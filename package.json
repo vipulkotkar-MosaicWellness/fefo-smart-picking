@@ -1,0 +1,27 @@
+{
+  "name": "fefo-smart-picking",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "FEFO Smart Picking & Picklist Generator — facility-level picklist engine with channel-wise dispatch tolerance, soft-block reservations and master-picklist inventory freeze.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.2",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.6.2",
+    "vite": "^6.0.0"
+  }
+}
