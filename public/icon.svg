@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FEFO Smart Picking">
+  <rect width="512" height="512" rx="96" fill="#0f766e"/>
+  <rect x="120" y="128" width="272" height="256" rx="24" fill="#ffffff"/>
+  <rect x="120" y="128" width="272" height="60" rx="24" fill="#134e4a"/>
+  <rect x="156" y="232" width="40" height="40" rx="8" fill="#0f766e"/>
+  <rect x="216" y="244" width="150" height="16" rx="8" fill="#94a3b8"/>
+  <rect x="156" y="300" width="40" height="40" rx="8" fill="#0f766e"/>
+  <rect x="216" y="312" width="150" height="16" rx="8" fill="#94a3b8"/>
+  <path d="M164 252l10 10 18-20" stroke="#ffffff" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M164 320l10 10 18-20" stroke="#ffffff" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

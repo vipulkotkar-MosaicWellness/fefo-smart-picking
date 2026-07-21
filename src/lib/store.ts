@@ -28,6 +28,7 @@ export interface AppState {
   location: string;
   channel: string;
   phase: 1 | 2;
+  view: "operator" | "picker";
   demand: DemandLine[];
   picklists: MasterPicklist[];
   mplSeq: number;
@@ -36,6 +37,7 @@ export interface AppState {
 
   locations: () => string[];
   anyOpen: () => boolean;
+  setView: (v: "operator" | "picker") => void;
 
   loadStock: (tuples: StockTuple[]) => void;
   setLocation: (l: string) => void;
@@ -64,6 +66,7 @@ export const useStore = create<AppState>()(
       location: initialStock[0]?.location ?? "",
       channel: "Blinkit",
       phase: 1,
+      view: "operator",
       demand: [],
       picklists: [],
       mplSeq: 0,
@@ -72,6 +75,7 @@ export const useStore = create<AppState>()(
 
       locations: () => [...new Set(get().stock.map((b) => b.location))],
       anyOpen: () => get().picklists.some((p) => p.status === "open"),
+      setView: (v) => set({ view: v }),
 
       loadStock: (tuples) => {
         const stock = rowsFromTuples(tuples);

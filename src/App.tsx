@@ -1,12 +1,13 @@
 import { DemandPanel } from "./components/DemandPanel";
 import { PerformancePanel } from "./components/PerformancePanel";
+import { PickerView } from "./components/PickerView";
 import { RegisterPanel } from "./components/RegisterPanel";
 import { StockPanel } from "./components/StockPanel";
 import { isSupabaseConfigured } from "./lib/supabaseClient";
 import { useStore } from "./lib/store";
 
 export default function App() {
-  const { location, setLocation, locations, phase, setPhase, anyOpen, picklists } = useStore();
+  const { location, setLocation, locations, phase, setPhase, anyOpen, picklists, view, setView } = useStore();
   const source = phase === 1 ? "Daily auto-generated email" : "API (real-time)";
   const openNos = picklists.filter((p) => p.status === "open").map((p) => p.no).join(", ");
 
@@ -21,11 +22,28 @@ export default function App() {
                 Upload stock · select location · generate by SKU · one-click complete with not-found at qty level
               </p>
             </div>
-            <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold">
-              {isSupabaseConfigured ? "Supabase connected" : "Local mode (browser)"}
-            </span>
+            <div className="flex flex-col items-end gap-2">
+              <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold">
+                {isSupabaseConfigured ? "Supabase connected" : "Local mode (browser)"}
+              </span>
+              <div className="inline-flex gap-1 rounded-lg bg-white/15 p-1">
+                <button
+                  onClick={() => setView("operator")}
+                  className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-semibold ${view === "operator" ? "bg-white text-teal-900" : "text-white"}`}
+                >
+                  Operator
+                </button>
+                <button
+                  onClick={() => setView("picker")}
+                  className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-semibold ${view === "picker" ? "bg-white text-teal-900" : "text-white"}`}
+                >
+                  Picker (mobile)
+                </button>
+              </div>
+            </div>
           </div>
 
+          {view === "operator" && (
           <div className="mt-3 flex flex-wrap items-end gap-4">
             <label className="text-xs opacity-90">
               <span className="mb-1 block font-semibold">Pick from location</span>
@@ -56,6 +74,7 @@ export default function App() {
               </button>
             </div>
           </div>
+          )}
 
           <div
             className={`mt-3 rounded-lg px-3 py-2 text-xs font-semibold ${anyOpen() ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-900"}`}
@@ -68,16 +87,24 @@ export default function App() {
           </div>
         </header>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <StockPanel />
-          <DemandPanel />
-        </div>
-        <div className="mt-4">
-          <RegisterPanel />
-        </div>
-        <div className="mt-4">
-          <PerformancePanel />
-        </div>
+        {view === "operator" ? (
+          <>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <StockPanel />
+              <DemandPanel />
+            </div>
+            <div className="mt-4">
+              <RegisterPanel />
+            </div>
+            <div className="mt-4">
+              <PerformancePanel />
+            </div>
+          </>
+        ) : (
+          <div className="mt-4">
+            <PickerView />
+          </div>
+        )}
 
         <p className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
           FEFO Smart Picking · React + Supabase-ready · Mosaic Wellness
