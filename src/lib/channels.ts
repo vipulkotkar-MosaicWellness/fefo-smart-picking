@@ -24,8 +24,7 @@ export const CHANNELS: Record<string, ChannelRule> = {
   "Reliance Retail": { type: "pct", val: 0.75 },
 };
 
-export function ruleText(channel: string): string {
-  const r = CHANNELS[channel];
+export function ruleText(r: ChannelRule | undefined): string {
   if (!r) return "";
   return r.type === "fixed"
     ? `≥ ${r.val} months remaining`

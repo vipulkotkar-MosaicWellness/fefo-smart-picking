@@ -50,11 +50,14 @@ export interface FacilityPicklist {
   taskNo: string;
   facility: string;
   status: PicklistStatus;
+  round: number; // 1 = first pass, 2 = round-2 (re-offer of not-found)
   bad: number; // qty moved to bad location / not found
   gp?: string; // gatepass number
   pickedTotal?: number;
   lines: PickLine[];
 }
+
+export type Role = "admin" | "planner" | "supervisor" | "picker";
 
 /** Demand that could not be met at any facility. */
 export interface Shortfall {

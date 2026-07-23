@@ -2,13 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { criticalPathSort } from "../lib/engine";
 import { monLabel } from "../lib/format";
 import { allFacilityLists, useStore } from "../lib/store";
-import type { FacilityPicklist } from "../lib/types";
+import type { FacilityPicklist, PickLine } from "../lib/types";
 import { Button, Tag } from "./Ui";
 
 function Scanner({ onDetect, onClose }: { onDetect: (code: string) => void; onClose: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [err, setErr] = useState("");
-
   useEffect(() => {
     let stream: MediaStream | undefined;
     let raf = 0;
@@ -18,55 +17,34 @@ function Scanner({ onDetect, onClose }: { onDetect: (code: string) => void; onCl
       return;
     }
     const det = new Detector();
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: "environment" } })
-      .then((s) => {
-        stream = s;
-        if (videoRef.current) {
-          videoRef.current.srcObject = s;
-          void videoRef.current.play();
-          tick();
-        }
-      })
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then((s) => { stream = s; if (videoRef.current) { videoRef.current.srcObject = s; void videoRef.current.play(); tick(); } })
       .catch(() => setErr("Camera not available on this device."));
-
     async function tick() {
       if (!videoRef.current) return;
-      try {
-        const codes = await det.detect(videoRef.current);
-        if (codes.length) return onDetect(codes[0].rawValue);
-      } catch {
-        /* keep scanning */
-      }
+      try { const codes = await det.detect(videoRef.current); if (codes.length) return onDetect(codes[0].rawValue); } catch { /* keep scanning */ }
       raf = requestAnimationFrame(tick);
     }
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      stream?.getTracks().forEach((t) => t.stop());
-    };
+    return () => { if (raf) cancelAnimationFrame(raf); stream?.getTracks().forEach((t) => t.stop()); };
   }, [onDetect]);
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-4">
       <div className="w-full max-w-md rounded-xl bg-white p-4 dark:bg-slate-800">
         <p className="mb-2 text-sm font-semibold">Scan bin / product</p>
-        {err ? (
-          <p className="mb-3 text-xs text-amber-700 dark:text-amber-300">{err}</p>
-        ) : (
-          <video ref={videoRef} className="mb-3 w-full rounded-lg bg-black" muted playsInline />
-        )}
-        <div className="flex gap-2">
-          <Button variant="green" onClick={() => onDetect("manual")}>Confirm</Button>
-          <Button variant="sm" onClick={onClose}>Cancel</Button>
-        </div>
+        {err ? <p className="mb-3 text-xs text-amber-700 dark:text-amber-300">{err}</p> : <video ref={videoRef} className="mb-3 w-full rounded-lg bg-black" muted playsInline />}
+        <div className="flex gap-2"><Button variant="green" onClick={() => onDetect("manual")}>Confirm</Button><Button variant="sm" onClick={onClose}>Cancel</Button></div>
       </div>
     </div>
   );
 }
 
 export function PickerView() {
-  const { tasks, markFacilityCompleted } = useStore();
-  const openLists = allFacilityLists(tasks).filter((f) => f.status === "open");
+  const { tasks, currentPicker, applyPicks } = useStore();
+
+  // facility picklists that have lines assigned to me and still to pick
+  const myLists = allFacilityLists(tasks)
+    .map((f) => ({ f, mine: f.lines.filter((l) => l.picker === currentPicker && l.picked == null) }))
+    .filter((x) => x.mine.length > 0);
 
   const [selectedNo, setSelectedNo] = useState<string | null>(null);
   const [idx, setIdx] = useState(0);
@@ -74,62 +52,48 @@ export function PickerView() {
   const [nfMode, setNfMode] = useState(false);
   const [nfVal, setNfVal] = useState(0);
   const [scan, setScan] = useState(false);
-  const [doneNo, setDoneNo] = useState<string | null>(null);
+  const [done, setDone] = useState<{ facility: string; picked: number; nf: number } | null>(null);
 
-  const f: FacilityPicklist | undefined = selectedNo ? openLists.find((x) => x.no === selectedNo) : undefined;
-  const lines = f ? criticalPathSort(f.lines) : [];
+  const chosen = selectedNo ? myLists.find((x) => x.f.no === selectedNo) : undefined;
+  const f: FacilityPicklist | undefined = chosen?.f;
+  const lines: PickLine[] = chosen ? criticalPathSort(chosen.mine) : [];
   const line = lines[idx];
 
-  function start(no: string) {
-    setSelectedNo(no);
-    setIdx(0);
-    setNfMap({});
-    setNfMode(false);
-    setDoneNo(null);
-  }
-  function reset() {
-    setSelectedNo(null);
-    setDoneNo(null);
-  }
+  function start(no: string) { setSelectedNo(no); setIdx(0); setNfMap({}); setNfMode(false); setDone(null); }
+  function reset() { setSelectedNo(null); setDone(null); }
   function advance(nextNf: Record<number, number>) {
     setNfMode(false);
-    if (idx + 1 < lines.length) {
-      setIdx(idx + 1);
-    } else if (f) {
-      markFacilityCompleted(f.taskNo, f.no, nextNf);
-      setDoneNo(f.no);
+    if (idx + 1 < lines.length) { setIdx(idx + 1); return; }
+    if (f) {
+      applyPicks(f.no, nextNf);
+      const picked = lines.reduce((s, l) => s + (l.qty - (nextNf[l.rid] ?? 0)), 0);
+      const nf = lines.reduce((s, l) => s + (nextNf[l.rid] ?? 0), 0);
+      setDone({ facility: f.facility, picked, nf });
       setSelectedNo(null);
     }
   }
   function picked() {
     if (!line) return;
-    advance({ ...nfMap, [line.rid]: 0 });
+    const next = { ...nfMap, [line.rid]: 0 };
+    setNfMap(next);
+    advance(next);
   }
   function confirmNotFound() {
     if (!line) return;
     const next = { ...nfMap, [line.rid]: Math.min(Math.max(nfVal, 0), line.qty) };
-    setNfMap(next);
-    advance(next);
+    setNfMap(next); advance(next);
   }
 
-  if (doneNo) {
-    const done = allFacilityLists(tasks).find((x) => x.no === doneNo);
+  if (done) {
     return (
       <div className="mx-auto max-w-md p-4">
         <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-6 text-center dark:border-emerald-800 dark:bg-emerald-950/40">
           <div className="text-4xl">✓</div>
-          <h2 className="mt-2 text-lg font-bold text-emerald-800 dark:text-emerald-300">Picking completed</h2>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{done?.no} · {done?.facility}</p>
-          {done && (
-            <div className="mt-3 text-sm">
-              <div>Gatepass <b>{done.gp}</b></div>
-              <div>Picked <b>{done.pickedTotal}</b> units{done.bad ? <> · <b>{done.bad}</b> not found</> : null}</div>
-            </div>
-          )}
+          <h2 className="mt-2 text-lg font-bold text-emerald-800 dark:text-emerald-300">Your picking is done</h2>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{done.facility}</p>
+          <div className="mt-3 text-sm">Picked <b>{done.picked}</b> units{done.nf ? <> · <b>{done.nf}</b> not found</> : null}</div>
         </div>
-        <div className="mt-4 text-center">
-          <Button onClick={reset}>Back to picklists</Button>
-        </div>
+        <div className="mt-4 text-center"><Button onClick={reset}>Back to my picklists</Button></div>
       </div>
     );
   }
@@ -137,24 +101,23 @@ export function PickerView() {
   if (!f) {
     return (
       <div className="mx-auto max-w-md p-4">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-teal-800 dark:text-teal-300">My picklists</h2>
-        {openLists.length === 0 ? (
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-teal-800 dark:text-teal-300">My picklists</h2>
+          <span className="text-xs text-slate-500 dark:text-slate-400">Picker: <b>{currentPicker}</b></span>
+        </div>
+        {myLists.length === 0 ? (
           <p className="rounded-xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800">
-            No open picklists. Generate one from the Operator view.
+            Nothing assigned to you yet. The supervisor assigns picklists in the Operator view.
           </p>
         ) : (
           <div className="space-y-2">
-            {openLists.map((p) => (
-              <button
-                key={p.no}
-                onClick={() => start(p.no)}
-                className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
-              >
+            {myLists.map(({ f: fl, mine }) => (
+              <button key={fl.no} onClick={() => start(fl.no)} className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700">
                 <div>
-                  <div className="font-semibold">{p.facility}</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">{p.no}</div>
+                  <div className="font-semibold">{fl.facility}{fl.round > 1 ? " · Round " + fl.round : ""}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">{fl.no}</div>
                 </div>
-                <Tag tone="warn">{p.lines.length} lines</Tag>
+                <Tag tone="warn">{mine.length} lines</Tag>
               </button>
             ))}
           </div>
@@ -170,10 +133,7 @@ export function PickerView() {
         <button onClick={reset} className="text-sm text-teal-700 dark:text-teal-300">‹ Back</button>
         <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">{f.facility}</div>
       </div>
-
-      <div className="mb-3 h-2 w-full rounded-full bg-slate-200 dark:bg-slate-700">
-        <div className="h-2 rounded-full bg-teal-600" style={{ width: `${(idx / total) * 100}%` }} />
-      </div>
+      <div className="mb-3 h-2 w-full rounded-full bg-slate-200 dark:bg-slate-700"><div className="h-2 rounded-full bg-teal-600" style={{ width: `${(idx / total) * 100}%` }} /></div>
       <p className="mb-2 text-center text-xs text-slate-500 dark:text-slate-400">Line {idx + 1} of {total}</p>
 
       {line && (

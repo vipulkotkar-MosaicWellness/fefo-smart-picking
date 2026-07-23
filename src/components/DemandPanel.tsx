@@ -9,7 +9,7 @@ const SAMPLE_DEMAND =
   "MWMMHRP.0001.AAAA.B0_N, 80\nMWMMHRP.0004.AAAA.B0_N, 40\nMWMMHRP.0006.AAAA.B0_R, 35";
 
 export function DemandPanel() {
-  const { channel, setChannel, skus, demand, setDemand, removeDemand, generate } = useStore();
+  const { channel, setChannel, channelRules, skus, demand, setDemand, removeDemand, generate } = useStore();
   const [text, setText] = useState("");
 
   function parse() {
@@ -47,7 +47,7 @@ export function DemandPanel() {
         ))}
       </select>
       <p className="my-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-        Rule: <b>{ruleText(channel)}</b>
+        Rule: <b>{ruleText(channelRules[channel])}</b>
       </p>
 
       <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400">

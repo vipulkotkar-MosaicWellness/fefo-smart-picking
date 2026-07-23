@@ -1,16 +1,13 @@
-import { CHANNELS } from "./channels";
-import type { Expiry, PickLine, StockRow } from "./types";
+import type { ChannelRule, Expiry, PickLine, StockRow } from "./types";
 
 /** Remaining shelf life in whole months from `today` to expiry. */
 export function monthsRemaining(exp: Expiry, today = new Date()): number {
   return (exp[0] - today.getFullYear()) * 12 + (exp[1] - 1 - today.getMonth());
 }
 
-/** Minimum remaining months a channel accepts for a given total shelf life. */
-export function cutoffMonths(channel: string, shelf: number): number {
-  const r = CHANNELS[channel];
-  if (!r) return 0;
-  return r.type === "fixed" ? r.val : +(r.val * shelf).toFixed(1);
+/** Minimum remaining months a channel accepts, from its (configurable) rule. */
+export function cutoffMonths(rule: ChannelRule, shelf: number): number {
+  return rule.type === "fixed" ? rule.val : +(rule.val * shelf).toFixed(1);
 }
 
 /** Parse a bin code into [zone letter, position number] for path ordering. */
@@ -32,9 +29,8 @@ export function criticalPathSort<T extends { bin: string }>(lines: T[]): T[] {
 export interface AllocateArgs {
   sku: string;
   need: number;
-  channel: string;
   location: string;
-  shelf: number;
+  cutoff: number; // minimum remaining months (already computed from the channel rule)
   stock: StockRow[];
   reservedFor: (rid: number) => number;
   exclude?: number[];
@@ -44,20 +40,18 @@ export interface AllocateArgs {
 export interface AllocateResult {
   lines: PickLine[];
   short: number;
-  cut: number;
   any: boolean;
 }
 
 /**
- * Allocate demand for one SKU: keep Good + Active stock at the location,
- * keep only batches meeting the channel shelf-life rule, sort FEFO, and
- * fill the demand across bins using currently available (un-reserved) qty.
+ * Allocate demand for one SKU at one facility: keep Good + Active stock,
+ * keep only batches meeting the channel shelf-life cutoff, sort FEFO, and
+ * fill across bins using currently available (un-reserved) qty.
  */
 export function allocate(args: AllocateArgs): AllocateResult {
-  const { sku, need, channel, location, shelf, stock, reservedFor } = args;
+  const { sku, need, location, cutoff, stock, reservedFor } = args;
   const exclude = args.exclude ?? [];
   const today = args.today ?? new Date();
-  const cut = cutoffMonths(channel, shelf);
 
   const eligible = stock
     .filter(
@@ -69,7 +63,7 @@ export function allocate(args: AllocateArgs): AllocateResult {
         !exclude.includes(b.rid),
     )
     .map((b) => ({ b, rem: monthsRemaining(b.exp, today), av: b.qty - reservedFor(b.rid) }))
-    .filter((o) => o.rem >= cut && o.av > 0)
+    .filter((o) => o.rem >= cutoff && o.av > 0)
     .sort((x, y) => x.rem - y.rem);
 
   let remain = need;
@@ -90,5 +84,5 @@ export function allocate(args: AllocateArgs): AllocateResult {
     });
     remain -= take;
   }
-  return { lines, short: remain, cut, any: eligible.length > 0 };
+  return { lines, short: remain, any: eligible.length > 0 };
 }

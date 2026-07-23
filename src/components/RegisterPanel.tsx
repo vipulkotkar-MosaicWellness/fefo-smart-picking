@@ -1,45 +1,39 @@
-import { useState } from "react";
+import { useState, type ChangeEvent } from "react";
 import { criticalPathSort } from "../lib/engine";
 import { downloadCsv, monLabel } from "../lib/format";
-import { taskIsComplete, useStore } from "../lib/store";
+import { facilityDone, taskIsComplete, useStore } from "../lib/store";
 import type { FacilityPicklist, PickingTask } from "../lib/types";
 import { Button, Card, Tag } from "./Ui";
 
-function ordered(f: FacilityPicklist) {
-  return criticalPathSort(f.lines);
-}
-
 function FacilityBlock({ f }: { f: FacilityPicklist }) {
-  const markCompleted = useStore((s) => s.markFacilityCompleted);
+  const { pickers, assignAll, assignLine, uploadAssignments, applyPicks } = useStore();
   const [nf, setNf] = useState<Record<number, number>>({});
+  const [assignTo, setAssignTo] = useState("");
   const open = f.status === "open";
-  const lines = ordered(f);
+  const lines = criticalPathSort(f.lines);
   const seq = new Map<number, number>();
   lines.forEach((l, i) => seq.set(l.rid, i + 1));
 
-  function rows() {
-    return lines.map((l, i) => ({ sr: i + 1, bin: l.bin, sku: l.sku, name: l.name, qty: l.qty }));
+  function shareRows() {
+    return lines.map((l, i) => ({ sr: i + 1, bin: l.bin, sku: l.sku, name: l.name, qty: l.qty, picker: l.picker ?? "" }));
   }
   function copy() {
     const txt =
-      `${f.no} · ${f.facility}\nSr#\tLocation\tSKU\tSKU Name\tQty\n` +
-      rows().map((r) => `${r.sr}\t${r.bin}\t${r.sku}\t${r.name}\t${r.qty}`).join("\n");
-    navigator.clipboard.writeText(txt).then(
-      () => alert("Picklist copied."),
-      () => alert("Copy blocked; use CSV."),
-    );
+      `${f.no} · ${f.facility}\nSr#\tLocation\tSKU\tSKU Name\tQty\tPicker\n` +
+      shareRows().map((r) => `${r.sr}\t${r.bin}\t${r.sku}\t${r.name}\t${r.qty}\t${r.picker}`).join("\n");
+    navigator.clipboard.writeText(txt).then(() => alert("Picklist copied."), () => alert("Copy blocked; use CSV."));
   }
   function csv() {
     downloadCsv(
-      "Sr #,Location,SKU Code,SKU Name,Qty\n" +
-        rows().map((r) => `${r.sr},${r.bin},${r.sku},"${r.name}",${r.qty}`).join("\n") + "\n",
+      "Sr #,Location,SKU Code,SKU Name,Qty,Picker\n" +
+        shareRows().map((r) => `${r.sr},${r.bin},${r.sku},"${r.name}",${r.qty},${r.picker}`).join("\n") + "\n",
       `${f.no}.csv`,
     );
   }
   function print() {
     const html =
-      `<h2>${f.no}</h2><p>${f.facility}</p><table border=1 cellpadding=6 style="border-collapse:collapse;font-family:Arial"><tr><th>Sr #</th><th>Location</th><th>SKU / SKU Name</th><th>Qty</th><th>Picked</th></tr>` +
-      rows().map((r) => `<tr><td>${r.sr}</td><td>${r.bin}</td><td>${r.sku}<br><small>${r.name}</small></td><td>${r.qty}</td><td></td></tr>`).join("") +
+      `<h2>${f.no}</h2><p>${f.facility}</p><table border=1 cellpadding=6 style="border-collapse:collapse;font-family:Arial"><tr><th>Sr #</th><th>Location</th><th>SKU / SKU Name</th><th>Qty</th><th>Picker</th><th>Picked</th></tr>` +
+      shareRows().map((r) => `<tr><td>${r.sr}</td><td>${r.bin}</td><td>${r.sku}<br><small>${r.name}</small></td><td>${r.qty}</td><td>${r.picker}</td><td></td></tr>`).join("") +
       `</table>`;
     const w = window.open("", "_blank");
     if (!w) return alert("Allow pop-ups to print.");
@@ -47,22 +41,55 @@ function FacilityBlock({ f }: { f: FacilityPicklist }) {
     w.document.close();
     w.print();
   }
+  function onUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = () => uploadAssignments(f.no, String(r.result));
+    r.readAsText(file);
+  }
+  function complete() {
+    const results: Record<number, number> = {};
+    lines.forEach((l) => (results[l.rid] = nf[l.rid] ?? 0));
+    applyPicks(f.no, results);
+  }
 
   return (
     <div className={`mt-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700 ${open ? "border-l-4 border-l-amber-500" : "border-l-4 border-l-emerald-600"}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm">
           <b>{f.facility}</b> <span className="text-xs text-slate-500 dark:text-slate-400">{f.no}</span>{" "}
-          <Tag tone={open ? "warn" : "ok"}>{f.status}</Tag>
+          {f.round > 1 && <Tag tone="info">Round {f.round}</Tag>} <Tag tone={open ? "warn" : "ok"}>{f.status}</Tag>
           {f.bad ? <span className="ml-1 text-xs text-rose-600 dark:text-rose-400">· {f.bad} not found</span> : null}
         </div>
         <div className="flex flex-wrap gap-1.5">
           <Button variant="sm" onClick={copy}>Copy</Button>
           <Button variant="sm" onClick={csv}>CSV</Button>
           <Button variant="sm" onClick={print}>Print</Button>
-          {open && <Button variant="green" onClick={() => markCompleted(f.taskNo, f.no, nf)}>Mark completed</Button>}
+          {open && <Button variant="green" onClick={complete}>Mark completed</Button>}
         </div>
       </div>
+
+      {open && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-slate-50 px-2 py-1.5 dark:bg-slate-900">
+          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Assign all to</span>
+          <select
+            value={assignTo}
+            onChange={(e) => {
+              setAssignTo(e.target.value);
+              if (e.target.value) assignAll(f.no, e.target.value);
+            }}
+            className="rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-800"
+          >
+            <option value="">— picker —</option>
+            {pickers.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <label className="cursor-pointer rounded border border-slate-300 px-2 py-1 text-[11px] dark:border-slate-600">
+            Upload assignments
+            <input type="file" accept=".csv" className="hidden" onChange={onUpload} />
+          </label>
+        </div>
+      )}
 
       <div className="my-1.5 rounded-md bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
         <b>Pick path</b>: {lines.map((l) => l.bin).join(" → ")}
@@ -81,6 +108,7 @@ function FacilityBlock({ f }: { f: FacilityPicklist }) {
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Location</th>
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">SKU / SKU Name</th>
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Qty</th>
+              <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Picker</th>
               {open && <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Not found</th>}
             </tr>
           </thead>
@@ -91,13 +119,25 @@ function FacilityBlock({ f }: { f: FacilityPicklist }) {
                 <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">{l.bin}</td>
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
                   {l.sku}
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                    {l.name} · {l.batch} · exp {monLabel(l.exp)} ({l.rem}m)
-                  </div>
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400">{l.name} · {l.batch} · exp {monLabel(l.exp)} ({l.rem}m)</div>
                 </td>
                 <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">
                   {open ? l.qty : (l.picked ?? l.qty)}
                   {!open && l.nf ? <> <Tag tone="bad">{l.nf} NF</Tag></> : null}
+                </td>
+                <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                  {open ? (
+                    <select
+                      value={l.picker ?? ""}
+                      onChange={(e) => assignLine(l.rid, f.no, e.target.value)}
+                      className="rounded border border-slate-300 p-1 text-[11px] dark:border-slate-600 dark:bg-slate-900"
+                    >
+                      <option value="">—</option>
+                      {pickers.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  ) : (
+                    l.picker || "—"
+                  )}
                 </td>
                 {open && (
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
@@ -124,7 +164,7 @@ function TaskCard({ t }: { t: PickingTask }) {
   const done = taskIsComplete(t);
   const suggested = t.facilities.reduce((s, f) => s + f.lines.reduce((a, l) => a + l.qty, 0), 0);
   const picked = t.facilities.reduce((s, f) => s + f.lines.reduce((a, l) => a + (l.picked ?? 0), 0), 0);
-  const pending = t.facilities.filter((f) => f.status === "open").reduce((s, f) => s + f.lines.reduce((a, l) => a + l.qty, 0), 0);
+  const pending = t.facilities.filter((f) => !facilityDone(f)).reduce((s, f) => s + f.lines.filter((l) => l.picked == null).reduce((a, l) => a + l.qty, 0), 0);
   const notFound = t.facilities.reduce((s, f) => s + f.lines.reduce((a, l) => a + (l.nf ?? 0), 0), 0);
   const shortQty = t.shortfall.reduce((s, x) => s + x.qty, 0);
 
@@ -145,14 +185,11 @@ function TaskCard({ t }: { t: PickingTask }) {
 
       {t.shortfall.length > 0 && (
         <div className="mt-2 rounded-md bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
-          <b>Not available in any facility:</b>{" "}
-          {t.shortfall.map((s) => `${s.name} (${s.qty})`).join(", ")}
+          <b>Not available in any facility:</b> {t.shortfall.map((s) => `${s.name} (${s.qty})`).join(", ")}
         </div>
       )}
 
-      {t.facilities.map((f) => (
-        <FacilityBlock key={f.no} f={f} />
-      ))}
+      {t.facilities.map((f) => <FacilityBlock key={f.no} f={f} />)}
     </div>
   );
 }
