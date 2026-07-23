@@ -81,6 +81,7 @@ export function allocate(args: AllocateArgs): AllocateResult {
       rid: o.b.rid,
       sku,
       name: o.b.name,
+      facility: o.b.location,
       bin: o.b.bin,
       batch: o.b.batch,
       exp: o.b.exp,

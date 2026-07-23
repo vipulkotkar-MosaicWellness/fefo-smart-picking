@@ -7,9 +7,9 @@ import { isSupabaseConfigured } from "./lib/supabaseClient";
 import { useStore } from "./lib/store";
 
 export default function App() {
-  const { location, setLocation, locations, phase, setPhase, anyOpen, picklists, view, setView } = useStore();
+  const { location, setLocation, locations, phase, setPhase, anyOpen, tasks, view, setView } = useStore();
   const source = phase === 1 ? "Daily auto-generated email" : "API (real-time)";
-  const openNos = picklists.filter((p) => p.status === "open").map((p) => p.no).join(", ");
+  const openNos = tasks.filter((t) => t.facilities.some((f) => f.status === "open")).map((t) => t.no).join(", ");
 
   return (
     <div className="min-h-full bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
@@ -46,7 +46,7 @@ export default function App() {
           {view === "operator" && (
           <div className="mt-3 flex flex-wrap items-end gap-4">
             <label className="text-xs opacity-90">
-              <span className="mb-1 block font-semibold">Pick from location</span>
+              <span className="mb-1 block font-semibold">View inventory for</span>
               <select
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}

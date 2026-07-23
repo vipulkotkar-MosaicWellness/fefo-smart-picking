@@ -4,7 +4,7 @@ import { reservedFor, useStore } from "../lib/store";
 import { Tag } from "./Ui";
 
 export function InventoryTable() {
-  const { stock, location, picklists } = useStore();
+  const { stock, location, tasks } = useStore();
   const rows = stock
     .filter((b) => b.location === location && b.type === "Good" && b.active === "Active")
     .sort((a, b) => {
@@ -32,7 +32,7 @@ export function InventoryTable() {
         </thead>
         <tbody className="tabular-nums">
           {rows.map((b) => {
-            const r = reservedFor(picklists, b.rid);
+            const r = reservedFor(tasks, b.rid);
             return (
               <tr key={b.rid} className="text-slate-700 dark:text-slate-200">
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{b.name}</td>

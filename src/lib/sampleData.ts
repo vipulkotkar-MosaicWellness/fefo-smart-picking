@@ -13,7 +13,11 @@ export const SAMPLE_STOCK: StockTuple[] = [
   ["SL Mother Hub", "SLM-C1", "MWMMHRP.0004.AAAA.B0_N", "MM Hair Gummies 30mcg - 30s", "GM-2712", "2027-12", 45, 18, "Good", "Active"],
   ["SL Mother Hub", "SLM-A3", "MWMMHRP.0006.AAAA.B0_R", "MM Minoxidil 5% - 60 ml", "MX-2701", "2027-01", 30, 24, "Good", "Active"],
   ["SL Mother Hub", "SLM-B2", "MWMMHRP.0006.AAAA.B0_R", "MM Minoxidil 5% - 60 ml", "MX-2801", "2028-01", 50, 24, "Good", "Active"],
+  ["SL Ambient", "SLA-B1", "MWMMHRP.0001.AAAA.B0_N", "MM DHT Blocking Shampoo - 200 ml", "SH-2807", "2028-07", 20, 24, "Good", "Active"],
   ["SL Ambient", "SLA-A1", "MWMMHRP.0006.AAAA.B0_R", "MM Minoxidil 5% - 60 ml", "MX-2806", "2028-06", 40, 24, "Good", "Active"],
+  ["SL RX", "SLR-A1", "MWMMHRP.0001.AAAA.B0_N", "MM DHT Blocking Shampoo - 200 ml", "SH-2810", "2028-10", 40, 24, "Good", "Active"],
+  ["SL RX", "SLR-B1", "MWMMHRP.0004.AAAA.B0_N", "MM Hair Gummies 30mcg - 30s", "GM-2803", "2028-03", 30, 18, "Good", "Active"],
+  ["SL RX", "SLR-A2", "MWMMHRP.0006.AAAA.B0_R", "MM Minoxidil 5% - 60 ml", "MX-2711", "2027-11", 25, 24, "Good", "Active"],
 ];
 
 /** Turn raw tuples (from sample or a parsed CSV) into StockRow[] with fresh rids. */

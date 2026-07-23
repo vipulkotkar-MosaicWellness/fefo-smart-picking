@@ -6,7 +6,7 @@ import { useStore } from "../lib/store";
 import { Button, Card } from "./Ui";
 
 const SAMPLE_DEMAND =
-  "MWMMHRP.0001.AAAA.B0_N, 55\nMWMMHRP.0004.AAAA.B0_N, 40\nMWMMHRP.0006.AAAA.B0_R, 35";
+  "MWMMHRP.0001.AAAA.B0_N, 80\nMWMMHRP.0004.AAAA.B0_N, 40\nMWMMHRP.0006.AAAA.B0_R, 35";
 
 export function DemandPanel() {
   const { channel, setChannel, skus, demand, setDemand, removeDemand, generate } = useStore();

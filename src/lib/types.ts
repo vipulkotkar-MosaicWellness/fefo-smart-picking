@@ -5,8 +5,8 @@ export type Expiry = [number, number];
 
 export interface StockRow {
   rid: number;
-  location: string;
-  bin: string;
+  location: string; // facility, e.g. "SL Mother Hub"
+  bin: string; // shelf / bin within the facility
   sku: string;
   name: string;
   batch: string;
@@ -28,32 +28,49 @@ export interface DemandLine {
 }
 
 export interface PickLine {
-  rid?: number;
+  rid: number;
   sku: string;
   name: string;
+  facility: string;
   bin: string;
-  batch?: string;
-  exp?: Expiry;
-  rem?: number; // remaining months at pick time
+  batch: string;
+  exp: Expiry;
+  rem: number; // remaining months at pick time
   qty: number; // suggested pick qty
-  noElig?: boolean; // no eligible stock for this SKU
-  shortLine?: boolean; // demand not fully coverable
   nf?: number; // not-found qty entered on completion
   picked?: number; // actual picked (qty - nf)
+  picker?: string; // assigned picker (child-picklist stage)
 }
 
 export type PicklistStatus = "open" | "completed";
 
-export interface MasterPicklist {
-  no: string;
-  channel: string;
-  location: string;
+/** One facility's slice of a picking task (Mother Hub / Ambient / RX). */
+export interface FacilityPicklist {
+  no: string; // e.g. PT-260722-001-MH
+  taskNo: string;
+  facility: string;
   status: PicklistStatus;
-  bad: number; // qty moved to bad location
+  bad: number; // qty moved to bad location / not found
   gp?: string; // gatepass number
   pickedTotal?: number;
-  demand: DemandLine[];
   lines: PickLine[];
+}
+
+/** Demand that could not be met at any facility. */
+export interface Shortfall {
+  sku: string;
+  name: string;
+  qty: number;
+}
+
+/** A demand upload from the planner — the top-level unit the warehouse acts on. */
+export interface PickingTask {
+  no: string; // PT-260722-001
+  channel: string;
+  demand: DemandLine[];
+  facilities: FacilityPicklist[]; // in priority order, only those with lines
+  shortfall: Shortfall[];
+  createdAt: string;
 }
 
 export interface ChannelRule {
