@@ -3,7 +3,8 @@ import { persist } from "zustand/middleware";
 import { CHANNELS } from "./channels";
 import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_PRIORITY, facilityCode } from "./facilities";
-import { rowsFromTuples, SAMPLE_STOCK, type StockTuple } from "./sampleData";
+import { rowsFromTuples, type StockTuple } from "./sampleData";
+import { REAL_STOCK } from "./stockSnapshot";
 import type {
   ChannelRule,
   DemandLine,
@@ -133,7 +134,7 @@ export interface AppState {
   setFetchTime: (t: string) => void;
 }
 
-const initialStock = rowsFromTuples(SAMPLE_STOCK);
+const initialStock = rowsFromTuples(REAL_STOCK);
 
 export const useStore = create<AppState>()(
   persist(
@@ -170,7 +171,7 @@ export const useStore = create<AppState>()(
       // Pull the latest stock from the auto-generated email (simulated in Phase A).
       syncStock: () => {
         if (get().anyOpen()) return set({ notice: "Feed frozen — complete open picking before syncing." });
-        const stock = rowsFromTuples(SAMPLE_STOCK);
+        const stock = rowsFromTuples(REAL_STOCK);
         set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString(), notice: "Stock synced from email." });
       },
 
@@ -322,6 +323,22 @@ export const useStore = create<AppState>()(
       setFacilityPriority: (p) => set({ facilityPriority: p }),
       setFetchTime: (t) => set({ fetchTime: t }),
     }),
-    { name: "fefo-smart-picking-v4" },
+    {
+      name: "fefo-smart-picking-v5",
+      // Stock is not persisted — it always comes fresh from the feed (snapshot / email).
+      partialize: (s) => ({
+        tasks: s.tasks,
+        taskSeq: s.taskSeq,
+        gpSeq: s.gpSeq,
+        channelRules: s.channelRules,
+        facilityPriority: s.facilityPriority,
+        fetchTime: s.fetchTime,
+        pickers: s.pickers,
+        visibleFacilities: s.visibleFacilities,
+        channel: s.channel,
+        role: s.role,
+        currentPicker: s.currentPicker,
+      }),
+    },
   ),
 );

@@ -21,9 +21,14 @@ export function InventoryTable() {
   if (rows.length === 0)
     return <p className="py-3 text-center text-xs text-slate-500">No Good + Active stock in the selected facilities.</p>;
 
+  const shown = rows.slice(0, 250);
   return (
-    <div className="overflow-x-auto">
-      <table className="mt-2 w-full border-collapse text-xs">
+    <>
+      <p className="mb-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+        {rows.length.toLocaleString()} stock rows{rows.length > shown.length ? ` · showing first ${shown.length}` : ""}
+      </p>
+      <div className="max-h-96 overflow-auto">
+      <table className="mt-1 w-full border-collapse text-xs">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
             <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Facility</th>
@@ -37,7 +42,7 @@ export function InventoryTable() {
           </tr>
         </thead>
         <tbody className="tabular-nums">
-          {rows.map((b) => {
+          {shown.map((b) => {
             const r = reservedFor(tasks, b.rid);
             return (
               <tr key={b.rid} className="text-slate-700 dark:text-slate-200">
@@ -54,6 +59,7 @@ export function InventoryTable() {
           })}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 }
