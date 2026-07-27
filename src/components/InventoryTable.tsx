@@ -32,6 +32,7 @@ export function InventoryTable() {
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
             <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Facility</th>
+            <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">SKU</th>
             <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">SKU Name</th>
             <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Location</th>
             <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Batch</th>
@@ -47,6 +48,7 @@ export function InventoryTable() {
             return (
               <tr key={b.rid} className="text-slate-700 dark:text-slate-200">
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{b.location}</td>
+                <td className="border-b border-slate-100 p-1.5 font-mono text-[10px] dark:border-slate-700/60">{b.sku}</td>
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{b.name}</td>
                 <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">{b.bin}</td>
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{b.batch}</td>
