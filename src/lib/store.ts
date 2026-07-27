@@ -5,6 +5,8 @@ import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_PRIORITY, facilityCode } from "./facilities";
 import { rowsFromTuples, type StockTuple } from "./sampleData";
 import { REAL_STOCK } from "./stockSnapshot";
+import { isSupabaseConfigured } from "./supabaseClient";
+import { fetchLastSync, fetchStock } from "./supabaseStock";
 import type {
   ChannelRule,
   DemandLine,
@@ -120,6 +122,7 @@ export interface AppState {
   setCurrentPicker: (p: string) => void;
   toggleFacility: (f: string) => void;
   syncStock: () => void;
+  loadFromSupabase: () => Promise<void>;
   loadStock: (tuples: StockTuple[]) => void;
   setChannel: (c: string) => void;
   setDemand: (d: DemandLine[]) => void;
@@ -168,11 +171,32 @@ export const useStore = create<AppState>()(
             : [...get().visibleFacilities, f],
         }),
 
-      // Pull the latest stock from the auto-generated email (simulated in Phase A).
+      // Pull the latest stock. Live from Supabase when configured, else the snapshot.
       syncStock: () => {
         if (get().anyOpen()) return set({ notice: "Feed frozen — complete open picking before syncing." });
+        if (isSupabaseConfigured) {
+          void get().loadFromSupabase();
+          return;
+        }
         const stock = rowsFromTuples(REAL_STOCK);
-        set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString(), notice: "Stock synced from email." });
+        set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString(), notice: "Stock synced from snapshot." });
+      },
+
+      loadFromSupabase: async () => {
+        if (!isSupabaseConfigured) return;
+        set({ notice: "Loading live stock from Supabase…" });
+        try {
+          const rows = await fetchStock();
+          const last = await fetchLastSync();
+          set({
+            stock: rows,
+            skus: skusFromStock(rows),
+            lastSync: last ?? new Date().toISOString(),
+            notice: `Loaded ${rows.length.toLocaleString()} live rows from Supabase.`,
+          });
+        } catch (e) {
+          set({ notice: "Supabase load failed: " + (e as Error).message });
+        }
       },
 
       loadStock: (tuples) => {

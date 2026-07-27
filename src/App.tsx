@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { AdminConfig } from "./components/AdminConfig";
 import { DemandPanel } from "./components/DemandPanel";
 import { InventoryPanel } from "./components/InventoryPanel";
@@ -18,8 +19,13 @@ const ROLES: { key: Role; label: string }[] = [
 export default function App() {
   const {
     locations, visibleFacilities, toggleFacility, anyOpen, tasks, lastSync, syncStock,
-    role, setRole, pickers, currentPicker, setCurrentPicker,
+    role, setRole, pickers, currentPicker, setCurrentPicker, loadFromSupabase,
   } = useStore();
+
+  // On load, pull live stock from Supabase (if configured); else the app keeps the snapshot.
+  useEffect(() => {
+    void loadFromSupabase();
+  }, [loadFromSupabase]);
   const openNos = tasks.filter((t) => t.facilities.some((f) => f.lines.some((l) => l.picked == null))).map((t) => t.no).join(", ");
   const ops = role !== "picker";
   const syncLabel = new Date(lastSync).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
