@@ -200,7 +200,7 @@ export function RegisterPanel() {
     <Card title="Picking tasks">
       {tasks.length === 0 ? (
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">
-          No picking task yet. Upload stock, add demand, and click <b>Generate</b>.
+          No picking task yet. As Planner, add demand and click <b>Generate picklist</b>.
         </p>
       ) : (
         tasks.slice().reverse().map((t) => <TaskCard key={t.no} t={t} />)

@@ -101,10 +101,10 @@ export interface AppState {
   facilityPriority: string[];
   fetchTime: string;
   pickers: string[];
+  lastSync: string;
 
-  location: string; // inventory VIEW filter
+  visibleFacilities: string[];
   channel: string;
-  phase: 1 | 2;
   role: Role;
   currentPicker: string;
   demand: DemandLine[];
@@ -117,10 +117,10 @@ export interface AppState {
   anyOpen: () => boolean;
   setRole: (r: Role) => void;
   setCurrentPicker: (p: string) => void;
+  toggleFacility: (f: string) => void;
+  syncStock: () => void;
   loadStock: (tuples: StockTuple[]) => void;
-  setLocation: (l: string) => void;
   setChannel: (c: string) => void;
-  setPhase: (p: 1 | 2) => void;
   setDemand: (d: DemandLine[]) => void;
   removeDemand: (i: number) => void;
   generate: () => void;
@@ -144,10 +144,10 @@ export const useStore = create<AppState>()(
       facilityPriority: [...FACILITY_PRIORITY],
       fetchTime: "07:30",
       pickers: [...PICKERS_DEFAULT],
+      lastSync: new Date().toISOString(),
 
-      location: FACILITY_PRIORITY[0],
+      visibleFacilities: [...FACILITY_PRIORITY],
       channel: "Blinkit",
-      phase: 1,
       role: "supervisor",
       currentPicker: PICKERS_DEFAULT[0],
       demand: [],
@@ -160,27 +160,32 @@ export const useStore = create<AppState>()(
       anyOpen: () => allFacilityLists(get().tasks).some((f) => f.lines.some((l) => l.picked == null)),
       setRole: (r) => set({ role: r }),
       setCurrentPicker: (p) => set({ currentPicker: p }),
+      toggleFacility: (f) =>
+        set({
+          visibleFacilities: get().visibleFacilities.includes(f)
+            ? get().visibleFacilities.filter((x) => x !== f)
+            : [...get().visibleFacilities, f],
+        }),
+
+      // Pull the latest stock from the auto-generated email (simulated in Phase A).
+      syncStock: () => {
+        if (get().anyOpen()) return set({ notice: "Feed frozen — complete open picking before syncing." });
+        const stock = rowsFromTuples(SAMPLE_STOCK);
+        set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString(), notice: "Stock synced from email." });
+      },
 
       loadStock: (tuples) => {
         const stock = rowsFromTuples(tuples);
-        const locs = [...new Set(stock.map((b) => b.location))];
-        set({
-          stock,
-          skus: skusFromStock(stock),
-          location: locs.includes(get().location) ? get().location : (locs[0] ?? ""),
-          notice: `${stock.length} stock rows loaded across ${locs.length} location(s).`,
-        });
+        set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString() });
       },
 
-      setLocation: (l) => set({ location: l }),
       setChannel: (c) => set({ channel: c }),
-      setPhase: (p) => set({ phase: p }),
       setDemand: (d) => set({ demand: d }),
       removeDemand: (i) => set({ demand: get().demand.filter((_, idx) => idx !== i) }),
 
       generate: () => {
         const { skus, demand, channel, channelRules, facilityPriority, stock, tasks, taskSeq } = get();
-        if (Object.keys(skus).length === 0) return set({ notice: "Upload stock first." });
+        if (Object.keys(skus).length === 0) return set({ notice: "No stock synced yet." });
         if (demand.length === 0) return set({ notice: "Add demand first." });
         const rule = channelRules[channel];
         if (!rule) return set({ notice: "Unknown channel." });
@@ -206,21 +211,14 @@ export const useStore = create<AppState>()(
           shortfall,
           createdAt: new Date().toISOString(),
         };
-        set({
-          tasks: [...tasks, task],
-          taskSeq: seq,
-          demand: [],
-          notice: `${no} created — ${task.facilities.length} facility picklist(s).`,
-        });
+        set({ tasks: [...tasks, task], taskSeq: seq, demand: [], notice: `${no} created — ${task.facilities.length} facility picklist(s).` });
       },
 
       assignAll: (facilityNo, picker) =>
         set({
           tasks: get().tasks.map((t) => ({
             ...t,
-            facilities: t.facilities.map((f) =>
-              f.no === facilityNo ? { ...f, lines: f.lines.map((l) => ({ ...l, picker })) } : f,
-            ),
+            facilities: t.facilities.map((f) => (f.no === facilityNo ? { ...f, lines: f.lines.map((l) => ({ ...l, picker })) } : f)),
           })),
         }),
 
@@ -229,20 +227,16 @@ export const useStore = create<AppState>()(
           tasks: get().tasks.map((t) => ({
             ...t,
             facilities: t.facilities.map((f) =>
-              f.no === facilityNo
-                ? { ...f, lines: f.lines.map((l) => (l.rid === rid ? { ...l, picker } : l)) }
-                : f,
+              f.no === facilityNo ? { ...f, lines: f.lines.map((l) => (l.rid === rid ? { ...l, picker } : l)) } : f,
             ),
           })),
         }),
 
       uploadAssignments: (facilityNo, text) => {
-        // CSV rows: any columns, must include a bin (Location) and a Picker
         const map: Record<string, string> = {};
         text.trim().split(/\r?\n/).forEach((ln) => {
           const c = ln.split(",").map((s) => s.trim());
-          if (/location/i.test(ln) && /picker/i.test(ln)) return; // header
-          // find a token that looks like a bin (has a dash+digit) and take last col as picker
+          if (/location/i.test(ln) && /picker/i.test(ln)) return;
           const bin = c.find((x) => /[A-Za-z]+-?[A-Za-z]\d+/.test(x));
           const picker = c[c.length - 1];
           if (bin && picker) map[bin] = picker;
@@ -251,9 +245,7 @@ export const useStore = create<AppState>()(
           tasks: get().tasks.map((t) => ({
             ...t,
             facilities: t.facilities.map((f) =>
-              f.no === facilityNo
-                ? { ...f, lines: f.lines.map((l) => (map[l.bin] ? { ...l, picker: map[l.bin] } : l)) }
-                : f,
+              f.no === facilityNo ? { ...f, lines: f.lines.map((l) => (map[l.bin] ? { ...l, picker: map[l.bin] } : l)) } : f,
             ),
           })),
           notice: "Assignments uploaded.",
@@ -265,7 +257,6 @@ export const useStore = create<AppState>()(
         const stock = state.stock.map((b) => ({ ...b }));
         let gpSeq = state.gpSeq;
 
-        // 1) apply picks to the target facility's lines
         let tasks = state.tasks.map((t) => ({
           ...t,
           facilities: t.facilities.map((f) => {
@@ -284,7 +275,6 @@ export const useStore = create<AppState>()(
           }),
         }));
 
-        // 2) if the facility is now fully done, finalize it (status + gatepass)
         let completedFacility: FacilityPicklist | undefined;
         let parentTask: PickingTask | undefined;
         tasks = tasks.map((t) => {
@@ -293,13 +283,7 @@ export const useStore = create<AppState>()(
             const picked = f.lines.reduce((s, l) => s + (l.picked ?? 0), 0);
             const bad = f.lines.reduce((s, l) => s + (l.nf ?? 0), 0);
             gpSeq += 1;
-            const finished: FacilityPicklist = {
-              ...f,
-              status: "completed",
-              pickedTotal: picked,
-              bad,
-              gp: "GP-" + String(100000 + gpSeq * 137).slice(0, 6),
-            };
+            const finished: FacilityPicklist = { ...f, status: "completed", pickedTotal: picked, bad, gp: "GP-" + String(100000 + gpSeq * 137).slice(0, 6) };
             completedFacility = finished;
             parentTask = t;
             return finished;
@@ -307,15 +291,12 @@ export const useStore = create<AppState>()(
           return { ...t, facilities };
         });
 
-        // 3) round-2: re-offer any not-found qty at another location
         if (completedFacility && parentTask && completedFacility.bad > 0) {
           const task = parentTask;
           const rule = state.channelRules[task.channel];
           const usedRids = new Set(task.facilities.flatMap((f) => f.lines.map((l) => l.rid)));
           const nfBySku: Record<string, number> = {};
-          completedFacility.lines.forEach((l) => {
-            if (l.nf) nfBySku[l.sku] = (nfBySku[l.sku] ?? 0) + l.nf;
-          });
+          completedFacility.lines.forEach((l) => { if (l.nf) nfBySku[l.sku] = (nfBySku[l.sku] ?? 0) + l.nf; });
           const r2: Record<string, PickLine[]> = {};
           const extraShort: Shortfall[] = [];
           const reserved = (rid: number) => reservedFor(tasks, rid);
@@ -330,22 +311,17 @@ export const useStore = create<AppState>()(
           }
           const r2Lists = buildFacilityLists(task.no, 2, r2, state.facilityPriority, "-R2");
           if (r2Lists.length || extraShort.length) {
-            tasks = tasks.map((t) =>
-              t.no === task.no
-                ? { ...t, facilities: [...t.facilities, ...r2Lists], shortfall: [...t.shortfall, ...extraShort] }
-                : t,
-            );
+            tasks = tasks.map((t) => (t.no === task.no ? { ...t, facilities: [...t.facilities, ...r2Lists], shortfall: [...t.shortfall, ...extraShort] } : t));
           }
         }
 
         set({ tasks, stock, gpSeq, notice: `${facilityNo} updated.` });
       },
 
-      updateChannelRule: (channel, rule) =>
-        set({ channelRules: { ...get().channelRules, [channel]: rule } }),
+      updateChannelRule: (channel, rule) => set({ channelRules: { ...get().channelRules, [channel]: rule } }),
       setFacilityPriority: (p) => set({ facilityPriority: p }),
       setFetchTime: (t) => set({ fetchTime: t }),
     }),
-    { name: "fefo-smart-picking-v3" },
+    { name: "fefo-smart-picking-v4" },
   ),
 );
