@@ -68,9 +68,17 @@ function ingest() {
   Logger.log('Parsed ' + out.length + ' usable rows.');
 
   // 3) clear the stock table (it only ever holds these 3 facilities), then bulk-insert
-  supa(SUPABASE_URL, SERVICE_KEY, 'DELETE', '/rest/v1/stock?id=gte.0');
+  var del = supa(SUPABASE_URL, SERVICE_KEY, 'DELETE', '/rest/v1/stock?id=gte.0');
+  if (del.getResponseCode() >= 300) {
+    throw new Error('DELETE failed ' + del.getResponseCode() + ': ' + del.getContentText() +
+      ' — is SERVICE_KEY the secret service_role key (not the publishable key)?');
+  }
   for (var b = 0; b < out.length; b += 500) {
-    supa(SUPABASE_URL, SERVICE_KEY, 'POST', '/rest/v1/stock', out.slice(b, b + 500));
+    var resp = supa(SUPABASE_URL, SERVICE_KEY, 'POST', '/rest/v1/stock', out.slice(b, b + 500));
+    if (resp.getResponseCode() >= 300) {
+      throw new Error('INSERT failed ' + resp.getResponseCode() + ': ' + resp.getContentText() +
+        ' — is SERVICE_KEY the secret service_role key (not the publishable key)?');
+    }
   }
 
   // 4) stamp the sync
