@@ -62,6 +62,13 @@ create table if not exists pick_lines (
   picker text, nf int, picked int
 );
 
+-- Enable RLS on the task tables too. No policies yet = locked to public (anon /
+-- authenticated) keys; only the service_role key (Apps Script) can touch them.
+-- Read/write policies for the app are added in step 3 (with roles/auth).
+alter table picking_tasks enable row level security;
+alter table facility_picklists enable row level security;
+alter table pick_lines enable row level security;
+
 -- "is any picklist still being picked?" — for the ingestion freeze in step 3
 create or replace view feed_frozen as
 select exists (
