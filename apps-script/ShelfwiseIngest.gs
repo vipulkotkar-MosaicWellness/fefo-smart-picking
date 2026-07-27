@@ -1,51 +1,41 @@
 /**
  * FEFO Smart Picking — Shelfwise inventory ingestion (Google Apps Script)
+ * Reads the export email hourly, downloads the CSV, filters to the 3 facilities
+ * (Good + Active, qty>0) and pushes to Supabase. See apps-script/README.md.
  *
- * Runs on an hourly trigger AS YOUR GOOGLE ACCOUNT, so it can read the
- * "Export Job Complete - Shelfwise Inventory" email, download the CSV it links
- * to, filter to the three facilities (Good + Active, qty > 0), and push the
- * result into Supabase. The web app then reads it live.
- *
- * SETUP (once):
- *  1. script.google.com → New project → paste this file.
- *  2. Project Settings → Script Properties → add:
- *        SUPABASE_URL   = https://kytktvvcbgslwokywmds.supabase.co
- *        SERVICE_KEY    = <your Supabase service_role key>   (Settings → API)
- *     (The service_role key is secret — keep it only here, never in the app.)
- *  3. Run `ingest` once and approve the Gmail permission prompt.
- *  4. Triggers (clock icon) → Add Trigger → function: ingest,
- *     event source: Time-driven, Hour timer, Every hour.
+ * SETUP: Script Properties →  SUPABASE_URL = https://kytktvvcbgslwokywmds.supabase.co
+ *                             SERVICE_KEY  = <SECRET service_role / sb_secret key>
+ * Then run `ingest` and add an hourly time-driven trigger.
  */
 
+var INGEST_VERSION = 'v3-diagnostic';
 var TARGET_FACILITIES = ['SL Mother Hub', 'SL Ambient', 'SL RX'];
 var EMAIL_QUERY = 'subject:"Export Job Complete - Shelfwise Inventory" newer_than:2d';
 
 function ingest() {
+  Logger.log('ingest ' + INGEST_VERSION + ' starting');
   var props = PropertiesService.getScriptProperties();
-  var SUPABASE_URL = props.getProperty('SUPABASE_URL');
-  var SERVICE_KEY = props.getProperty('SERVICE_KEY');
+  var SUPABASE_URL = (props.getProperty('SUPABASE_URL') || '').trim().replace(/\/+$/, '');
+  var SERVICE_KEY = (props.getProperty('SERVICE_KEY') || '').trim();
   if (!SUPABASE_URL || !SERVICE_KEY) throw new Error('Set SUPABASE_URL and SERVICE_KEY in Script Properties.');
-
-  // Freeze rule: do not refresh stock while any picking is still open.
-  if (isFeedFrozen(SUPABASE_URL, SERVICE_KEY)) {
-    Logger.log('Feed frozen — open picking in progress. Skipping this run.');
-    return;
+  Logger.log('URL=' + SUPABASE_URL + ' · key starts with "' + SERVICE_KEY.slice(0, 11) + '…" len=' + SERVICE_KEY.length);
+  if (SERVICE_KEY.indexOf('sb_publishable_') === 0) {
+    throw new Error('SERVICE_KEY is the PUBLISHABLE key — it cannot write. Use the SECRET (sb_secret / service_role) key.');
   }
 
-  // 1) find the latest export email and pull the CSV link out of the body
+  if (isFeedFrozen(SUPABASE_URL, SERVICE_KEY)) { Logger.log('Feed frozen — skipping.'); return; }
+
+  // 1) latest export email → CSV link
   var threads = GmailApp.search(EMAIL_QUERY, 0, 5);
   if (!threads.length) { Logger.log('No export email found.'); return; }
   var msgs = threads[0].getMessages();
   var body = msgs[msgs.length - 1].getPlainBody();
   var m = body.match(/https?:\/\/\S+?\.csv/i);
   if (!m) { Logger.log('No CSV link in email.'); return; }
-  var csvUrl = m[0];
 
-  // 2) download + parse the CSV
-  var csv = UrlFetchApp.fetch(csvUrl, { muteHttpExceptions: true }).getContentText();
+  // 2) download + parse + filter
+  var csv = UrlFetchApp.fetch(m[0], { muteHttpExceptions: true }).getContentText();
   var rows = Utilities.parseCsv(csv);
-  // header indices: 0 Facility, 1 SKU, 2 Name, 3 InvType, 4 Shelf/bin,
-  //                 9 Qty, 15 Batch, 16 Expiry, 18 Mfg, 21 Batch Status
   var out = [];
   for (var i = 1; i < rows.length; i++) {
     var r = rows[i];
@@ -54,34 +44,28 @@ function ingest() {
     if (r[3] !== 'GOOD_INVENTORY' || r[21] !== 'Active') continue;
     var qty = parseInt(r[9], 10);
     if (!qty || qty <= 0) continue;
-    out.push({
-      facility: r[0],
-      bin: r[4] || 'DEFAULT',
-      sku: r[1],
-      name: r[2],
-      batch: r[15] || null,
-      expiry: (r[16] || '').slice(0, 10) || null,
-      qty: qty,
-      shelf: shelfMonths(r[18], r[16])
-    });
+    out.push({ facility: r[0], bin: r[4] || 'DEFAULT', sku: r[1], name: r[2],
+      batch: r[15] || null, expiry: (r[16] || '').slice(0, 10) || null, qty: qty, shelf: shelfMonths(r[18], r[16]) });
   }
   Logger.log('Parsed ' + out.length + ' usable rows.');
+  if (!out.length) { Logger.log('Nothing to insert.'); return; }
 
-  // 3) clear the stock table (it only ever holds these 3 facilities), then bulk-insert
+  // 3) clear + bulk-insert, checking every response code
   var del = supa(SUPABASE_URL, SERVICE_KEY, 'DELETE', '/rest/v1/stock?id=gte.0');
-  if (del.getResponseCode() >= 300) {
-    throw new Error('DELETE failed ' + del.getResponseCode() + ': ' + del.getContentText() +
-      ' — is SERVICE_KEY the secret service_role key (not the publishable key)?');
-  }
+  Logger.log('DELETE code=' + del.getResponseCode());
+  if (del.getResponseCode() >= 300) throw new Error('DELETE failed ' + del.getResponseCode() + ': ' + del.getContentText());
+
   for (var b = 0; b < out.length; b += 500) {
     var resp = supa(SUPABASE_URL, SERVICE_KEY, 'POST', '/rest/v1/stock', out.slice(b, b + 500));
-    if (resp.getResponseCode() >= 300) {
-      throw new Error('INSERT failed ' + resp.getResponseCode() + ': ' + resp.getContentText() +
-        ' — is SERVICE_KEY the secret service_role key (not the publishable key)?');
-    }
+    if (b === 0) Logger.log('first INSERT code=' + resp.getResponseCode() + ' body=' + resp.getContentText().slice(0, 200));
+    if (resp.getResponseCode() >= 300) throw new Error('INSERT failed ' + resp.getResponseCode() + ': ' + resp.getContentText());
   }
 
-  // 4) stamp the sync
+  // 4) verify by counting the table ourselves
+  var chk = UrlFetchApp.fetch(SUPABASE_URL + '/rest/v1/stock?select=facility&limit=1',
+    { headers: { apikey: SERVICE_KEY, Authorization: 'Bearer ' + SERVICE_KEY, Prefer: 'count=exact' }, muteHttpExceptions: true });
+  Logger.log('table count header=' + chk.getAllHeaders()['Content-Range']);
+
   supa(SUPABASE_URL, SERVICE_KEY, 'PATCH', '/rest/v1/sync_state?id=eq.1',
     { last_synced: new Date().toISOString(), rows: out.length, status: 'ok' });
   Logger.log('Done — ' + out.length + ' rows synced.');
