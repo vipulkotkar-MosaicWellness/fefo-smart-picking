@@ -67,9 +67,8 @@ function ingest() {
   }
   Logger.log('Parsed ' + out.length + ' usable rows.');
 
-  // 3) replace the stock for these facilities, then bulk-insert
-  supa(SUPABASE_URL, SERVICE_KEY, 'DELETE',
-    '/rest/v1/stock?facility=in.(' + TARGET_FACILITIES.map(quote).join(',') + ')');
+  // 3) clear the stock table (it only ever holds these 3 facilities), then bulk-insert
+  supa(SUPABASE_URL, SERVICE_KEY, 'DELETE', '/rest/v1/stock?id=gte.0');
   for (var b = 0; b < out.length; b += 500) {
     supa(SUPABASE_URL, SERVICE_KEY, 'POST', '/rest/v1/stock', out.slice(b, b + 500));
   }
@@ -87,8 +86,6 @@ function shelfMonths(mfg, exp) {
     return months > 0 ? months : 24;
   } catch (err) { return 24; }
 }
-
-function quote(s) { return '"' + s + '"'; }
 
 function isFeedFrozen(url, key) {
   try {
