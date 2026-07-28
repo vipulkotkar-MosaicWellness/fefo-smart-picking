@@ -160,7 +160,7 @@ function FacilityBlock({ f }: { f: FacilityPicklist }) {
   );
 }
 
-function TaskCard({ t }: { t: PickingTask }) {
+function TaskCard({ t, queuePos }: { t: PickingTask; queuePos?: number }) {
   const done = taskIsComplete(t);
   const suggested = t.facilities.reduce((s, f) => s + f.lines.reduce((a, l) => a + l.qty, 0), 0);
   const picked = t.facilities.reduce((s, f) => s + f.lines.reduce((a, l) => a + (l.picked ?? 0), 0), 0);
@@ -172,6 +172,7 @@ function TaskCard({ t }: { t: PickingTask }) {
     <div className="mb-3 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm">
+          {queuePos != null && !done && <Tag tone="info">Queue #{queuePos}</Tag>}{" "}
           <b>{t.no}</b> <Tag tone={done ? "ok" : "warn"}>{done ? "completed" : "open"}</Tag>{" "}
           <span className="text-xs text-slate-500 dark:text-slate-400">· {t.channel} · {t.facilities.length} facility picklist(s)</span>
         </div>
@@ -194,16 +195,26 @@ function TaskCard({ t }: { t: PickingTask }) {
   );
 }
 
-export function RegisterPanel() {
+export function RegisterPanel({ order = "latest" }: { order?: "latest" | "sequential" }) {
   const tasks = useStore((s) => s.tasks);
+  const sequential = order === "sequential";
+  const ordered = sequential ? tasks : tasks.slice().reverse();
+  const openTasks = tasks.filter((t) => !taskIsComplete(t));
+
   return (
-    <Card title="Picking tasks">
+    <Card title={sequential ? "Picking queue (sequential — oldest first)" : "Picking tasks"}>
       {tasks.length === 0 ? (
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">
           No picking task yet. As Planner, add demand and click <b>Generate picklist</b>.
         </p>
       ) : (
-        tasks.slice().reverse().map((t) => <TaskCard key={t.no} t={t} />)
+        ordered.map((t) => (
+          <TaskCard
+            key={t.no}
+            t={t}
+            queuePos={sequential ? openTasks.findIndex((o) => o.no === t.no) + 1 || undefined : undefined}
+          />
+        ))
       )}
     </Card>
   );

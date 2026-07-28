@@ -107,6 +107,7 @@ export interface AppState {
   lastSync: string;
 
   visibleFacilities: string[];
+  skuFilter: string;
   channel: string;
   role: Role;
   currentPicker: string;
@@ -121,6 +122,7 @@ export interface AppState {
   setRole: (r: Role) => void;
   setCurrentPicker: (p: string) => void;
   toggleFacility: (f: string) => void;
+  setSkuFilter: (s: string) => void;
   syncStock: () => void;
   loadFromSupabase: () => Promise<void>;
   loadStock: (tuples: StockTuple[]) => void;
@@ -151,6 +153,7 @@ export const useStore = create<AppState>()(
       lastSync: new Date().toISOString(),
 
       visibleFacilities: [...FACILITY_PRIORITY],
+      skuFilter: "",
       channel: "Blinkit",
       role: "supervisor",
       currentPicker: PICKERS_DEFAULT[0],
@@ -164,6 +167,7 @@ export const useStore = create<AppState>()(
       anyOpen: () => allFacilityLists(get().tasks).some((f) => f.lines.some((l) => l.picked == null)),
       setRole: (r) => set({ role: r }),
       setCurrentPicker: (p) => set({ currentPicker: p }),
+      setSkuFilter: (s) => set({ skuFilter: s }),
       toggleFacility: (f) =>
         set({
           visibleFacilities: get().visibleFacilities.includes(f)

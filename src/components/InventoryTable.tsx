@@ -12,14 +12,16 @@ function mfgFrom(exp: Expiry, shelf: number): Expiry {
 }
 
 export function InventoryTable() {
-  const { stock, visibleFacilities } = useStore();
+  const { stock, visibleFacilities, skuFilter } = useStore();
+  const needle = skuFilter.trim().toLowerCase();
   const rows = stock
     .filter(
       (b) =>
         visibleFacilities.includes(b.location) &&
         b.type === "Good" &&
         b.active === "Active" &&
-        b.qty > 0, // on-hand stock only
+        b.qty > 0 && // on-hand stock only
+        (!needle || b.sku.toLowerCase().includes(needle) || b.name.toLowerCase().includes(needle)),
     )
     .sort((a, b) => {
       const fr = facilityRank(a.location) - facilityRank(b.location);

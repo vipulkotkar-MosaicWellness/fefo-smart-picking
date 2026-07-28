@@ -94,8 +94,20 @@ export default function App() {
         </header>
 
         {role === "admin" && <div className="mt-4 space-y-4"><AdminConfig /><InventoryPanel /></div>}
-        {role === "planner" && <div className="mt-4 space-y-4"><DemandPanel /><InventoryPanel /><RegisterPanel /><PerformancePanel /></div>}
-        {role === "supervisor" && <div className="mt-4 space-y-4"><InventoryPanel /><RegisterPanel /><PerformancePanel /></div>}
+        {role === "planner" && (
+          <div className="mt-4 space-y-4">
+            <DemandPanel />
+            <RegisterPanel />
+            <PerformancePanel />
+            <InventoryPanel />
+          </div>
+        )}
+        {role === "supervisor" && (
+          <div className="mt-4 space-y-4">
+            <RegisterPanel order="sequential" />
+            <InventoryPanel />
+          </div>
+        )}
         {role === "picker" && <div className="mt-4"><PickerView /></div>}
 
         <p className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">FEFO Smart Picking · React + Supabase-ready · Mosaic Wellness</p>
