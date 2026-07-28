@@ -6,11 +6,30 @@
  * SETUP: Script Properties →  SUPABASE_URL = https://kytktvvcbgslwokywmds.supabase.co
  *                             SERVICE_KEY  = <SECRET service_role / sb_secret key>
  * Then run `ingest` and add an hourly time-driven trigger.
+ *
+ * Columns are read BY NAME (not position) — the export report has changed its
+ * column layout before (extra columns inserted mid-row) and silently broke a
+ * positional parser. A header-name lookup survives that; it only fails loudly
+ * if a column we actually need disappears entirely.
  */
 
-var INGEST_VERSION = 'v4-diagnostic';
+var INGEST_VERSION = 'v5-header-lookup';
 var TARGET_FACILITIES = ['SL Mother Hub', 'SL Ambient', 'SL RX'];
 var EMAIL_QUERY = 'subject:"Export Job Complete - Shelfwise Inventory" newer_than:2d';
+
+// CSV header name -> the field we use it for.
+var COLUMNS = {
+  facility: 'Facility',
+  sku: 'Item Type SKU Code',
+  name: 'Item Type Name',
+  invType: 'Inventory Type',
+  bin: 'Shelf',
+  qty: 'Quantity',
+  batch: 'Batch Code',
+  expiry: 'Expiry',
+  mfg: 'Manufacturing',
+  status: 'Batch Status',
+};
 
 function ingest() {
   Logger.log('ingest ' + INGEST_VERSION + ' starting');
@@ -18,7 +37,6 @@ function ingest() {
   var SUPABASE_URL = (props.getProperty('SUPABASE_URL') || '').trim().replace(/\/+$/, '');
   var SERVICE_KEY = (props.getProperty('SERVICE_KEY') || '').trim();
   if (!SUPABASE_URL || !SERVICE_KEY) throw new Error('Set SUPABASE_URL and SERVICE_KEY in Script Properties.');
-  Logger.log('URL=' + SUPABASE_URL + ' · key starts with "' + SERVICE_KEY.slice(0, 11) + '…" len=' + SERVICE_KEY.length);
   if (SERVICE_KEY.indexOf('sb_publishable_') === 0) {
     throw new Error('SERVICE_KEY is the PUBLISHABLE key — it cannot write. Use the SECRET (sb_secret / service_role) key.');
   }
@@ -28,53 +46,65 @@ function ingest() {
   // 1) latest export email → CSV link
   var threads = GmailApp.search(EMAIL_QUERY, 0, 5);
   if (!threads.length) { Logger.log('No export email found.'); return; }
-  Logger.log('Matched ' + threads.length + ' thread(s); using thread 0, subject="' + threads[0].getFirstMessageSubject() + '"');
   var msgs = threads[0].getMessages();
   var lastMsg = msgs[msgs.length - 1];
-  Logger.log('Using message ' + (msgs.length - 1) + '/' + msgs.length + ' · date=' + lastMsg.getDate() + ' · from=' + lastMsg.getFrom());
+  Logger.log('Using email dated ' + lastMsg.getDate());
   var body = lastMsg.getPlainBody();
   var m = body.match(/https?:\/\/\S+?\.csv/i);
-  if (!m) { Logger.log('No CSV link in email. Body preview: ' + body.slice(0, 300)); return; }
-  Logger.log('CSV URL: ' + m[0]);
+  if (!m) { Logger.log('No CSV link in email.'); return; }
 
-  // 2) download + parse + filter
+  // 2) download
   var fetchRes = UrlFetchApp.fetch(m[0], { muteHttpExceptions: true });
   var csv = fetchRes.getContentText();
-  Logger.log('Fetch HTTP ' + fetchRes.getResponseCode() + ' · ' + csv.length + ' chars · first 150: ' + csv.slice(0, 150).replace(/\n/g, '\\n'));
   var rows = Utilities.parseCsv(csv);
-  Logger.log('CSV parsed into ' + rows.length + ' raw row(s) (incl. header). Header: ' + (rows[0] || []).join(' | '));
-  var facilityMismatch = 0, invTypeMismatch = 0, statusMismatch = 0, qtyZero = 0, tooShort = 0;
+  if (!rows.length) { Logger.log('Empty CSV (HTTP ' + fetchRes.getResponseCode() + ').'); return; }
+
+  // 3) map header names -> column index (robust to the report adding/reordering columns)
+  var header = rows[0];
+  var idx = {};
+  for (var key in COLUMNS) {
+    var pos = header.indexOf(COLUMNS[key]);
+    if (pos < 0) {
+      throw new Error('Expected column "' + COLUMNS[key] + '" not found in export header. ' +
+        'The report format changed — update apps-script/ShelfwiseIngest.gs COLUMNS. Header was: ' + header.join(' | '));
+    }
+    idx[key] = pos;
+  }
+  Logger.log('Column positions: ' + JSON.stringify(idx));
+
+  // 4) filter: our 3 facilities, Good inventory, Active batch status, qty > 0
   var out = [];
+  var dropped = { facility: 0, invType: 0, status: 0, qtyZero: 0 };
   for (var i = 1; i < rows.length; i++) {
     var r = rows[i];
-    if (r.length < 22) { tooShort++; continue; }
-    if (TARGET_FACILITIES.indexOf(r[0]) < 0) { facilityMismatch++; continue; }
-    if (r[3] !== 'GOOD_INVENTORY') { invTypeMismatch++; continue; }
-    if (r[21] !== 'Active') { statusMismatch++; continue; }
-    var qty = parseInt(r[9], 10);
-    if (!qty || qty <= 0) { qtyZero++; continue; }
-    out.push({ facility: r[0], bin: r[4] || 'DEFAULT', sku: r[1], name: r[2],
-      batch: r[15] || null, expiry: (r[16] || '').slice(0, 10) || null, qty: qty, shelf: shelfMonths(r[18], r[16]) });
+    var facility = r[idx.facility];
+    if (TARGET_FACILITIES.indexOf(facility) < 0) { dropped.facility++; continue; }
+    if (r[idx.invType] !== 'GOOD_INVENTORY') { dropped.invType++; continue; }
+    if (r[idx.status] !== 'Active') { dropped.status++; continue; }
+    var qty = parseInt(r[idx.qty], 10);
+    if (!qty || qty <= 0) { dropped.qtyZero++; continue; }
+    out.push({
+      facility: facility,
+      bin: r[idx.bin] || 'DEFAULT',
+      sku: r[idx.sku],
+      name: r[idx.name],
+      batch: r[idx.batch] || null,
+      expiry: (r[idx.expiry] || '').slice(0, 10) || null,
+      qty: qty,
+      shelf: shelfMonths(r[idx.mfg], r[idx.expiry]),
+    });
   }
-  Logger.log('Parsed ' + out.length + ' usable rows. Dropped: tooShort=' + tooShort + ' facilityMismatch=' + facilityMismatch +
-    ' invTypeMismatch=' + invTypeMismatch + ' statusMismatch=' + statusMismatch + ' qtyZero=' + qtyZero);
-  if (!out.length) { Logger.log('Nothing to insert — see the dropped-row breakdown above to see why.'); return; }
+  Logger.log('Parsed ' + out.length + ' usable rows. Dropped: ' + JSON.stringify(dropped));
+  if (!out.length) { Logger.log('Nothing to insert.'); return; }
 
-  // 3) clear + bulk-insert, checking every response code
+  // 5) clear + bulk-insert, checking every response code
   var del = supa(SUPABASE_URL, SERVICE_KEY, 'DELETE', '/rest/v1/stock?id=gte.0');
-  Logger.log('DELETE code=' + del.getResponseCode());
   if (del.getResponseCode() >= 300) throw new Error('DELETE failed ' + del.getResponseCode() + ': ' + del.getContentText());
 
   for (var b = 0; b < out.length; b += 500) {
     var resp = supa(SUPABASE_URL, SERVICE_KEY, 'POST', '/rest/v1/stock', out.slice(b, b + 500));
-    if (b === 0) Logger.log('first INSERT code=' + resp.getResponseCode() + ' body=' + resp.getContentText().slice(0, 200));
     if (resp.getResponseCode() >= 300) throw new Error('INSERT failed ' + resp.getResponseCode() + ': ' + resp.getContentText());
   }
-
-  // 4) verify by counting the table ourselves
-  var chk = UrlFetchApp.fetch(SUPABASE_URL + '/rest/v1/stock?select=facility&limit=1',
-    { headers: { apikey: SERVICE_KEY, Authorization: 'Bearer ' + SERVICE_KEY, Prefer: 'count=exact' }, muteHttpExceptions: true });
-  Logger.log('table count header=' + chk.getAllHeaders()['Content-Range']);
 
   supa(SUPABASE_URL, SERVICE_KEY, 'PATCH', '/rest/v1/sync_state?id=eq.1',
     { last_synced: new Date().toISOString(), rows: out.length, status: 'ok' });
