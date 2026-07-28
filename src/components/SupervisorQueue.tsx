@@ -59,6 +59,25 @@ function Bucket({
   );
 }
 
+function ShortfallAlert() {
+  const tasks = useStore((s) => s.tasks);
+  const withShortfall = tasks.filter((t) => t.shortfall.length > 0);
+  if (withShortfall.length === 0) return null;
+
+  return (
+    <div className="mb-4 rounded-lg border border-rose-300 bg-rose-50 p-3 dark:border-rose-800 dark:bg-rose-950/40">
+      <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">
+        Not available in any facility
+      </h3>
+      {withShortfall.map((t) => (
+        <p key={t.no} className="text-[11px] text-rose-800 dark:text-rose-200">
+          <b>{t.no}</b> ({t.channel}): {t.shortfall.map((s) => `${s.name} — ${s.qty} short`).join(", ")}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 export function SupervisorQueue() {
   const tasks = useStore((s) => s.tasks);
   const all = allFacilityLists(tasks); // already in task-creation order
@@ -70,6 +89,7 @@ export function SupervisorQueue() {
   if (all.length === 0) {
     return (
       <Card title="Picking queue">
+        <ShortfallAlert />
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">
           No picklists yet — waiting on the Planner to raise demand.
         </p>
@@ -79,6 +99,7 @@ export function SupervisorQueue() {
 
   return (
     <Card title="Picking queue">
+      <ShortfallAlert />
       <div className="space-y-5">
         <Bucket title="Picklist creation pending" tone="warn" items={creation} queued emptyText="Nothing awaiting picker assignment." />
         <Bucket title="Picking pending" tone="info" items={picking} queued emptyText="Nothing currently being picked." />
