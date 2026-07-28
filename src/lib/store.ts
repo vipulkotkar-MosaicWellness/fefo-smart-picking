@@ -104,6 +104,7 @@ export interface AppState {
   facilityPriority: string[];
   pickers: string[];
   lastSync: string;
+  syncing: boolean;
 
   visibleFacilities: string[];
   skuFilter: string;
@@ -146,6 +147,7 @@ export const useStore = create<AppState>()(
       facilityPriority: [...FACILITY_PRIORITY],
       pickers: [...PICKERS_DEFAULT],
       lastSync: new Date().toISOString(),
+      syncing: false,
 
       visibleFacilities: [...FACILITY_PRIORITY],
       skuFilter: "",
@@ -171,29 +173,34 @@ export const useStore = create<AppState>()(
 
       // Pull the latest stock. Live from Supabase when configured, else the snapshot.
       syncStock: () => {
-        if (get().anyOpen()) return set({ notice: "Feed frozen — complete open picking before syncing." });
+        if (get().anyOpen()) return set({ notice: "⚠ Feed frozen — complete open picking before syncing." });
         if (isSupabaseConfigured) {
           void get().loadFromSupabase();
           return;
         }
         const stock = rowsFromTuples(REAL_STOCK);
-        set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString(), notice: "Stock synced from snapshot." });
+        set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString(), notice: "✓ Stock reloaded from snapshot." });
       },
 
       loadFromSupabase: async () => {
         if (!isSupabaseConfigured) return;
-        set({ notice: "Loading live stock from Supabase…" });
+        const prevLast = get().lastSync;
+        set({ syncing: true, notice: "Checking for new stock…" });
         try {
           const rows = await fetchStock();
           const last = await fetchLastSync();
+          const changed = last && last !== prevLast;
           set({
             stock: rows,
             skus: skusFromStock(rows),
             lastSync: last ?? new Date().toISOString(),
-            notice: `Loaded ${rows.length.toLocaleString()} live rows from Supabase.`,
+            syncing: false,
+            notice: changed
+              ? `✓ New stock loaded — ${rows.length.toLocaleString()} rows.`
+              : `✓ Up to date — ${rows.length.toLocaleString()} rows (next email refresh is hourly).`,
           });
         } catch (e) {
-          set({ notice: "Supabase load failed: " + (e as Error).message });
+          set({ syncing: false, notice: "✗ Sync failed: " + (e as Error).message });
         }
       },
 

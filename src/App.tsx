@@ -18,7 +18,7 @@ const ROLES: { key: Role; label: string }[] = [
 
 export default function App() {
   const {
-    locations, visibleFacilities, toggleFacility, anyOpen, tasks, lastSync, syncStock,
+    locations, visibleFacilities, toggleFacility, anyOpen, tasks, lastSync, syncStock, syncing, notice,
     role, setRole, pickers, currentPicker, setCurrentPicker, loadFromSupabase,
   } = useStore();
 
@@ -66,8 +66,28 @@ export default function App() {
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="opacity-90">Stock synced from email · <b>{syncLabel}</b></span>
-                <button onClick={syncStock} className="rounded-md bg-white/20 px-2.5 py-1 font-semibold hover:bg-white/30">Sync now</button>
+                <button
+                  onClick={syncStock}
+                  disabled={syncing}
+                  className="rounded-md bg-white/20 px-2.5 py-1 font-semibold hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {syncing ? "Syncing…" : "Sync now"}
+                </button>
               </div>
+            </div>
+          )}
+
+          {ops && notice && (
+            <div
+              className={`mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                notice.startsWith("✗")
+                  ? "bg-rose-100 text-rose-900"
+                  : notice.startsWith("⚠")
+                    ? "bg-amber-100 text-amber-900"
+                    : "bg-white/15 text-white"
+              }`}
+            >
+              {notice}
             </div>
           )}
 
