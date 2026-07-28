@@ -8,7 +8,7 @@
  * Then run `ingest` and add an hourly time-driven trigger.
  */
 
-var INGEST_VERSION = 'v3-diagnostic';
+var INGEST_VERSION = 'v4-diagnostic';
 var TARGET_FACILITIES = ['SL Mother Hub', 'SL Ambient', 'SL RX'];
 var EMAIL_QUERY = 'subject:"Export Job Complete - Shelfwise Inventory" newer_than:2d';
 
@@ -28,27 +28,37 @@ function ingest() {
   // 1) latest export email → CSV link
   var threads = GmailApp.search(EMAIL_QUERY, 0, 5);
   if (!threads.length) { Logger.log('No export email found.'); return; }
+  Logger.log('Matched ' + threads.length + ' thread(s); using thread 0, subject="' + threads[0].getFirstMessageSubject() + '"');
   var msgs = threads[0].getMessages();
-  var body = msgs[msgs.length - 1].getPlainBody();
+  var lastMsg = msgs[msgs.length - 1];
+  Logger.log('Using message ' + (msgs.length - 1) + '/' + msgs.length + ' · date=' + lastMsg.getDate() + ' · from=' + lastMsg.getFrom());
+  var body = lastMsg.getPlainBody();
   var m = body.match(/https?:\/\/\S+?\.csv/i);
-  if (!m) { Logger.log('No CSV link in email.'); return; }
+  if (!m) { Logger.log('No CSV link in email. Body preview: ' + body.slice(0, 300)); return; }
+  Logger.log('CSV URL: ' + m[0]);
 
   // 2) download + parse + filter
-  var csv = UrlFetchApp.fetch(m[0], { muteHttpExceptions: true }).getContentText();
+  var fetchRes = UrlFetchApp.fetch(m[0], { muteHttpExceptions: true });
+  var csv = fetchRes.getContentText();
+  Logger.log('Fetch HTTP ' + fetchRes.getResponseCode() + ' · ' + csv.length + ' chars · first 150: ' + csv.slice(0, 150).replace(/\n/g, '\\n'));
   var rows = Utilities.parseCsv(csv);
+  Logger.log('CSV parsed into ' + rows.length + ' raw row(s) (incl. header). Header: ' + (rows[0] || []).join(' | '));
+  var facilityMismatch = 0, invTypeMismatch = 0, statusMismatch = 0, qtyZero = 0, tooShort = 0;
   var out = [];
   for (var i = 1; i < rows.length; i++) {
     var r = rows[i];
-    if (r.length < 22) continue;
-    if (TARGET_FACILITIES.indexOf(r[0]) < 0) continue;
-    if (r[3] !== 'GOOD_INVENTORY' || r[21] !== 'Active') continue;
+    if (r.length < 22) { tooShort++; continue; }
+    if (TARGET_FACILITIES.indexOf(r[0]) < 0) { facilityMismatch++; continue; }
+    if (r[3] !== 'GOOD_INVENTORY') { invTypeMismatch++; continue; }
+    if (r[21] !== 'Active') { statusMismatch++; continue; }
     var qty = parseInt(r[9], 10);
-    if (!qty || qty <= 0) continue;
+    if (!qty || qty <= 0) { qtyZero++; continue; }
     out.push({ facility: r[0], bin: r[4] || 'DEFAULT', sku: r[1], name: r[2],
       batch: r[15] || null, expiry: (r[16] || '').slice(0, 10) || null, qty: qty, shelf: shelfMonths(r[18], r[16]) });
   }
-  Logger.log('Parsed ' + out.length + ' usable rows.');
-  if (!out.length) { Logger.log('Nothing to insert.'); return; }
+  Logger.log('Parsed ' + out.length + ' usable rows. Dropped: tooShort=' + tooShort + ' facilityMismatch=' + facilityMismatch +
+    ' invTypeMismatch=' + invTypeMismatch + ' statusMismatch=' + statusMismatch + ' qtyZero=' + qtyZero);
+  if (!out.length) { Logger.log('Nothing to insert — see the dropped-row breakdown above to see why.'); return; }
 
   // 3) clear + bulk-insert, checking every response code
   var del = supa(SUPABASE_URL, SERVICE_KEY, 'DELETE', '/rest/v1/stock?id=gte.0');
