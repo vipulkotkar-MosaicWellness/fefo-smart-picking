@@ -23,6 +23,7 @@ export interface SkuInfo {
 }
 
 export interface DemandLine {
+  channel: string;
   sku: string;
   qty: number;
 }

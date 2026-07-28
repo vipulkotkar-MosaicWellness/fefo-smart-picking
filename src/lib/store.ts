@@ -102,13 +102,11 @@ export interface AppState {
   skus: Record<string, SkuInfo>;
   channelRules: Record<string, ChannelRule>;
   facilityPriority: string[];
-  fetchTime: string;
   pickers: string[];
   lastSync: string;
 
   visibleFacilities: string[];
   skuFilter: string;
-  channel: string;
   role: Role;
   currentPicker: string;
   demand: DemandLine[];
@@ -126,7 +124,6 @@ export interface AppState {
   syncStock: () => void;
   loadFromSupabase: () => Promise<void>;
   loadStock: (tuples: StockTuple[]) => void;
-  setChannel: (c: string) => void;
   setDemand: (d: DemandLine[]) => void;
   removeDemand: (i: number) => void;
   generate: () => void;
@@ -136,7 +133,6 @@ export interface AppState {
   applyPicks: (facilityNo: string, results: Record<number, number>) => void;
   updateChannelRule: (channel: string, rule: ChannelRule) => void;
   setFacilityPriority: (p: string[]) => void;
-  setFetchTime: (t: string) => void;
 }
 
 const initialStock = rowsFromTuples(REAL_STOCK);
@@ -148,13 +144,11 @@ export const useStore = create<AppState>()(
       skus: skusFromStock(initialStock),
       channelRules: { ...CHANNELS },
       facilityPriority: [...FACILITY_PRIORITY],
-      fetchTime: "07:30",
       pickers: [...PICKERS_DEFAULT],
       lastSync: new Date().toISOString(),
 
       visibleFacilities: [...FACILITY_PRIORITY],
       skuFilter: "",
-      channel: "Blinkit",
       role: "supervisor",
       currentPicker: PICKERS_DEFAULT[0],
       demand: [],
@@ -208,39 +202,55 @@ export const useStore = create<AppState>()(
         set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString() });
       },
 
-      setChannel: (c) => set({ channel: c }),
       setDemand: (d) => set({ demand: d }),
       removeDemand: (i) => set({ demand: get().demand.filter((_, idx) => idx !== i) }),
 
+      // One picking task per channel present in the demand list, created together
+      // so a single multi-channel CSV upload queues multiple picklists at once.
       generate: () => {
-        const { skus, demand, channel, channelRules, facilityPriority, stock, tasks, taskSeq } = get();
+        const { skus, demand, channelRules, facilityPriority, stock, tasks, taskSeq } = get();
         if (Object.keys(skus).length === 0) return set({ notice: "No stock synced yet." });
         if (demand.length === 0) return set({ notice: "Add demand first." });
-        const rule = channelRules[channel];
-        if (!rule) return set({ notice: "Unknown channel." });
 
-        const seq = taskSeq + 1;
-        const no = taskNumber(seq);
-        const reserved = (rid: number) => reservedFor(tasks, rid);
-        const byFacility: Record<string, PickLine[]> = {};
-        const shortfall: Shortfall[] = [];
-
+        const byChannel = new Map<string, DemandLine[]>();
         for (const d of demand) {
-          const cutoff = cutoffMonths(rule, skus[d.sku].shelf);
-          const w = waterfall(d.sku, d.qty, cutoff, stock, facilityPriority, reserved, []);
-          for (const f of Object.keys(w.byFacility)) (byFacility[f] ??= []).push(...w.byFacility[f]);
-          if (w.short > 0) shortfall.push({ sku: d.sku, name: skus[d.sku].name, qty: w.short });
+          if (!byChannel.has(d.channel)) byChannel.set(d.channel, []);
+          byChannel.get(d.channel)!.push(d);
         }
 
-        const task: PickingTask = {
-          no,
-          channel,
-          demand: JSON.parse(JSON.stringify(demand)),
-          facilities: buildFacilityLists(no, 1, byFacility, facilityPriority),
-          shortfall,
-          createdAt: new Date().toISOString(),
-        };
-        set({ tasks: [...tasks, task], taskSeq: seq, demand: [], notice: `${no} created — ${task.facilities.length} facility picklist(s).` });
+        let seq = taskSeq;
+        const reserved = (rid: number) => reservedFor(tasks, rid);
+        const newTasks: PickingTask[] = [];
+
+        for (const [channel, lines] of byChannel) {
+          const rule = channelRules[channel];
+          if (!rule) continue;
+          seq += 1;
+          const no = taskNumber(seq);
+          const byFacility: Record<string, PickLine[]> = {};
+          const shortfall: Shortfall[] = [];
+          for (const d of lines) {
+            const cutoff = cutoffMonths(rule, skus[d.sku].shelf);
+            const w = waterfall(d.sku, d.qty, cutoff, stock, facilityPriority, reserved, []);
+            for (const f of Object.keys(w.byFacility)) (byFacility[f] ??= []).push(...w.byFacility[f]);
+            if (w.short > 0) shortfall.push({ sku: d.sku, name: skus[d.sku].name, qty: w.short });
+          }
+          newTasks.push({
+            no,
+            channel,
+            demand: JSON.parse(JSON.stringify(lines)),
+            facilities: buildFacilityLists(no, 1, byFacility, facilityPriority),
+            shortfall,
+            createdAt: new Date().toISOString(),
+          });
+        }
+
+        set({
+          tasks: [...tasks, ...newTasks],
+          taskSeq: seq,
+          demand: [],
+          notice: `${newTasks.length} picking task(s) created — ${newTasks.map((t) => t.no).join(", ")}.`,
+        });
       },
 
       assignAll: (facilityNo, picker) =>
@@ -349,10 +359,9 @@ export const useStore = create<AppState>()(
 
       updateChannelRule: (channel, rule) => set({ channelRules: { ...get().channelRules, [channel]: rule } }),
       setFacilityPriority: (p) => set({ facilityPriority: p }),
-      setFetchTime: (t) => set({ fetchTime: t }),
     }),
     {
-      name: "fefo-smart-picking-v5",
+      name: "fefo-smart-picking-v6",
       // Stock is not persisted — it always comes fresh from the feed (snapshot / email).
       partialize: (s) => ({
         tasks: s.tasks,
@@ -360,10 +369,8 @@ export const useStore = create<AppState>()(
         gpSeq: s.gpSeq,
         channelRules: s.channelRules,
         facilityPriority: s.facilityPriority,
-        fetchTime: s.fetchTime,
         pickers: s.pickers,
         visibleFacilities: s.visibleFacilities,
-        channel: s.channel,
         role: s.role,
         currentPicker: s.currentPicker,
       }),

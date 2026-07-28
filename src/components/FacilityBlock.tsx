@@ -1,11 +1,12 @@
 import { useState, type ChangeEvent } from "react";
 import { criticalPathSort } from "../lib/engine";
 import { downloadCsv, monLabel } from "../lib/format";
-import { facilityDone, taskIsComplete, useStore } from "../lib/store";
-import type { FacilityPicklist, PickingTask } from "../lib/types";
-import { Button, Card, Tag } from "./Ui";
+import { useStore } from "../lib/store";
+import type { FacilityPicklist } from "../lib/types";
+import { Button, Tag } from "./Ui";
 
-function FacilityBlock({ f }: { f: FacilityPicklist }) {
+/** The full picklist detail: assignment controls, share buttons, line table, complete button. */
+export function FacilityBlock({ f }: { f: FacilityPicklist }) {
   const { pickers, assignAll, assignLine, uploadAssignments, applyPicks } = useStore();
   const [nf, setNf] = useState<Record<number, number>>({});
   const [assignTo, setAssignTo] = useState("");
@@ -55,11 +56,11 @@ function FacilityBlock({ f }: { f: FacilityPicklist }) {
   }
 
   return (
-    <div className={`mt-2 rounded-lg border border-slate-200 p-3 dark:border-slate-700 ${open ? "border-l-4 border-l-amber-500" : "border-l-4 border-l-emerald-600"}`}>
+    <div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm">
-          <b>{f.facility}</b> <span className="text-xs text-slate-500 dark:text-slate-400">{f.no}</span>{" "}
-          {f.round > 1 && <Tag tone="info">Round {f.round}</Tag>} <Tag tone={open ? "warn" : "ok"}>{f.status}</Tag>
+          <b>{f.taskNo}</b> <span className="text-xs text-slate-500 dark:text-slate-400">{f.no}</span>{" "}
+          {f.round > 1 && <Tag tone="info">Round {f.round}</Tag>}
           {f.bad ? <span className="ml-1 text-xs text-rose-600 dark:text-rose-400">· {f.bad} not found</span> : null}
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -157,65 +158,5 @@ function FacilityBlock({ f }: { f: FacilityPicklist }) {
         </table>
       </div>
     </div>
-  );
-}
-
-function TaskCard({ t, queuePos }: { t: PickingTask; queuePos?: number }) {
-  const done = taskIsComplete(t);
-  const suggested = t.facilities.reduce((s, f) => s + f.lines.reduce((a, l) => a + l.qty, 0), 0);
-  const picked = t.facilities.reduce((s, f) => s + f.lines.reduce((a, l) => a + (l.picked ?? 0), 0), 0);
-  const pending = t.facilities.filter((f) => !facilityDone(f)).reduce((s, f) => s + f.lines.filter((l) => l.picked == null).reduce((a, l) => a + l.qty, 0), 0);
-  const notFound = t.facilities.reduce((s, f) => s + f.lines.reduce((a, l) => a + (l.nf ?? 0), 0), 0);
-  const shortQty = t.shortfall.reduce((s, x) => s + x.qty, 0);
-
-  return (
-    <div className="mb-3 rounded-xl border border-slate-200 p-3 dark:border-slate-700">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm">
-          {queuePos != null && !done && <Tag tone="info">Queue #{queuePos}</Tag>}{" "}
-          <b>{t.no}</b> <Tag tone={done ? "ok" : "warn"}>{done ? "completed" : "open"}</Tag>{" "}
-          <span className="text-xs text-slate-500 dark:text-slate-400">· {t.channel} · {t.facilities.length} facility picklist(s)</span>
-        </div>
-        <div className="flex flex-wrap gap-2 text-[11px]">
-          <Tag tone="muted">to pick {suggested}</Tag>
-          <Tag tone="ok">picked {picked}</Tag>
-          <Tag tone="warn">pending {pending}</Tag>
-          <Tag tone="bad">not avail {notFound + shortQty}</Tag>
-        </div>
-      </div>
-
-      {t.shortfall.length > 0 && (
-        <div className="mt-2 rounded-md bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
-          <b>Not available in any facility:</b> {t.shortfall.map((s) => `${s.name} (${s.qty})`).join(", ")}
-        </div>
-      )}
-
-      {t.facilities.map((f) => <FacilityBlock key={f.no} f={f} />)}
-    </div>
-  );
-}
-
-export function RegisterPanel({ order = "latest" }: { order?: "latest" | "sequential" }) {
-  const tasks = useStore((s) => s.tasks);
-  const sequential = order === "sequential";
-  const ordered = sequential ? tasks : tasks.slice().reverse();
-  const openTasks = tasks.filter((t) => !taskIsComplete(t));
-
-  return (
-    <Card title={sequential ? "Picking queue (sequential — oldest first)" : "Picking tasks"}>
-      {tasks.length === 0 ? (
-        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">
-          No picking task yet. As Planner, add demand and click <b>Generate picklist</b>.
-        </p>
-      ) : (
-        ordered.map((t) => (
-          <TaskCard
-            key={t.no}
-            t={t}
-            queuePos={sequential ? openTasks.findIndex((o) => o.no === t.no) + 1 || undefined : undefined}
-          />
-        ))
-      )}
-    </Card>
   );
 }

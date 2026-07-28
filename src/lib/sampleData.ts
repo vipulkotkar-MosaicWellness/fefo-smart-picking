@@ -61,30 +61,38 @@ export function parseStockCsv(text: string): StockTuple[] {
   return out;
 }
 
-/** Parse demand CSV text (SKU Code, Qty). Returns rows plus unknown skus. */
+/** Parse multi-channel demand CSV text (Channel, SKU Code, Qty). */
 export function parseDemandCsv(
   text: string,
   known: Record<string, unknown>,
-): { demand: { sku: string; qty: number }[]; bad: string[] } {
-  const demand: { sku: string; qty: number }[] = [];
-  const bad: string[] = [];
+  knownChannels: Record<string, unknown>,
+): { demand: { channel: string; sku: string; qty: number }[]; badSku: string[]; badChannel: string[] } {
+  const demand: { channel: string; sku: string; qty: number }[] = [];
+  const badSku: string[] = [];
+  const badChannel: string[] = [];
   text
     .trim()
     .split(/\r?\n/)
     .forEach((ln) => {
       if (!ln.trim()) return;
       const c = ln.split(",").map((s) => s.trim());
-      if (/sku/i.test(c[0])) return;
-      const sku = c[0];
-      const qty = parseInt(c[1], 10);
+      if (/channel/i.test(c[0]) && /sku/i.test(ln)) return; // header
+      if (c.length < 3) return;
+      const channel = c[0];
+      const sku = c[1];
+      const qty = parseInt(c[2], 10);
+      if (!(channel in knownChannels)) {
+        badChannel.push(channel);
+        return;
+      }
       if (!(sku in known)) {
-        bad.push(sku);
+        badSku.push(sku);
         return;
       }
       if (!qty || qty < 1) return;
-      const ex = demand.find((d) => d.sku === sku);
+      const ex = demand.find((d) => d.channel === channel && d.sku === sku);
       if (ex) ex.qty += qty;
-      else demand.push({ sku, qty });
+      else demand.push({ channel, sku, qty });
     });
-  return { demand, bad };
+  return { demand, badSku, badChannel };
 }

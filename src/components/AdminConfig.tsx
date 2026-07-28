@@ -2,8 +2,7 @@ import { useStore } from "../lib/store";
 import { Button, Card } from "./Ui";
 
 export function AdminConfig() {
-  const { channelRules, updateChannelRule, facilityPriority, setFacilityPriority, fetchTime, setFetchTime } =
-    useStore();
+  const { channelRules, updateChannelRule, facilityPriority, setFacilityPriority } = useStore();
 
   function move(i: number, dir: -1 | 1) {
     const p = [...facilityPriority];
@@ -104,21 +103,6 @@ export function AdminConfig() {
               </div>
             ))}
           </div>
-        </Card>
-
-        <Card title="Auto-fetch schedule">
-          <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-            Hourly fetch starts at
-          </label>
-          <input
-            type="time"
-            value={fetchTime}
-            onChange={(e) => setFetchTime(e.target.value)}
-            className="mt-1 rounded-lg border border-slate-300 p-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-          />
-          <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-            The report is fetched every hour from this time (24/7). Live fetch activates in Phase B (Supabase).
-          </p>
         </Card>
       </div>
     </div>

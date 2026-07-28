@@ -4,7 +4,7 @@ import { DemandPanel } from "./components/DemandPanel";
 import { InventoryPanel } from "./components/InventoryPanel";
 import { PerformancePanel } from "./components/PerformancePanel";
 import { PickerView } from "./components/PickerView";
-import { RegisterPanel } from "./components/RegisterPanel";
+import { SupervisorQueue } from "./components/SupervisorQueue";
 import { isSupabaseConfigured } from "./lib/supabaseClient";
 import { useStore } from "./lib/store";
 import type { Role } from "./lib/types";
@@ -97,14 +97,13 @@ export default function App() {
         {role === "planner" && (
           <div className="mt-4 space-y-4">
             <DemandPanel />
-            <RegisterPanel />
             <PerformancePanel />
             <InventoryPanel />
           </div>
         )}
         {role === "supervisor" && (
           <div className="mt-4 space-y-4">
-            <RegisterPanel order="sequential" />
+            <SupervisorQueue />
             <InventoryPanel />
           </div>
         )}
