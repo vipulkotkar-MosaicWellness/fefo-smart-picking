@@ -112,6 +112,9 @@ function AppShell() {
           <div className="mt-4 space-y-4">
             <AdminConfig />
             <AdminUsers />
+            <DemandPanel />
+            <SupervisorQueue />
+            <PerformancePanel />
             <PicklistRepository />
             <InventoryPanel />
           </div>
