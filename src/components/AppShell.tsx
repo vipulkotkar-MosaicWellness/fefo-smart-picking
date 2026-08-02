@@ -15,12 +15,43 @@ function groupBySection(items: NavItem[]): [NavItem["section"], NavItem[]][] {
     .filter(([, group]) => group.length > 0);
 }
 
+function SidebarButton({
+  item,
+  active,
+  badge,
+  onClick,
+}: {
+  item: NavItem;
+  active: boolean;
+  badge?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-current={active ? "page" : undefined}
+      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
+        active ? "bg-[var(--fefo-teal-700)] text-white" : "text-teal-100/90 hover:bg-white/10"
+      }`}
+    >
+      <span className="w-4 text-center" aria-hidden>
+        {item.icon}
+      </span>
+      <span className="flex-1">{item.label}</span>
+      {badge != null && badge > 0 && (
+        <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] font-bold">{badge}</span>
+      )}
+    </button>
+  );
+}
+
 export function AppShell({
   navItems,
   activeView,
   onNavigate,
   breadcrumb,
   headerActions,
+  badges,
   children,
 }: {
   navItems: NavItem[];
@@ -28,6 +59,7 @@ export function AppShell({
   onNavigate: (id: ViewId) => void;
   breadcrumb: string;
   headerActions: ReactNode;
+  badges?: Partial<Record<ViewId, number>>;
   children: ReactNode;
 }) {
   const sections = groupBySection(navItems);
@@ -61,16 +93,13 @@ export function AppShell({
                 </p>
                 <div className="space-y-0.5">
                   {items.map((item) => (
-                    <button
+                    <SidebarButton
                       key={item.id}
+                      item={item}
+                      active={activeView === item.id}
+                      badge={badges?.[item.id]}
                       onClick={() => onNavigate(item.id)}
-                      aria-current={activeView === item.id ? "page" : undefined}
-                      className={`w-full rounded-lg px-3 py-2.5 text-left text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
-                        activeView === item.id ? "bg-[var(--fefo-teal-700)] text-white" : "text-teal-100/90 hover:bg-white/10"
-                      }`}
-                    >
-                      {item.label}
-                    </button>
+                    />
                   ))}
                 </div>
               </div>
@@ -83,16 +112,13 @@ export function AppShell({
                 {SECTION_LABEL.settings}
               </p>
               {settingsItems.map((item) => (
-                <button
+                <SidebarButton
                   key={item.id}
+                  item={item}
+                  active={activeView === item.id}
+                  badge={badges?.[item.id]}
                   onClick={() => onNavigate(item.id)}
-                  aria-current={activeView === item.id ? "page" : undefined}
-                  className={`w-full rounded-lg px-3 py-2.5 text-left text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
-                    activeView === item.id ? "bg-[var(--fefo-teal-700)] text-white" : "text-teal-100/90 hover:bg-white/10"
-                  }`}
-                >
-                  {item.label}
-                </button>
+                />
               ))}
             </div>
           )}
@@ -110,11 +136,17 @@ export function AppShell({
             key={item.id}
             onClick={() => onNavigate(item.id)}
             aria-current={activeView === item.id ? "page" : undefined}
-            className={`flex min-h-14 flex-col items-center justify-center gap-0.5 py-1.5 text-[10px] font-semibold ${
+            className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 py-1.5 text-[10px] font-semibold ${
               activeView === item.id ? "bg-[var(--fefo-teal-700)] text-white" : "text-teal-100/80"
             }`}
           >
-            {item.label}
+            <span aria-hidden>{item.icon}</span>
+            <span>{item.label}</span>
+            {badges?.[item.id] != null && badges[item.id]! > 0 && (
+              <span className="absolute right-3 top-1 rounded-full bg-white/20 px-1 text-[9px] font-bold">
+                {badges[item.id]}
+              </span>
+            )}
           </button>
         ))}
       </nav>

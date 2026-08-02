@@ -5,15 +5,16 @@ export type ViewId = "demand" | "supervisor" | "picker" | "inventory" | "admin";
 export interface NavItem {
   id: ViewId;
   label: string;
+  icon: string;
   section: "workflow" | "shared" | "settings";
 }
 
 const ALL_ITEMS: (NavItem & { roles: Role[] })[] = [
-  { id: "demand", label: "Demand Planner", section: "workflow", roles: ["planner", "admin", "super_admin"] },
-  { id: "supervisor", label: "Picking Supervisor", section: "workflow", roles: ["planner", "admin", "super_admin"] },
-  { id: "picker", label: "Picker", section: "workflow", roles: ["picker"] },
-  { id: "inventory", label: "Inventory", section: "shared", roles: ["planner", "admin", "super_admin"] },
-  { id: "admin", label: "Admin", section: "settings", roles: ["admin", "super_admin"] },
+  { id: "demand", label: "Demand Planner", icon: "⇧", section: "workflow", roles: ["planner", "admin", "super_admin"] },
+  { id: "supervisor", label: "Picking Supervisor", icon: "▦", section: "workflow", roles: ["planner", "admin", "super_admin"] },
+  { id: "picker", label: "Picker", icon: "▣", section: "workflow", roles: ["picker"] },
+  { id: "inventory", label: "Inventory", icon: "⌕", section: "shared", roles: ["planner", "admin", "super_admin"] },
+  { id: "admin", label: "Admin", icon: "⚙", section: "settings", roles: ["admin", "super_admin"] },
 ];
 
 /** Nav items a given role may see, in the app's canonical order. */

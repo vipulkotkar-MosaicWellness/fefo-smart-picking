@@ -13,7 +13,12 @@ import { SupervisorQueue } from "./components/SupervisorQueue";
 import { useAuth } from "./lib/authStore";
 import { getNavigation, type ViewId } from "./lib/navigation";
 import { isSupabaseConfigured } from "./lib/supabaseClient";
-import { useStore } from "./lib/store";
+import { allFacilityLists, useStore } from "./lib/store";
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
+}
 
 const VIEW_LABEL: Record<ViewId, string> = {
   demand: "Demand Planner",
@@ -32,6 +37,13 @@ function HeaderActions({ role, displayName, onSignOut }: { role: string; display
       <span className="hidden text-xs text-[var(--fefo-muted)] md:inline dark:text-slate-400">
         <b className="text-[var(--fefo-text)] dark:text-slate-100">{displayName}</b> ·{" "}
         <span className="capitalize">{role === "planner" ? "Planner / Supervisor" : role.replace("_", " ")}</span>
+      </span>
+      <span
+        aria-hidden
+        title={displayName}
+        className="hidden h-9 w-9 items-center justify-center rounded-full bg-[var(--fefo-teal-950)] text-xs font-bold text-white sm:flex"
+      >
+        {initialsOf(displayName)}
       </span>
       <button
         onClick={onSignOut}
@@ -114,10 +126,14 @@ function OperationsToolbar() {
 }
 
 function Workspace() {
-  const { loadFromSupabase, loadTasks, startTasksRealtime, loadPickers } = useStore();
+  const { loadFromSupabase, loadTasks, startTasksRealtime, loadPickers, tasks } = useStore();
   const { profile, signOut } = useAuth();
   const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
   const isAdminTier = role === "admin" || role === "super_admin";
+
+  const unassignedCount = allFacilityLists(tasks).filter(
+    (f) => f.status !== "completed" && !f.lines.some((l) => l.picker),
+  ).length;
 
   const navItems = useMemo(() => getNavigation(role), [role]);
   const [activeView, setActiveView] = useState<ViewId>(navItems[0]?.id ?? "picker");
@@ -162,6 +178,7 @@ function Workspace() {
       onNavigate={setActiveView}
       breadcrumb={VIEW_LABEL[activeView]}
       headerActions={<HeaderActions role={role} displayName={profile!.display_name} onSignOut={() => void signOut()} />}
+      badges={{ supervisor: unassignedCount }}
     >
       <OperationsToolbar />
       {activeView === "demand" && (
