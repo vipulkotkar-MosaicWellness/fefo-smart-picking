@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AdminConfig } from "./components/AdminConfig";
-import { MosaicLogo } from "./components/brand/MosaicLogo";
 import { AdminUsers } from "./components/AdminUsers";
+import { AppShell } from "./components/AppShell";
+import { MosaicLogo } from "./components/brand/MosaicLogo";
 import { AuthGate, PendingApproval } from "./components/AuthGate";
 import { DemandPanel } from "./components/DemandPanel";
 import { InventoryPanel } from "./components/InventoryPanel";
@@ -10,10 +11,11 @@ import { PickerView } from "./components/PickerView";
 import { PicklistRepository } from "./components/PicklistRepository";
 import { SupervisorQueue } from "./components/SupervisorQueue";
 import { useAuth } from "./lib/authStore";
+import { getNavigation, type ViewId } from "./lib/navigation";
 import { isSupabaseConfigured } from "./lib/supabaseClient";
 import { useStore } from "./lib/store";
 
-function AppShell() {
+function Workspace() {
   const {
     locations, visibleFacilities, toggleFacility, anyOpen, tasks, lastSync, syncStock, syncing, notice,
     loadFromSupabase, loadTasks, startTasksRealtime, loadPickers,
@@ -21,6 +23,13 @@ function AppShell() {
   const { profile, signOut } = useAuth();
   const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
   const isAdminTier = role === "admin" || role === "super_admin";
+
+  const navItems = useMemo(() => getNavigation(role), [role]);
+  const [activeView, setActiveView] = useState<ViewId>(navItems[0]?.id ?? "picker");
+  useEffect(() => {
+    if (!navItems.some((item) => item.id === activeView)) setActiveView(navItems[0]?.id ?? "picker");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
 
   useEffect(() => {
     void loadFromSupabase();
@@ -114,27 +123,33 @@ function AppShell() {
           )}
         </header>
 
-        {isAdminTier && (
-          <div className="mt-4 space-y-4">
-            <AdminConfig />
-            <AdminUsers />
-            <DemandPanel />
-            <SupervisorQueue />
-            <PerformancePanel />
-            <PicklistRepository />
-            <InventoryPanel />
+        {role === "picker" ? (
+          <div className="mt-4"><PickerView /></div>
+        ) : (
+          <div className="mt-4">
+            <AppShell navItems={navItems} activeView={activeView} onNavigate={setActiveView}>
+              {activeView === "demand" && (
+                <div className="space-y-4">
+                  <DemandPanel />
+                  <PerformancePanel />
+                </div>
+              )}
+              {activeView === "supervisor" && (
+                <div className="space-y-4">
+                  <SupervisorQueue />
+                  <PicklistRepository />
+                </div>
+              )}
+              {activeView === "inventory" && <InventoryPanel />}
+              {activeView === "admin" && isAdminTier && (
+                <div className="space-y-4">
+                  <AdminConfig />
+                  <AdminUsers />
+                </div>
+              )}
+            </AppShell>
           </div>
         )}
-        {role === "planner" && (
-          <div className="mt-4 space-y-4">
-            <DemandPanel />
-            <SupervisorQueue />
-            <PerformancePanel />
-            <PicklistRepository />
-            <InventoryPanel />
-          </div>
-        )}
-        {role === "picker" && <div className="mt-4"><PickerView /></div>}
 
         <p className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">FEFO Smart Picking · React + Supabase-ready · Mosaic Wellness</p>
       </div>
@@ -159,7 +174,7 @@ export default function App() {
   }
   if (!userId) return <AuthGate />;
   if (!profile || profile.role === "pending") return <PendingApproval email={profile?.email ?? ""} />;
-  return <AppShell />;
+  return <Workspace />;
 }
 
 function LocalDemoNotice() {
