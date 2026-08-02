@@ -5,12 +5,14 @@
 --
 -- What this sets up:
 --   - Real logins (Supabase Auth) with roles: super_admin, admin, planner,
---     supervisor, picker, pending.
+--     picker, pending.
 --   - super_admin  — exactly you, the first person who ever signs up. Can
 --                    nominate new Admins by email, and do anything.
 --   - admin        — nominated by a super_admin (pre-authorized by email
---                    before they even sign up). Can assign Supervisor/Picker
+--                    before they even sign up). Can assign Planner/Picker
 --                    to others, but CANNOT create more Admins.
+--   - planner      — collated Planner + Supervisor: creates picklists AND
+--                    receives/assigns them to Pickers.
 --   - Picking tasks stored as one JSONB row per task in a shared `tasks`
 --     table with Realtime, so every logged-in user's queue updates live.
 
@@ -26,7 +28,7 @@ create table if not exists profiles (
   email        text not null,
   display_name text not null,
   role         text not null default 'pending'
-               check (role in ('pending','super_admin','admin','planner','supervisor','picker')),
+               check (role in ('pending','super_admin','admin','planner','picker')),
   created_at   timestamptz not null default now()
 );
 
@@ -84,16 +86,16 @@ alter table profiles enable row level security;
 create policy "read all profiles" on profiles for select to authenticated using (true);
 
 -- Tiered role assignment: super_admin can set anyone's role to anything;
--- admin can only touch pending/supervisor/picker rows, and only set them to
--- supervisor or picker — never admin/super_admin.
+-- admin can only touch pending/planner/picker rows, and only set them to
+-- planner or picker — never admin/super_admin.
 create policy "tiered role assignment" on profiles for update to authenticated
   using (
     current_role_name() = 'super_admin'
-    or (current_role_name() = 'admin' and role in ('pending', 'supervisor', 'picker'))
+    or (current_role_name() = 'admin' and role in ('pending', 'planner', 'picker'))
   )
   with check (
     current_role_name() = 'super_admin'
-    or (current_role_name() = 'admin' and role in ('supervisor', 'picker'))
+    or (current_role_name() = 'admin' and role in ('planner', 'picker'))
   );
 
 alter table admin_invites enable row level security;
@@ -118,8 +120,8 @@ create policy "read tasks" on tasks for select to authenticated using (true);
 create policy "planner admin create tasks" on tasks for insert to authenticated
   with check (current_role_name() in ('planner', 'admin', 'super_admin'));
 create policy "assigned roles update tasks" on tasks for update to authenticated
-  using (current_role_name() in ('planner', 'supervisor', 'admin', 'super_admin', 'picker'))
-  with check (current_role_name() in ('planner', 'supervisor', 'admin', 'super_admin', 'picker'));
+  using (current_role_name() in ('planner', 'admin', 'super_admin', 'picker'))
+  with check (current_role_name() in ('planner', 'admin', 'super_admin', 'picker'));
 
 -- Keep updated_at current on every change (used to order/refresh the repository view).
 create or replace function touch_tasks_updated_at() returns trigger as $$

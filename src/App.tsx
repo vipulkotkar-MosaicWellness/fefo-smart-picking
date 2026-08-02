@@ -18,7 +18,7 @@ function AppShell() {
     loadFromSupabase, loadTasks, startTasksRealtime, loadPickers,
   } = useStore();
   const { profile, signOut } = useAuth();
-  const role = profile!.role as "super_admin" | "admin" | "planner" | "supervisor" | "picker";
+  const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
   const isAdminTier = role === "admin" || role === "super_admin";
 
   useEffect(() => {
@@ -49,7 +49,8 @@ function AppShell() {
               </span>
               <div className="flex items-center gap-2 text-xs">
                 <span className="opacity-90">
-                  Signed in as <b>{profile!.display_name}</b> · <span className="capitalize">{role.replace("_", " ")}</span>
+                  Signed in as <b>{profile!.display_name}</b> ·{" "}
+                  <span className="capitalize">{role === "planner" ? "Planner / Supervisor" : role.replace("_", " ")}</span>
                 </span>
                 <button onClick={() => void signOut()} className="rounded-md bg-white/20 px-2.5 py-1 font-semibold hover:bg-white/30">
                   Sign out
@@ -118,13 +119,8 @@ function AppShell() {
         {role === "planner" && (
           <div className="mt-4 space-y-4">
             <DemandPanel />
-            <PerformancePanel />
-            <InventoryPanel />
-          </div>
-        )}
-        {role === "supervisor" && (
-          <div className="mt-4 space-y-4">
             <SupervisorQueue />
+            <PerformancePanel />
             <PicklistRepository />
             <InventoryPanel />
           </div>

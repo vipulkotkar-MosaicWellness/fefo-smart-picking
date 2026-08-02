@@ -10,8 +10,12 @@ interface Invite {
   created_at: string;
 }
 
-const ADMIN_ROLE_OPTIONS = ["pending", "supervisor", "picker"] as const;
-const SUPER_ADMIN_ROLE_OPTIONS = ["pending", "super_admin", "admin", "supervisor", "picker"] as const;
+const ADMIN_ROLE_OPTIONS = ["pending", "planner", "picker"] as const;
+const SUPER_ADMIN_ROLE_OPTIONS = ["pending", "super_admin", "admin", "planner", "picker"] as const;
+
+const ROLE_LABELS: Record<string, string> = {
+  planner: "Planner / Supervisor",
+};
 
 export function AdminUsers() {
   const myRole = useAuth((s) => s.profile?.role);
@@ -150,11 +154,11 @@ export function AdminUsers() {
                         className="rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-900"
                       >
                         {roleOptions.map((r) => (
-                          <option key={r} value={r}>{r.replace("_", " ")}</option>
+                          <option key={r} value={r}>{ROLE_LABELS[r] ?? r.replace("_", " ")}</option>
                         ))}
                       </select>
                     ) : (
-                      <Tag tone="info">{u.role.replace("_", " ")}</Tag>
+                      <Tag tone="info">{ROLE_LABELS[u.role] ?? u.role.replace("_", " ")}</Tag>
                     )}
                   </td>
                 </tr>

@@ -58,7 +58,7 @@ export interface FacilityPicklist {
   lines: PickLine[];
 }
 
-export type Role = "super_admin" | "admin" | "planner" | "supervisor" | "picker";
+export type Role = "super_admin" | "admin" | "planner" | "picker";
 
 /** Demand that could not be met at any facility. */
 export interface Shortfall {
