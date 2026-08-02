@@ -1,17 +1,21 @@
 /* Visual tokens for the FEFO branded redesign. Layered under the existing
    Tailwind utility classes — not a replacement for them. */
 :root {
-  --fefo-teal-900: #083f38;
+  --fefo-teal-950: #063a33;
+  --fefo-teal-900: #084b42;
   --fefo-teal-700: #087f6d;
-  --fefo-teal-50: #e8f7f3;
+  --fefo-teal-100: #d9f2eb;
+  --fefo-teal-50: #eef9f6;
   --fefo-bg: #f3f7f6;
   --fefo-surface: #ffffff;
-  --fefo-line: #dfe8e5;
-  --fefo-text: #163e37;
-  --fefo-muted: #6e827d;
-  --fefo-danger: #cf4545;
-  --fefo-warning: #a46b00;
-  --fefo-success: #087f6d;
-  --fefo-radius: 12px;
-  --fefo-focus: #1f6feb;
+  --fefo-line: #dce7e4;
+  --fefo-text: #153c35;
+  --fefo-muted: #687d77;
+  --fefo-danger: #c94242;
+  --fefo-danger-bg: #fceaea;
+  --fefo-warning: #946300;
+  --fefo-warning-bg: #fff2cf;
+  --fefo-radius: 14px;
+  --fefo-shadow: 0 3px 12px rgba(18, 64, 55, 0.06);
+  --fefo-focus: #3b82f6;
 }

@@ -15,11 +15,106 @@ import { getNavigation, type ViewId } from "./lib/navigation";
 import { isSupabaseConfigured } from "./lib/supabaseClient";
 import { useStore } from "./lib/store";
 
+const VIEW_LABEL: Record<ViewId, string> = {
+  demand: "Demand Planner",
+  supervisor: "Picking Supervisor",
+  picker: "Picker",
+  inventory: "Inventory",
+  admin: "Admin",
+};
+
+function HeaderActions({ role, displayName, onSignOut }: { role: string; displayName: string; onSignOut: () => void }) {
+  return (
+    <>
+      <span className="hidden rounded-full bg-[var(--fefo-teal-50)] px-2.5 py-1 text-[11px] font-semibold text-[var(--fefo-teal-700)] sm:inline-block dark:bg-slate-700 dark:text-teal-300">
+        {isSupabaseConfigured ? "Supabase connected" : "Local mode"}
+      </span>
+      <span className="hidden text-xs text-[var(--fefo-muted)] md:inline dark:text-slate-400">
+        <b className="text-[var(--fefo-text)] dark:text-slate-100">{displayName}</b> ·{" "}
+        <span className="capitalize">{role === "planner" ? "Planner / Supervisor" : role.replace("_", " ")}</span>
+      </span>
+      <button
+        onClick={onSignOut}
+        className="rounded-md border border-[var(--fefo-line)] px-2.5 py-1.5 text-xs font-semibold text-[var(--fefo-text)] hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700"
+      >
+        Sign out
+      </button>
+    </>
+  );
+}
+
+function OperationsToolbar() {
+  const { locations, visibleFacilities, toggleFacility, anyOpen, tasks, lastSync, syncStock, syncing, notice } = useStore();
+  const openNos = tasks.filter((t) => t.facilities.some((f) => f.lines.some((l) => l.picked == null))).map((t) => t.no).join(", ");
+  const syncLabel = new Date(lastSync).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+
+  return (
+    <div className="rounded-2xl border border-[var(--fefo-line)] bg-white p-3.5 shadow-[var(--fefo-shadow)] dark:border-slate-700 dark:bg-slate-800">
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs font-semibold text-[var(--fefo-muted)] dark:text-slate-400">Show inventory:</span>
+          {locations().map((f) => (
+            <label key={f} className="flex cursor-pointer items-center gap-1.5 text-xs">
+              <input
+                type="checkbox"
+                checked={visibleFacilities.includes(f)}
+                onChange={() => toggleFacility(f)}
+                className="h-3.5 w-3.5 accent-[var(--fefo-teal-700)]"
+              />
+              {f}
+            </label>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-2 text-xs">
+          <span className="text-[var(--fefo-muted)] dark:text-slate-400">
+            Stock synced from email · <b className="text-[var(--fefo-text)] dark:text-slate-200">{syncLabel}</b>
+          </span>
+          <button
+            onClick={syncStock}
+            disabled={syncing}
+            className="rounded-md bg-[var(--fefo-teal-700)] px-2.5 py-1.5 font-semibold text-white hover:bg-[var(--fefo-teal-900)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {syncing ? "Syncing…" : "Sync now"}
+          </button>
+        </div>
+      </div>
+
+      {notice && (
+        <div
+          className={`mt-2.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${
+            notice.startsWith("✗")
+              ? "bg-[var(--fefo-danger-bg)] text-rose-900"
+              : notice.startsWith("⚠")
+                ? "bg-[var(--fefo-warning-bg)] text-amber-900"
+                : "bg-[var(--fefo-teal-50)] text-[var(--fefo-teal-700)]"
+          }`}
+        >
+          {notice}
+        </div>
+      )}
+
+      <div
+        className={`mt-2.5 rounded-lg px-3 py-2 text-xs font-semibold ${
+          anyOpen() ? "bg-[var(--fefo-warning-bg)] text-amber-900" : "bg-[var(--fefo-teal-50)] text-[var(--fefo-teal-700)]"
+        }`}
+      >
+        {anyOpen() ? (
+          <>
+            ⚠ Inventory feed <b>FROZEN</b> — open task(s): {openNos}. New stock will not load from the email until all picking is
+            complete.
+          </>
+        ) : (
+          <>
+            Inventory feed <b>live</b> — stock refreshes from the auto-generated email.
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Workspace() {
-  const {
-    locations, visibleFacilities, toggleFacility, anyOpen, tasks, lastSync, syncStock, syncing, notice,
-    loadFromSupabase, loadTasks, startTasksRealtime, loadPickers,
-  } = useStore();
+  const { loadFromSupabase, loadTasks, startTasksRealtime, loadPickers } = useStore();
   const { profile, signOut } = useAuth();
   const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
   const isAdminTier = role === "admin" || role === "super_admin";
@@ -40,120 +135,55 @@ function Workspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const openNos = tasks.filter((t) => t.facilities.some((f) => f.lines.some((l) => l.picked == null))).map((t) => t.no).join(", ");
-  const ops = role !== "picker";
-  const syncLabel = new Date(lastSync).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  if (role === "picker") {
+    return (
+      <div className="min-h-screen bg-[var(--fefo-bg)] dark:bg-slate-900">
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-2.5 border-b border-[var(--fefo-line)] bg-white px-4 dark:border-slate-700 dark:bg-slate-800">
+          <MosaicLogo compact />
+          <span className="text-sm font-extrabold tracking-tight text-[var(--fefo-text)] dark:text-slate-100">FEFO Pick</span>
+          <button
+            onClick={() => void signOut()}
+            className="ml-auto rounded-md border border-[var(--fefo-line)] px-2.5 py-1.5 text-xs font-semibold text-[var(--fefo-text)] hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            Sign out
+          </button>
+        </header>
+        <div className="p-4">
+          <PickerView />
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-full bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
-      <div className="mx-auto max-w-6xl p-4">
-        <header className="rounded-xl bg-gradient-to-br from-teal-700 to-teal-900 p-5 text-white shadow">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-white/95 px-2.5 py-1.5 shadow-sm">
-                <MosaicLogo />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold">FEFO Smart Picking</h1>
-                <p className="text-xs opacity-90">Multi-facility waterfall · picking tasks · picker assignment · round-2</p>
-              </div>
-            </div>
-            <div className="flex flex-col items-end gap-2">
-              <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold">
-                {isSupabaseConfigured ? "Supabase connected" : "Local mode (browser)"}
-              </span>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="opacity-90">
-                  Signed in as <b>{profile!.display_name}</b> ·{" "}
-                  <span className="capitalize">{role === "planner" ? "Planner / Supervisor" : role.replace("_", " ")}</span>
-                </span>
-                <button onClick={() => void signOut()} className="rounded-md bg-white/20 px-2.5 py-1 font-semibold hover:bg-white/30">
-                  Sign out
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {ops && (
-            <div className="mt-3 flex flex-wrap items-center gap-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="text-xs font-semibold opacity-90">Show inventory:</span>
-                {locations().map((f) => (
-                  <label key={f} className="flex cursor-pointer items-center gap-1.5 text-xs">
-                    <input type="checkbox" checked={visibleFacilities.includes(f)} onChange={() => toggleFacility(f)} className="h-3.5 w-3.5 accent-white" />
-                    {f}
-                  </label>
-                ))}
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="opacity-90">Stock synced from email · <b>{syncLabel}</b></span>
-                <button
-                  onClick={syncStock}
-                  disabled={syncing}
-                  className="rounded-md bg-white/20 px-2.5 py-1 font-semibold hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {syncing ? "Syncing…" : "Sync now"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {ops && notice && (
-            <div
-              className={`mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                notice.startsWith("✗")
-                  ? "bg-rose-100 text-rose-900"
-                  : notice.startsWith("⚠")
-                    ? "bg-amber-100 text-amber-900"
-                    : "bg-white/15 text-white"
-              }`}
-            >
-              {notice}
-            </div>
-          )}
-
-          {ops && (
-            <div className={`mt-3 rounded-lg px-3 py-2 text-xs font-semibold ${anyOpen() ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-900"}`}>
-              {anyOpen() ? (
-                <>⚠ Inventory feed <b>FROZEN</b> — open task(s): {openNos}. New stock will not load from the email until all picking is complete.</>
-              ) : (
-                <>Inventory feed <b>live</b> — stock refreshes from the auto-generated email.</>
-              )}
-            </div>
-          )}
-        </header>
-
-        {role === "picker" ? (
-          <div className="mt-4"><PickerView /></div>
-        ) : (
-          <div className="mt-4">
-            <AppShell navItems={navItems} activeView={activeView} onNavigate={setActiveView}>
-              {activeView === "demand" && (
-                <div className="space-y-4">
-                  <DemandPanel />
-                  <PerformancePanel />
-                </div>
-              )}
-              {activeView === "supervisor" && (
-                <div className="space-y-4">
-                  <SupervisorQueue />
-                  <PicklistRepository />
-                </div>
-              )}
-              {activeView === "inventory" && <InventoryPanel />}
-              {activeView === "admin" && isAdminTier && (
-                <div className="space-y-4">
-                  <AdminConfig />
-                  <AdminUsers />
-                </div>
-              )}
-            </AppShell>
-          </div>
-        )}
-
-        <p className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">FEFO Smart Picking · React + Supabase-ready · Mosaic Wellness</p>
-      </div>
-    </div>
+    <AppShell
+      navItems={navItems}
+      activeView={activeView}
+      onNavigate={setActiveView}
+      breadcrumb={VIEW_LABEL[activeView]}
+      headerActions={<HeaderActions role={role} displayName={profile!.display_name} onSignOut={() => void signOut()} />}
+    >
+      <OperationsToolbar />
+      {activeView === "demand" && (
+        <div className="space-y-4">
+          <DemandPanel />
+          <PerformancePanel />
+        </div>
+      )}
+      {activeView === "supervisor" && (
+        <div className="space-y-4">
+          <SupervisorQueue />
+          <PicklistRepository />
+        </div>
+      )}
+      {activeView === "inventory" && <InventoryPanel />}
+      {activeView === "admin" && isAdminTier && (
+        <div className="space-y-4">
+          <AdminConfig />
+          <AdminUsers />
+        </div>
+      )}
+    </AppShell>
   );
 }
 
@@ -170,7 +200,7 @@ export default function App() {
     return <LocalDemoNotice />;
   }
   if (loading) {
-    return <div className="flex min-h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">Loading…</div>;
+    return <div className="flex min-h-screen items-center justify-center text-sm text-slate-500 dark:text-slate-400">Loading…</div>;
   }
   if (!userId) return <AuthGate />;
   if (!profile || profile.role === "pending") return <PendingApproval email={profile?.email ?? ""} />;
@@ -179,7 +209,7 @@ export default function App() {
 
 function LocalDemoNotice() {
   return (
-    <div className="flex min-h-full items-center justify-center bg-slate-100 p-4 dark:bg-slate-900">
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4 dark:bg-slate-900">
       <div className="max-w-sm rounded-xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
         Supabase isn't configured, so logins are unavailable — this build is running in local demo mode only.
       </div>
