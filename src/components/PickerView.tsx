@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useAuth } from "../lib/authStore";
 import { criticalPathSort } from "../lib/engine";
 import { monLabel } from "../lib/format";
 import { allFacilityLists, useStore } from "../lib/store";
@@ -39,11 +40,12 @@ function Scanner({ onDetect, onClose }: { onDetect: (code: string) => void; onCl
 }
 
 export function PickerView() {
-  const { tasks, currentPicker, applyPicks } = useStore();
+  const { tasks, applyPicks } = useStore();
+  const myName = useAuth((s) => s.profile?.display_name ?? "");
 
   // facility picklists that have lines assigned to me and still to pick
   const myLists = allFacilityLists(tasks)
-    .map((f) => ({ f, mine: f.lines.filter((l) => l.picker === currentPicker && l.picked == null) }))
+    .map((f) => ({ f, mine: f.lines.filter((l) => l.picker === myName && l.picked == null) }))
     .filter((x) => x.mine.length > 0);
 
   const [selectedNo, setSelectedNo] = useState<string | null>(null);
@@ -65,7 +67,7 @@ export function PickerView() {
     setNfMode(false);
     if (idx + 1 < lines.length) { setIdx(idx + 1); return; }
     if (f) {
-      applyPicks(f.no, nextNf);
+      void applyPicks(f.no, nextNf);
       const picked = lines.reduce((s, l) => s + (l.qty - (nextNf[l.rid] ?? 0)), 0);
       const nf = lines.reduce((s, l) => s + (nextNf[l.rid] ?? 0), 0);
       setDone({ facility: f.facility, picked, nf });
@@ -103,7 +105,7 @@ export function PickerView() {
       <div className="mx-auto max-w-md p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-teal-800 dark:text-teal-300">My picklists</h2>
-          <span className="text-xs text-slate-500 dark:text-slate-400">Picker: <b>{currentPicker}</b></span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">Picker: <b>{myName}</b></span>
         </div>
         {myLists.length === 0 ? (
           <p className="rounded-xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800">

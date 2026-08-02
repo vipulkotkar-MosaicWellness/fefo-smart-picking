@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent } from "react";
+import { useAuth } from "../lib/authStore";
 import { CHANNELS } from "../lib/channels";
 import { downloadCsv } from "../lib/format";
 import { parseDemandCsv } from "../lib/sampleData";
@@ -12,7 +13,18 @@ const TEMPLATE = "Channel,SKU Code,Qty\nBlinkit,MWMMHRP.0001.AAAA.B0_N,50\nAmazo
 
 export function DemandPanel() {
   const { channelRules, skus, demand, setDemand, removeDemand, generate } = useStore();
+  const userId = useAuth((s) => s.userId);
   const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function onGenerate() {
+    setBusy(true);
+    try {
+      await generate(userId);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function parse() {
     const { demand: d, badSku, badChannel } = parseDemandCsv(text, skus, channelRules);
@@ -84,8 +96,8 @@ export function DemandPanel() {
       </div>
 
       <div className="mt-2.5">
-        <Button onClick={generate} disabled={demand.length === 0}>
-          Generate picklist{channelCount > 1 ? `s (${channelCount} channels)` : ""}
+        <Button onClick={() => void onGenerate()} disabled={demand.length === 0 || busy}>
+          {busy ? "Generating…" : `Generate picklist${channelCount > 1 ? `s (${channelCount} channels)` : ""}`}
         </Button>
       </div>
     </Card>

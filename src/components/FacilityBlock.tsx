@@ -2,6 +2,7 @@ import { useState, type ChangeEvent } from "react";
 import { criticalPathSort } from "../lib/engine";
 import { downloadCsv, monLabel } from "../lib/format";
 import { useStore } from "../lib/store";
+import { uniwareCsv } from "../lib/uniwareExport";
 import type { FacilityPicklist } from "../lib/types";
 import { Button, Tag } from "./Ui";
 
@@ -25,11 +26,9 @@ export function FacilityBlock({ f }: { f: FacilityPicklist }) {
     navigator.clipboard.writeText(txt).then(() => alert("Picklist copied."), () => alert("Copy blocked; use CSV."));
   }
   function csv() {
-    downloadCsv(
-      "Sr #,Location,SKU Code,SKU Name,Qty,Picker\n" +
-        shareRows().map((r) => `${r.sr},${r.bin},${r.sku},"${r.name}",${r.qty},${r.picker}`).join("\n") + "\n",
-      `${f.no}.csv`,
-    );
+    // Uniware-import-ready format: SKU, Qty, Inventory Type, Shelf Code, Unit
+    // Price (from the COGS sheet), Batch Code, Force Allocate.
+    downloadCsv(uniwareCsv(lines), `${f.no}.csv`);
   }
   function print() {
     const html =
@@ -46,13 +45,13 @@ export function FacilityBlock({ f }: { f: FacilityPicklist }) {
     const file = e.target.files?.[0];
     if (!file) return;
     const r = new FileReader();
-    r.onload = () => uploadAssignments(f.no, String(r.result));
+    r.onload = () => void uploadAssignments(f.no, String(r.result));
     r.readAsText(file);
   }
   function complete() {
     const results: Record<number, number> = {};
     lines.forEach((l) => (results[l.rid] = nf[l.rid] ?? 0));
-    applyPicks(f.no, results);
+    void applyPicks(f.no, results);
   }
 
   return (
@@ -78,7 +77,7 @@ export function FacilityBlock({ f }: { f: FacilityPicklist }) {
             value={assignTo}
             onChange={(e) => {
               setAssignTo(e.target.value);
-              if (e.target.value) assignAll(f.no, e.target.value);
+              if (e.target.value) void assignAll(f.no, e.target.value);
             }}
             className="rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-800"
           >
@@ -130,7 +129,7 @@ export function FacilityBlock({ f }: { f: FacilityPicklist }) {
                   {open ? (
                     <select
                       value={l.picker ?? ""}
-                      onChange={(e) => assignLine(l.rid, f.no, e.target.value)}
+                      onChange={(e) => void assignLine(l.rid, f.no, e.target.value)}
                       className="rounded border border-slate-300 p-1 text-[11px] dark:border-slate-600 dark:bg-slate-900"
                     >
                       <option value="">—</option>

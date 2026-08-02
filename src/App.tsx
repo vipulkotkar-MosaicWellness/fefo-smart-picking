@@ -1,31 +1,34 @@
 import { useEffect } from "react";
 import { AdminConfig } from "./components/AdminConfig";
+import { AdminUsers } from "./components/AdminUsers";
+import { AuthGate, PendingApproval } from "./components/AuthGate";
 import { DemandPanel } from "./components/DemandPanel";
 import { InventoryPanel } from "./components/InventoryPanel";
 import { PerformancePanel } from "./components/PerformancePanel";
 import { PickerView } from "./components/PickerView";
+import { PicklistRepository } from "./components/PicklistRepository";
 import { SupervisorQueue } from "./components/SupervisorQueue";
+import { useAuth } from "./lib/authStore";
 import { isSupabaseConfigured } from "./lib/supabaseClient";
 import { useStore } from "./lib/store";
-import type { Role } from "./lib/types";
 
-const ROLES: { key: Role; label: string }[] = [
-  { key: "admin", label: "Admin" },
-  { key: "planner", label: "Planner" },
-  { key: "supervisor", label: "Supervisor" },
-  { key: "picker", label: "Picker" },
-];
-
-export default function App() {
+function AppShell() {
   const {
     locations, visibleFacilities, toggleFacility, anyOpen, tasks, lastSync, syncStock, syncing, notice,
-    role, setRole, pickers, currentPicker, setCurrentPicker, loadFromSupabase,
+    loadFromSupabase, loadTasks, startTasksRealtime, loadPickers,
   } = useStore();
+  const { profile, signOut } = useAuth();
+  const role = profile!.role as "admin" | "planner" | "supervisor" | "picker";
 
-  // On load, pull live stock from Supabase (if configured); else the app keeps the snapshot.
   useEffect(() => {
     void loadFromSupabase();
-  }, [loadFromSupabase]);
+    void loadTasks();
+    void loadPickers();
+    const stop = startTasksRealtime();
+    return stop;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const openNos = tasks.filter((t) => t.facilities.some((f) => f.lines.some((l) => l.picked == null))).map((t) => t.no).join(", ");
   const ops = role !== "picker";
   const syncLabel = new Date(lastSync).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -43,12 +46,13 @@ export default function App() {
               <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold">
                 {isSupabaseConfigured ? "Supabase connected" : "Local mode (browser)"}
               </span>
-              <div className="inline-flex flex-wrap gap-1 rounded-lg bg-white/15 p-1">
-                {ROLES.map((r) => (
-                  <button key={r.key} onClick={() => setRole(r.key)} className={`cursor-pointer rounded-md px-3 py-1.5 text-xs font-semibold ${role === r.key ? "bg-white text-teal-900" : "text-white"}`}>
-                    {r.label}
-                  </button>
-                ))}
+              <div className="flex items-center gap-2 text-xs">
+                <span className="opacity-90">
+                  Signed in as <b>{profile!.display_name}</b> · <span className="capitalize">{role}</span>
+                </span>
+                <button onClick={() => void signOut()} className="rounded-md bg-white/20 px-2.5 py-1 font-semibold hover:bg-white/30">
+                  Sign out
+                </button>
               </div>
             </div>
           </div>
@@ -91,17 +95,6 @@ export default function App() {
             </div>
           )}
 
-          {role === "picker" && (
-            <div className="mt-3">
-              <label className="text-xs opacity-90">
-                <span className="mb-1 mr-2 font-semibold">You are picker</span>
-                <select value={currentPicker} onChange={(e) => setCurrentPicker(e.target.value)} className="min-w-40 rounded-lg border-0 bg-white p-2 text-sm text-slate-900">
-                  {pickers.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </label>
-            </div>
-          )}
-
           {ops && (
             <div className={`mt-3 rounded-lg px-3 py-2 text-xs font-semibold ${anyOpen() ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-900"}`}>
               {anyOpen() ? (
@@ -113,7 +106,14 @@ export default function App() {
           )}
         </header>
 
-        {role === "admin" && <div className="mt-4 space-y-4"><AdminConfig /><InventoryPanel /></div>}
+        {role === "admin" && (
+          <div className="mt-4 space-y-4">
+            <AdminConfig />
+            <AdminUsers />
+            <PicklistRepository />
+            <InventoryPanel />
+          </div>
+        )}
         {role === "planner" && (
           <div className="mt-4 space-y-4">
             <DemandPanel />
@@ -124,12 +124,43 @@ export default function App() {
         {role === "supervisor" && (
           <div className="mt-4 space-y-4">
             <SupervisorQueue />
+            <PicklistRepository />
             <InventoryPanel />
           </div>
         )}
         {role === "picker" && <div className="mt-4"><PickerView /></div>}
 
         <p className="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">FEFO Smart Picking · React + Supabase-ready · Mosaic Wellness</p>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const { loading, userId, profile, init } = useAuth();
+
+  useEffect(() => {
+    init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!isSupabaseConfigured) {
+    // Local/demo mode has no auth backend — nothing to gate.
+    return <LocalDemoNotice />;
+  }
+  if (loading) {
+    return <div className="flex min-h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">Loading…</div>;
+  }
+  if (!userId) return <AuthGate />;
+  if (!profile || profile.role === "pending") return <PendingApproval email={profile?.email ?? ""} />;
+  return <AppShell />;
+}
+
+function LocalDemoNotice() {
+  return (
+    <div className="flex min-h-full items-center justify-center bg-slate-100 p-4 dark:bg-slate-900">
+      <div className="max-w-sm rounded-xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+        Supabase isn't configured, so logins are unavailable — this build is running in local demo mode only.
       </div>
     </div>
   );

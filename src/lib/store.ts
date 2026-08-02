@@ -1,25 +1,24 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { CHANNELS } from "./channels";
+import { bucketCode, channelCode, CHANNELS } from "./channels";
 import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_PRIORITY, facilityCode } from "./facilities";
+import { PICKERS_DEFAULT, usePickers } from "./pickersStore";
 import { rowsFromTuples, type StockTuple } from "./sampleData";
 import { REAL_STOCK } from "./stockSnapshot";
 import { isSupabaseConfigured } from "./supabaseClient";
 import { fetchLastSync, fetchStock } from "./supabaseStock";
+import { fetchAllTasks, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
   ChannelRule,
   DemandLine,
   FacilityPicklist,
   PickingTask,
   PickLine,
-  Role,
   Shortfall,
   SkuInfo,
   StockRow,
 } from "./types";
-
-export const PICKERS_DEFAULT = ["Ravi", "Sunil", "Amit"];
 
 export function allFacilityLists(tasks: PickingTask[]): FacilityPicklist[] {
   return tasks.flatMap((t) => t.facilities);
@@ -48,10 +47,13 @@ function skusFromStock(stock: StockRow[]): Record<string, SkuInfo> {
   return s;
 }
 
-function taskNumber(seq: number): string {
+/** Picklist number = Channel Bucket + Channel + Date + Sequence, e.g. B2BE-AMAZON-260729-001. */
+function todayYmd(): string {
   const d = new Date();
-  const ymd = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  return `PT-${ymd}-${String(seq).padStart(3, "0")}`;
+  return `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+}
+function taskNumberPrefix(channel: string): string {
+  return `${bucketCode(channel)}-${channelCode(channel)}-${todayYmd()}-`;
 }
 
 /** Fill one SKU's need across facilities in priority order (FEFO + tolerance). */
@@ -97,6 +99,15 @@ function buildFacilityLists(
     }));
 }
 
+/** Merge a task update in: replaces the task if its `no` matches, else appends. */
+function mergeTask(tasks: PickingTask[], updated: PickingTask): PickingTask[] {
+  const i = tasks.findIndex((t) => t.no === updated.no);
+  if (i < 0) return [...tasks, updated];
+  const next = tasks.slice();
+  next[i] = updated;
+  return next;
+}
+
 export interface AppState {
   stock: StockRow[];
   skus: Record<string, SkuInfo>;
@@ -108,30 +119,29 @@ export interface AppState {
 
   visibleFacilities: string[];
   skuFilter: string;
-  role: Role;
-  currentPicker: string;
   demand: DemandLine[];
   tasks: PickingTask[];
-  taskSeq: number;
+  tasksLoaded: boolean;
   gpSeq: number;
   notice: string;
 
   locations: () => string[];
   anyOpen: () => boolean;
-  setRole: (r: Role) => void;
-  setCurrentPicker: (p: string) => void;
   toggleFacility: (f: string) => void;
   setSkuFilter: (s: string) => void;
   syncStock: () => void;
   loadFromSupabase: () => Promise<void>;
   loadStock: (tuples: StockTuple[]) => void;
+  loadTasks: () => Promise<void>;
+  startTasksRealtime: () => () => void;
+  loadPickers: () => Promise<void>;
   setDemand: (d: DemandLine[]) => void;
   removeDemand: (i: number) => void;
-  generate: () => void;
-  assignAll: (facilityNo: string, picker: string) => void;
-  assignLine: (rid: number, facilityNo: string, picker: string) => void;
-  uploadAssignments: (facilityNo: string, text: string) => void;
-  applyPicks: (facilityNo: string, results: Record<number, number>) => void;
+  generate: (createdBy: string | null) => Promise<void>;
+  assignAll: (facilityNo: string, picker: string) => Promise<void>;
+  assignLine: (rid: number, facilityNo: string, picker: string) => Promise<void>;
+  uploadAssignments: (facilityNo: string, text: string) => Promise<void>;
+  applyPicks: (facilityNo: string, results: Record<number, number>) => Promise<void>;
   updateChannelRule: (channel: string, rule: ChannelRule) => void;
   setFacilityPriority: (p: string[]) => void;
 }
@@ -151,18 +161,14 @@ export const useStore = create<AppState>()(
 
       visibleFacilities: [...FACILITY_PRIORITY],
       skuFilter: "",
-      role: "supervisor",
-      currentPicker: PICKERS_DEFAULT[0],
       demand: [],
       tasks: [],
-      taskSeq: 0,
+      tasksLoaded: false,
       gpSeq: 0,
       notice: "",
 
       locations: () => [...new Set(get().stock.map((b) => b.location))],
       anyOpen: () => allFacilityLists(get().tasks).some((f) => f.lines.some((l) => l.picked == null)),
-      setRole: (r) => set({ role: r }),
-      setCurrentPicker: (p) => set({ currentPicker: p }),
       setSkuFilter: (s) => set({ skuFilter: s }),
       toggleFacility: (f) =>
         set({
@@ -170,6 +176,31 @@ export const useStore = create<AppState>()(
             ? get().visibleFacilities.filter((x) => x !== f)
             : [...get().visibleFacilities, f],
         }),
+
+      loadPickers: async () => {
+        if (!isSupabaseConfigured) return;
+        await usePickers.getState().load();
+        const live = usePickers.getState().pickers;
+        set({ pickers: live.length ? live : [...PICKERS_DEFAULT] });
+      },
+
+      loadTasks: async () => {
+        if (!isSupabaseConfigured) {
+          set({ tasksLoaded: true });
+          return;
+        }
+        try {
+          const tasks = await fetchAllTasks();
+          set({ tasks, tasksLoaded: true });
+        } catch (e) {
+          set({ notice: "Could not load picklists: " + (e as Error).message, tasksLoaded: true });
+        }
+      },
+
+      startTasksRealtime: () => {
+        if (!isSupabaseConfigured) return () => {};
+        return subscribeTasks((task) => set({ tasks: mergeTask(get().tasks, task) }));
+      },
 
       // Pull the latest stock. Live from Supabase when configured, else the snapshot.
       syncStock: () => {
@@ -214,10 +245,16 @@ export const useStore = create<AppState>()(
 
       // One picking task per channel present in the demand list, created together
       // so a single multi-channel CSV upload queues multiple picklists at once.
-      generate: () => {
-        const { skus, demand, channelRules, facilityPriority, stock, tasks, taskSeq } = get();
-        if (Object.keys(skus).length === 0) return set({ notice: "No stock synced yet." });
-        if (demand.length === 0) return set({ notice: "Add demand first." });
+      generate: async (createdBy) => {
+        const { skus, demand, channelRules, facilityPriority, stock, tasks } = get();
+        if (Object.keys(skus).length === 0) {
+          set({ notice: "No stock synced yet." });
+          return;
+        }
+        if (demand.length === 0) {
+          set({ notice: "Add demand first." });
+          return;
+        }
 
         const byChannel = new Map<string, DemandLine[]>();
         for (const d of demand) {
@@ -225,15 +262,15 @@ export const useStore = create<AppState>()(
           byChannel.get(d.channel)!.push(d);
         }
 
-        let seq = taskSeq;
         const reserved = (rid: number) => reservedFor(tasks, rid);
         const newTasks: PickingTask[] = [];
 
         for (const [channel, lines] of byChannel) {
           const rule = channelRules[channel];
           if (!rule) continue;
-          seq += 1;
-          const no = taskNumber(seq);
+          const prefix = taskNumberPrefix(channel);
+          const seq = isSupabaseConfigured ? await nextSequence(prefix) : newTasks.length + 1;
+          const no = `${prefix}${String(seq).padStart(3, "0")}`;
           const byFacility: Record<string, PickLine[]> = {};
           const shortfall: Shortfall[] = [];
           for (const d of lines) {
@@ -254,31 +291,51 @@ export const useStore = create<AppState>()(
 
         set({
           tasks: [...tasks, ...newTasks],
-          taskSeq: seq,
           demand: [],
           notice: `${newTasks.length} picking task(s) created — ${newTasks.map((t) => t.no).join(", ")}.`,
         });
+
+        if (isSupabaseConfigured) {
+          for (const t of newTasks) {
+            try {
+              await insertTask(t, createdBy);
+            } catch (e) {
+              set({ notice: "Could not save " + t.no + ": " + (e as Error).message });
+            }
+          }
+        }
       },
 
-      assignAll: (facilityNo, picker) =>
-        set({
-          tasks: get().tasks.map((t) => ({
-            ...t,
-            facilities: t.facilities.map((f) => (f.no === facilityNo ? { ...f, lines: f.lines.map((l) => ({ ...l, picker })) } : f)),
-          })),
-        }),
+      assignAll: async (facilityNo, picker) => {
+        let changed: PickingTask | undefined;
+        const tasks = get().tasks.map((t) => {
+          if (!t.facilities.some((f) => f.no === facilityNo)) return t;
+          const next = { ...t, facilities: t.facilities.map((f) => (f.no === facilityNo ? { ...f, lines: f.lines.map((l) => ({ ...l, picker })) } : f)) };
+          changed = next;
+          return next;
+        });
+        set({ tasks });
+        if (isSupabaseConfigured && changed) await updateTaskData(changed);
+      },
 
-      assignLine: (rid, facilityNo, picker) =>
-        set({
-          tasks: get().tasks.map((t) => ({
+      assignLine: async (rid, facilityNo, picker) => {
+        let changed: PickingTask | undefined;
+        const tasks = get().tasks.map((t) => {
+          if (!t.facilities.some((f) => f.no === facilityNo)) return t;
+          const next = {
             ...t,
             facilities: t.facilities.map((f) =>
               f.no === facilityNo ? { ...f, lines: f.lines.map((l) => (l.rid === rid ? { ...l, picker } : l)) } : f,
             ),
-          })),
-        }),
+          };
+          changed = next;
+          return next;
+        });
+        set({ tasks });
+        if (isSupabaseConfigured && changed) await updateTaskData(changed);
+      },
 
-      uploadAssignments: (facilityNo, text) => {
+      uploadAssignments: async (facilityNo, text) => {
         const map: Record<string, string> = {};
         text.trim().split(/\r?\n/).forEach((ln) => {
           const c = ln.split(",").map((s) => s.trim());
@@ -287,18 +344,23 @@ export const useStore = create<AppState>()(
           const picker = c[c.length - 1];
           if (bin && picker) map[bin] = picker;
         });
-        set({
-          tasks: get().tasks.map((t) => ({
+        let changed: PickingTask | undefined;
+        const tasks = get().tasks.map((t) => {
+          if (!t.facilities.some((f) => f.no === facilityNo)) return t;
+          const next = {
             ...t,
             facilities: t.facilities.map((f) =>
               f.no === facilityNo ? { ...f, lines: f.lines.map((l) => (map[l.bin] ? { ...l, picker: map[l.bin] } : l)) } : f,
             ),
-          })),
-          notice: "Assignments uploaded.",
+          };
+          changed = next;
+          return next;
         });
+        set({ tasks, notice: "Assignments uploaded." });
+        if (isSupabaseConfigured && changed) await updateTaskData(changed);
       },
 
-      applyPicks: (facilityNo, results) => {
+      applyPicks: async (facilityNo, results) => {
         const state = get();
         const stock = state.stock.map((b) => ({ ...b }));
         let gpSeq = state.gpSeq;
@@ -362,24 +424,26 @@ export const useStore = create<AppState>()(
         }
 
         set({ tasks, stock, gpSeq, notice: `${facilityNo} updated.` });
+
+        const finalTask = tasks.find((t) => t.no === (parentTask?.no ?? ""));
+        if (isSupabaseConfigured && finalTask) await updateTaskData(finalTask);
       },
 
       updateChannelRule: (channel, rule) => set({ channelRules: { ...get().channelRules, [channel]: rule } }),
       setFacilityPriority: (p) => set({ facilityPriority: p }),
     }),
     {
-      name: "fefo-smart-picking-v6",
-      // Stock is not persisted — it always comes fresh from the feed (snapshot / email).
+      name: "fefo-smart-picking-v7",
+      // Stock and tasks are not persisted locally when Supabase is configured —
+      // they come live from the shared database instead. Local mode (no
+      // Supabase keys) keeps everything in browser storage as before.
       partialize: (s) => ({
-        tasks: s.tasks,
-        taskSeq: s.taskSeq,
+        tasks: isSupabaseConfigured ? [] : s.tasks,
         gpSeq: s.gpSeq,
         channelRules: s.channelRules,
         facilityPriority: s.facilityPriority,
         pickers: s.pickers,
         visibleFacilities: s.visibleFacilities,
-        role: s.role,
-        currentPicker: s.currentPicker,
       }),
     },
   ),
