@@ -66,10 +66,18 @@ export function parseDemandCsv(
   text: string,
   known: Record<string, unknown>,
   knownChannels: Record<string, unknown>,
-): { demand: { channel: string; sku: string; qty: number }[]; badSku: string[]; badChannel: string[] } {
+): {
+  demand: { channel: string; sku: string; qty: number }[];
+  badSku: string[];
+  badChannel: string[];
+  badQty: string[];
+  duplicatesMerged: string[];
+} {
   const demand: { channel: string; sku: string; qty: number }[] = [];
   const badSku: string[] = [];
   const badChannel: string[] = [];
+  const badQty: string[] = [];
+  const duplicatesMerged: string[] = [];
   text
     .trim()
     .split(/\r?\n/)
@@ -89,10 +97,18 @@ export function parseDemandCsv(
         badSku.push(sku);
         return;
       }
-      if (!qty || qty < 1) return;
+      if (!qty || qty < 1) {
+        badQty.push(`${channel} / ${sku}`);
+        return;
+      }
       const ex = demand.find((d) => d.channel === channel && d.sku === sku);
-      if (ex) ex.qty += qty;
-      else demand.push({ channel, sku, qty });
+      if (ex) {
+        ex.qty += qty;
+        const key = `${channel} / ${sku}`;
+        if (!duplicatesMerged.includes(key)) duplicatesMerged.push(key);
+      } else {
+        demand.push({ channel, sku, qty });
+      }
     });
-  return { demand, badSku, badChannel };
+  return { demand, badSku, badChannel, badQty, duplicatesMerged };
 }
