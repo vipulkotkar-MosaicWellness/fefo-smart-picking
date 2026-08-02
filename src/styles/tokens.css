@@ -1,0 +1,17 @@
+/* Visual tokens for the FEFO branded redesign. Layered under the existing
+   Tailwind utility classes — not a replacement for them. */
+:root {
+  --fefo-teal-900: #083f38;
+  --fefo-teal-700: #087f6d;
+  --fefo-teal-50: #e8f7f3;
+  --fefo-bg: #f3f7f6;
+  --fefo-surface: #ffffff;
+  --fefo-line: #dfe8e5;
+  --fefo-text: #163e37;
+  --fefo-muted: #6e827d;
+  --fefo-danger: #cf4545;
+  --fefo-warning: #a46b00;
+  --fefo-success: #087f6d;
+  --fefo-radius: 12px;
+  --fefo-focus: #1f6feb;
+}

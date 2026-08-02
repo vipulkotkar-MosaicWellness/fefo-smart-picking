@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { AdminConfig } from "./components/AdminConfig";
+import { MosaicLogo } from "./components/brand/MosaicLogo";
 import { AdminUsers } from "./components/AdminUsers";
 import { AuthGate, PendingApproval } from "./components/AuthGate";
 import { DemandPanel } from "./components/DemandPanel";
@@ -39,9 +40,14 @@ function AppShell() {
       <div className="mx-auto max-w-6xl p-4">
         <header className="rounded-xl bg-gradient-to-br from-teal-700 to-teal-900 p-5 text-white shadow">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h1 className="text-xl font-bold">FEFO Smart Picking</h1>
-              <p className="text-xs opacity-90">Multi-facility waterfall · picking tasks · picker assignment · round-2</p>
+            <div className="flex items-center gap-3">
+              <div className="rounded-lg bg-white/95 px-2.5 py-1.5 shadow-sm">
+                <MosaicLogo />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold">FEFO Smart Picking</h1>
+                <p className="text-xs opacity-90">Multi-facility waterfall · picking tasks · picker assignment · round-2</p>
+              </div>
             </div>
             <div className="flex flex-col items-end gap-2">
               <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold">
