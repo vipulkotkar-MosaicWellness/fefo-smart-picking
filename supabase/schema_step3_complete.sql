@@ -39,28 +39,32 @@ create table if not exists admin_invites (
 );
 
 -- Helper: the calling user's own role, used inside RLS policies below.
+-- Schema-qualified + search_path pinned: functions fired from an auth.users
+-- trigger don't reliably inherit `public` on their search_path, so an
+-- unqualified `profiles` reference can fail to resolve there even though it
+-- works fine when called from the app.
 create or replace function current_role_name() returns text as $$
-  select role from profiles where id = auth.uid();
-$$ language sql stable security definer;
+  select role from public.profiles where id = auth.uid();
+$$ language sql stable security definer set search_path = public, auth;
 
 -- Bootstrap trigger: checks admin_invites first; else the very first person
 -- to ever sign up becomes super_admin; everyone else starts 'pending'.
 create or replace function handle_new_user() returns trigger as $$
 declare
   is_first boolean;
-  invite   admin_invites;
+  invite   public.admin_invites;
 begin
-  select * into invite from admin_invites where email = lower(new.email);
+  select * into invite from public.admin_invites where email = lower(new.email);
 
   if invite.email is not null then
-    insert into profiles (id, email, display_name, role)
+    insert into public.profiles (id, email, display_name, role)
     values (new.id, new.email, invite.display_name, 'admin');
-    delete from admin_invites where email = lower(new.email);
+    delete from public.admin_invites where email = lower(new.email);
     return new;
   end if;
 
-  select count(*) = 0 into is_first from profiles;
-  insert into profiles (id, email, display_name, role)
+  select count(*) = 0 into is_first from public.profiles;
+  insert into public.profiles (id, email, display_name, role)
   values (
     new.id,
     new.email,
@@ -69,7 +73,7 @@ begin
   );
   return new;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public, auth;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
