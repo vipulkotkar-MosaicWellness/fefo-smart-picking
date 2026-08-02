@@ -79,6 +79,50 @@ function waterfall(
   return { byFacility, short: remain };
 }
 
+export interface ChannelAllocation {
+  channel: string;
+  byFacility: Record<string, PickLine[]>;
+  shortfall: Shortfall[];
+}
+
+/**
+ * Pure FEFO waterfall allocation for a demand list, grouped by channel — no
+ * Supabase, no store mutation, no numbering. `generate()` uses this to build
+ * real tasks; the Demand Planner's "review allocation" step calls the same
+ * function to preview, so preview and generate can never disagree.
+ */
+export function computeChannelAllocations(
+  demand: DemandLine[],
+  channelRules: Record<string, ChannelRule>,
+  skus: Record<string, SkuInfo>,
+  stock: StockRow[],
+  facilityPriority: string[],
+  existingTasks: PickingTask[],
+): ChannelAllocation[] {
+  const byChannel = new Map<string, DemandLine[]>();
+  for (const d of demand) {
+    if (!byChannel.has(d.channel)) byChannel.set(d.channel, []);
+    byChannel.get(d.channel)!.push(d);
+  }
+
+  const reserved = (rid: number) => reservedFor(existingTasks, rid);
+  const out: ChannelAllocation[] = [];
+  for (const [channel, lines] of byChannel) {
+    const rule = channelRules[channel];
+    if (!rule) continue;
+    const byFacility: Record<string, PickLine[]> = {};
+    const shortfall: Shortfall[] = [];
+    for (const d of lines) {
+      const cutoff = cutoffMonths(rule, skus[d.sku].shelf);
+      const w = waterfall(d.sku, d.qty, cutoff, stock, facilityPriority, reserved, []);
+      for (const f of Object.keys(w.byFacility)) (byFacility[f] ??= []).push(...w.byFacility[f]);
+      if (w.short > 0) shortfall.push({ sku: d.sku, name: skus[d.sku].name, qty: w.short });
+    }
+    out.push({ channel, byFacility, shortfall });
+  }
+  return out;
+}
+
 function buildFacilityLists(
   taskNo: string,
   round: number,
@@ -256,33 +300,22 @@ export const useStore = create<AppState>()(
           return;
         }
 
-        const byChannel = new Map<string, DemandLine[]>();
+        const allocations = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, tasks);
+        const demandByChannel = new Map<string, DemandLine[]>();
         for (const d of demand) {
-          if (!byChannel.has(d.channel)) byChannel.set(d.channel, []);
-          byChannel.get(d.channel)!.push(d);
+          if (!demandByChannel.has(d.channel)) demandByChannel.set(d.channel, []);
+          demandByChannel.get(d.channel)!.push(d);
         }
-
-        const reserved = (rid: number) => reservedFor(tasks, rid);
         const newTasks: PickingTask[] = [];
 
-        for (const [channel, lines] of byChannel) {
-          const rule = channelRules[channel];
-          if (!rule) continue;
+        for (const { channel, byFacility, shortfall } of allocations) {
           const prefix = taskNumberPrefix(channel);
           const seq = isSupabaseConfigured ? await nextSequence(prefix) : newTasks.length + 1;
           const no = `${prefix}${String(seq).padStart(3, "0")}`;
-          const byFacility: Record<string, PickLine[]> = {};
-          const shortfall: Shortfall[] = [];
-          for (const d of lines) {
-            const cutoff = cutoffMonths(rule, skus[d.sku].shelf);
-            const w = waterfall(d.sku, d.qty, cutoff, stock, facilityPriority, reserved, []);
-            for (const f of Object.keys(w.byFacility)) (byFacility[f] ??= []).push(...w.byFacility[f]);
-            if (w.short > 0) shortfall.push({ sku: d.sku, name: skus[d.sku].name, qty: w.short });
-          }
           newTasks.push({
             no,
             channel,
-            demand: JSON.parse(JSON.stringify(lines)),
+            demand: JSON.parse(JSON.stringify(demandByChannel.get(channel))),
             facilities: buildFacilityLists(no, 1, byFacility, facilityPriority),
             shortfall,
             createdAt: new Date().toISOString(),
