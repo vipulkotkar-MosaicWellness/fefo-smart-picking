@@ -4,6 +4,7 @@ import { CHANNELS } from "../lib/channels";
 import { downloadCsv } from "../lib/format";
 import { parseDemandCsv } from "../lib/sampleData";
 import { useStore } from "../lib/store";
+import { PartnerMark } from "./partners/PartnerMark";
 import { Button, Card } from "./Ui";
 
 const SAMPLE_DEMAND =
@@ -85,9 +86,8 @@ export function DemandPanel() {
               key={`${d.channel}-${d.sku}`}
               className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
             >
-              <span>
-                <span className="font-semibold text-teal-700 dark:text-teal-300">{d.channel}</span> ·{" "}
-                {skus[d.sku]?.name ?? d.sku} · <b>{d.qty}</b>
+              <span className="inline-flex items-center gap-1.5">
+                <PartnerMark name={d.channel} compact /> · {skus[d.sku]?.name ?? d.sku} · <b>{d.qty}</b>
               </span>
               <Button variant="sm" onClick={() => removeDemand(i)}>x</Button>
             </div>
