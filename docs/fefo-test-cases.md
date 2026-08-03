@@ -24,18 +24,16 @@ npm run test:run
 | Picking Supervisor | `tests/supervisor/metrics.test.ts` | Open/unassigned counts, fill rate (completed picklists only), picker workload |
 | Admin | `tests/admin/partnerDirectory.test.tsx` | Logo stays hidden until Approved; activate/deactivate toggle |
 | Inventory | `tests/inventory/inventoryView.test.ts` | Filter combinations, expiry-first sort, pagination math |
-| Picker | `tests/picker/pickerScan.test.ts` | Batch match logic (case/whitespace-insensitive) |
 | Picker | `tests/picker/offlineQueue.test.ts` | Queue persists across loads; removed once synced |
-| Picker | `tests/picker/pickerFlow.test.tsx` | Wrong-batch scan is rejected with the expected message; structured exception UI present |
+| Picker | `tests/picker/pickerFlow.test.tsx` | Location/SKU/batch/qty display; Found advances without any scan step; structured exception UI present |
 
 **Deliberately not covered by an automated test:** the real `generate()`
 Supabase write path, and `applyPicks()`'s real Supabase write path. Both
 call live Supabase, and this project's `supabaseClient.ts` falls back to
 real production credentials when no env vars are set — so those two are
 covered by testing the pure logic they depend on
-(`computeChannelAllocations`, `scanMatches`) instead of exercising the
-write itself in a test run. Manual testing (below) is what verifies the
-actual write.
+(`computeChannelAllocations`) instead of exercising the write itself in a
+test run. Manual testing (below) is what verifies the actual write.
 
 ## 2. Manual test cases — walk these before wider rollout
 
@@ -65,13 +63,13 @@ actual write.
 4. Complete a picklist as a Picker (see below), then confirm Fill rate updates and the picklist moves to "Picking completed."
 
 ### Picker
-1. Sign in as a Picker with at least one assigned picklist → confirm you land directly on your current pick, large-format location first.
-2. Tap **Scan** → type an incorrect batch code → confirm you see "Wrong batch. Scan batch \<code\>." and it does **not** advance.
-3. Type the correct batch code → confirm it advances to the next line.
-4. Tap **Report an exception** → confirm a reason dropdown appears (not just a bare quantity field) → submit → confirm it's recorded.
+1. Sign in as a Picker with at least one assigned picklist → confirm you land directly on your current pick, large-format location (bin) first.
+2. Confirm the card shows product name, SKU, batch #, expiry, and quantity to pick — everything needed to find and count stock at that location, no scanning required.
+3. Tap **Found — Picked \<qty\>** → confirm it advances to the next line (or to the "picking done" screen if it was the last line).
+4. On a different line, tap **Not found** instead → confirm a reason dropdown appears (Not enough stock / Batch not found / Damaged stock / Location blocked / Other), adjust the available quantity, submit → confirm it's recorded as a partial pick, not silently dropped.
 5. Complete the last line of a picklist → confirm the "picking done" screen appears, and the picklist shows as completed in Picking Supervisor.
 6. **Offline check:** turn off Wi-Fi/data, complete a picklist → confirm the status pill shows "Offline · 1 queued" instead of failing silently. Turn connectivity back on → confirm it syncs automatically within a few seconds and the pill returns to "Online."
-7. Try double-tapping "Picked" rapidly on the same line → confirm it doesn't submit twice (button shows "Saving…" and is disabled mid-submit).
+7. Try double-tapping "Found" rapidly on the same line → confirm it doesn't submit twice (button shows "Saving…" and is disabled mid-submit).
 
 ### Inventory (any role that has access)
 1. Confirm the default sort is earliest-expiry-first.

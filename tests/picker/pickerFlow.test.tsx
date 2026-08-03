@@ -14,7 +14,7 @@ afterEach(() => {
   useAuth.setState(initialAuthState, true);
 });
 
-// Two lines so a "Picked" tap on line 1 only advances locally — it never
+// Two lines so a "Found" tap on line 1 only advances locally — it never
 // reaches the last-line branch that calls applyPicks() (and, through it,
 // a real Supabase write), which is what we specifically want to avoid here.
 const task: PickingTask = {
@@ -45,34 +45,38 @@ function setup() {
 }
 
 describe("PickerView", () => {
-  it("blocks confirmation on a wrong batch scan, and accepts the correct one", async () => {
-    setup();
+  it("shows the location, SKU, batch, and quantity for the current line", async () => {
     const user = userEvent.setup();
+    setup();
     render(<PickerView />);
-
     await user.click(screen.getByRole("button", { name: /SL Mother Hub/ }));
-    await user.click(screen.getByRole("button", { name: "Scan" }));
 
-    const input = screen.getByPlaceholderText(/Batch code/);
-    await user.type(input, "WRONG-BATCH");
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Scan batch BA019232");
-
-    await user.clear(input);
-    await user.type(input, "BA019232");
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
-
-    // Advanced to line 2 of 2 — the scan was accepted.
-    expect(await screen.findByText("Line 2 of 2")).toBeVisible();
+    expect(screen.getByText("Go to location")).toBeVisible();
+    expect(screen.getByText("A1")).toBeVisible();
+    expect(screen.getByText("Product A")).toBeVisible();
+    expect(screen.getByText("SKU-A", { exact: false })).toBeVisible();
+    expect(screen.getByText("BA019232")).toBeVisible();
+    expect(screen.getByText("Pick 15")).toBeVisible();
   });
 
-  it("shows a structured exception with a reason, not just a bare quantity", async () => {
-    setup();
+  it("marking a line Found advances to the next line, no scan required", async () => {
     const user = userEvent.setup();
+    setup();
     render(<PickerView />);
-
     await user.click(screen.getByRole("button", { name: /SL Mother Hub/ }));
-    await user.click(screen.getByRole("button", { name: "Report an exception" }));
+
+    await user.click(screen.getByRole("button", { name: /Found — Picked 15/ }));
+    expect(await screen.findByText("Line 2 of 2")).toBeVisible();
+    expect(screen.getByText("A2")).toBeVisible();
+  });
+
+  it("shows a structured exception with a reason when marked Not found", async () => {
+    const user = userEvent.setup();
+    setup();
+    render(<PickerView />);
+    await user.click(screen.getByRole("button", { name: /SL Mother Hub/ }));
+
+    await user.click(screen.getByRole("button", { name: "Not found" }));
 
     expect(screen.getByText("Issue")).toBeVisible();
     expect(screen.getByRole("option", { name: "Damaged stock" })).toBeInTheDocument();

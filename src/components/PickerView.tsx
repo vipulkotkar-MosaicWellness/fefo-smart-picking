@@ -1,84 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../lib/authStore";
 import { criticalPathSort } from "../lib/engine";
 import { monLabel } from "../lib/format";
 import { loadQueue } from "../lib/offlineQueue";
-import { scanMatches } from "../lib/pickerScan";
 import { allFacilityLists, useStore } from "../lib/store";
 import type { FacilityPicklist, PickLine } from "../lib/types";
 import { Button, Tag } from "./Ui";
 
-const EXCEPTION_REASONS = ["Not enough stock", "Batch not found", "Damaged stock", "Location blocked", "Barcode not scanning"] as const;
-
-function Scanner({
-  expectedBatch,
-  onDetect,
-  onClose,
-}: {
-  expectedBatch: string;
-  onDetect: (code: string) => void;
-  onClose: () => void;
-}) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [err, setErr] = useState("");
-  const [manualCode, setManualCode] = useState("");
-  const [mismatch, setMismatch] = useState(false);
-
-  function submit(code: string) {
-    if (scanMatches(code, expectedBatch)) {
-      onDetect(code);
-    } else {
-      setMismatch(true);
-    }
-  }
-
-  useEffect(() => {
-    let stream: MediaStream | undefined;
-    let raf = 0;
-    const Detector = (window as unknown as { BarcodeDetector?: new () => { detect: (v: HTMLVideoElement) => Promise<{ rawValue: string }[]> } }).BarcodeDetector;
-    if (!Detector) {
-      setErr("Live scanning needs a supported browser/device. Type the batch code below instead.");
-      return;
-    }
-    const det = new Detector();
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-      .then((s) => { stream = s; if (videoRef.current) { videoRef.current.srcObject = s; void videoRef.current.play(); tick(); } })
-      .catch(() => setErr("Camera not available on this device. Type the batch code below instead."));
-    async function tick() {
-      if (!videoRef.current) return;
-      try { const codes = await det.detect(videoRef.current); if (codes.length) return submit(codes[0].rawValue); } catch { /* keep scanning */ }
-      raf = requestAnimationFrame(tick);
-    }
-    return () => { if (raf) cancelAnimationFrame(raf); stream?.getTracks().forEach((t) => t.stop()); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-4">
-      <div role="dialog" aria-modal="true" aria-label="Scan the batch" className="w-full max-w-md rounded-xl bg-white p-4 dark:bg-slate-800">
-        <p className="mb-2 text-sm font-semibold">Scan the batch</p>
-        {err ? <p className="mb-3 text-xs text-amber-700 dark:text-amber-300">{err}</p> : <video ref={videoRef} className="mb-3 w-full rounded-lg bg-black" muted playsInline />}
-        {mismatch && (
-          <p role="alert" className="mb-3 rounded-md bg-rose-50 px-2.5 py-2 text-xs font-semibold text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
-            Wrong batch. Scan batch {expectedBatch}.
-          </p>
-        )}
-        <div className="flex gap-2">
-          <input
-            value={manualCode}
-            onChange={(e) => setManualCode(e.target.value)}
-            placeholder={`Batch code (${expectedBatch})`}
-            className="flex-1 rounded-lg border border-slate-300 p-2 text-sm dark:border-slate-600 dark:bg-slate-900"
-          />
-          <Button variant="green" onClick={() => submit(manualCode)}>Confirm</Button>
-        </div>
-        <div className="mt-2 text-right">
-          <Button variant="sm" onClick={onClose}>Cancel</Button>
-        </div>
-      </div>
-    </div>
-  );
-}
+const EXCEPTION_REASONS = ["Not enough stock", "Batch not found", "Damaged stock", "Location blocked", "Other"] as const;
 
 function SyncStatus() {
   const [online, setOnline] = useState(navigator.onLine);
@@ -115,7 +44,6 @@ export function PickerView() {
   const [exceptionMode, setExceptionMode] = useState(false);
   const [exceptionReason, setExceptionReason] = useState<string>(EXCEPTION_REASONS[0]);
   const [nfVal, setNfVal] = useState(0);
-  const [scan, setScan] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ facility: string; picked: number; nf: number } | null>(null);
 
@@ -217,18 +145,21 @@ export function PickerView() {
           <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Go to location</div>
           <div className="my-1 text-4xl font-extrabold tracking-tight text-teal-700 dark:text-teal-300">{line.bin}</div>
           <div className="mt-2 text-base font-semibold">{line.name}</div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">{line.sku} · {line.batch} · exp {monLabel(line.exp)}</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            SKU {line.sku}
+            <br />
+            Batch <b>{line.batch}</b> · exp {monLabel(line.exp)}
+          </div>
           <div className="mt-3 inline-block rounded-lg bg-slate-100 px-4 py-2 text-2xl font-bold tabular-nums dark:bg-slate-900">Pick {line.qty}</div>
 
           {!exceptionMode ? (
             <div className="mt-5 space-y-2">
               <button onClick={picked} disabled={busy} className="w-full rounded-xl bg-emerald-600 py-4 text-base font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">
-                {busy ? "Saving…" : `✓ Picked ${line.qty}`}
+                {busy ? "Saving…" : `✓ Found — Picked ${line.qty}`}
               </button>
-              <div className="flex gap-2">
-                <button onClick={() => setScan(true)} disabled={busy} className="flex-1 rounded-xl border border-teal-600 py-3 text-sm font-semibold text-teal-700 disabled:opacity-60 dark:text-teal-300">Scan</button>
-                <button onClick={() => { setNfVal(line.qty); setExceptionReason(EXCEPTION_REASONS[0]); setExceptionMode(true); }} disabled={busy} className="flex-1 rounded-xl border border-amber-500 py-3 text-sm font-semibold text-amber-700 disabled:opacity-60 dark:text-amber-300">Report an exception</button>
-              </div>
+              <button onClick={() => { setNfVal(line.qty); setExceptionReason(EXCEPTION_REASONS[0]); setExceptionMode(true); }} disabled={busy} className="w-full rounded-xl border border-amber-500 py-3 text-sm font-semibold text-amber-700 disabled:opacity-60 dark:text-amber-300">
+                Not found
+              </button>
             </div>
           ) : (
             <div className="mt-5 text-left">
@@ -264,10 +195,6 @@ export function PickerView() {
           <span className="font-semibold">{next.bin} · {next.qty} units</span>
           <span aria-hidden>→</span>
         </div>
-      )}
-
-      {scan && line && (
-        <Scanner expectedBatch={line.batch} onClose={() => setScan(false)} onDetect={() => { setScan(false); picked(); }} />
       )}
     </div>
   );
