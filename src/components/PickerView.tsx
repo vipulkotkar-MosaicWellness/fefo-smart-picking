@@ -55,7 +55,7 @@ function Scanner({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-4 dark:bg-slate-800">
+      <div role="dialog" aria-modal="true" aria-label="Scan the batch" className="w-full max-w-md rounded-xl bg-white p-4 dark:bg-slate-800">
         <p className="mb-2 text-sm font-semibold">Scan the batch</p>
         {err ? <p className="mb-3 text-xs text-amber-700 dark:text-amber-300">{err}</p> : <video ref={videoRef} className="mb-3 w-full rounded-lg bg-black" muted playsInline />}
         {mismatch && (
