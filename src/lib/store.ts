@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import { bucketCode, channelCode, CHANNELS } from "./channels";
 import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_PRIORITY, facilityCode } from "./facilities";
+import { dequeue as dequeuePick, enqueue as enqueuePick, loadQueue as loadPickQueue } from "./offlineQueue";
 import { PICKERS_DEFAULT, usePickers } from "./pickersStore";
 import { rowsFromTuples, type StockTuple } from "./sampleData";
 import { REAL_STOCK } from "./stockSnapshot";
@@ -213,6 +214,7 @@ export interface AppState {
   assignLine: (rid: number, facilityNo: string, picker: string) => Promise<void>;
   uploadAssignments: (facilityNo: string, text: string) => Promise<void>;
   applyPicks: (facilityNo: string, results: Record<number, number>) => Promise<void>;
+  flushOfflineQueue: () => Promise<void>;
   updateChannelRule: (channel: string, rule: ChannelRule) => void;
   setFacilityPriority: (p: string[]) => void;
 }
@@ -503,7 +505,37 @@ export const useStore = create<AppState>()(
         set({ tasks, stock, gpSeq, notice: `${facilityNo} updated.` });
 
         const finalTask = tasks.find((t) => t.no === (parentTask?.no ?? ""));
-        if (isSupabaseConfigured && finalTask) await updateTaskData(finalTask);
+        if (isSupabaseConfigured && finalTask) {
+          try {
+            await updateTaskData(finalTask);
+          } catch {
+            // Offline or a transient failure — the pick is already applied
+            // locally above; queue the sync so it isn't silently lost.
+            enqueuePick({ facilityNo, results });
+            set({ notice: "⚠ Saved on this device — will sync once you're back online." });
+          }
+        }
+      },
+
+      flushOfflineQueue: async () => {
+        if (!isSupabaseConfigured) return;
+        const queue = loadPickQueue();
+        if (queue.length === 0) return;
+        const { tasks } = get();
+        for (const item of queue) {
+          const task = tasks.find((t) => t.facilities.some((f) => f.no === item.facilityNo));
+          if (!task) {
+            dequeuePick(item.id);
+            continue;
+          }
+          try {
+            await updateTaskData(task);
+            dequeuePick(item.id);
+          } catch {
+            // Still offline / still failing — leave it queued for next time.
+          }
+        }
+        if (loadPickQueue().length === 0) set({ notice: "✓ Synced queued pick(s)." });
       },
 
       updateChannelRule: (channel, rule) => set({ channelRules: { ...get().channelRules, [channel]: rule } }),

@@ -128,7 +128,7 @@ function OperationsToolbar() {
 }
 
 function Workspace() {
-  const { loadFromSupabase, loadTasks, startTasksRealtime, loadPickers, tasks } = useStore();
+  const { loadFromSupabase, loadTasks, startTasksRealtime, loadPickers, tasks, flushOfflineQueue } = useStore();
   const { profile, signOut } = useAuth();
   const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
   const isAdminTier = role === "admin" || role === "super_admin";
@@ -148,8 +148,14 @@ function Workspace() {
     void loadFromSupabase();
     void loadTasks();
     void loadPickers();
+    void flushOfflineQueue();
     const stop = startTasksRealtime();
-    return stop;
+    const onOnline = () => void flushOfflineQueue();
+    window.addEventListener("online", onOnline);
+    return () => {
+      stop();
+      window.removeEventListener("online", onOnline);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
