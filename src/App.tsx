@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { AdminConfig } from "./components/AdminConfig";
 import { AdminUsers } from "./components/AdminUsers";
+import { AuditLog } from "./components/admin/AuditLog";
+import { PartnerDirectory } from "./components/admin/PartnerDirectory";
 import { AppShell } from "./components/AppShell";
 import { MosaicLogo } from "./components/brand/MosaicLogo";
 import { AuthGate, PendingApproval } from "./components/AuthGate";
@@ -197,6 +199,8 @@ function Workspace() {
       {activeView === "admin" && isAdminTier && (
         <div className="space-y-4">
           <AdminConfig />
+          <PartnerDirectory />
+          <AuditLog />
           <AdminUsers />
         </div>
       )}

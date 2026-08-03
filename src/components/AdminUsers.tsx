@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../lib/authStore";
+import { useStore } from "../lib/store";
 import { supabase } from "../lib/supabaseClient";
 import type { Profile } from "../lib/authStore";
 import { Button, Card, Tag } from "./Ui";
@@ -19,6 +20,8 @@ const ROLE_LABELS: Record<string, string> = {
 
 export function AdminUsers() {
   const myRole = useAuth((s) => s.profile?.role);
+  const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
+  const logAudit = useStore((s) => s.logAudit);
   const isSuperAdmin = myRole === "super_admin";
   const [users, setUsers] = useState<Profile[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -46,11 +49,14 @@ export function AdminUsers() {
 
   async function setRole(id: string, role: string) {
     if (!supabase) return;
+    const target = users.find((u) => u.id === id);
     setUsers((u) => u.map((x) => (x.id === id ? { ...x, role: role as Profile["role"] } : x)));
     const { error } = await supabase.from("profiles").update({ role }).eq("id", id);
     if (error) {
       alert("Could not update role: " + error.message);
       void load();
+    } else if (target) {
+      logAudit(myName, `Set ${target.display_name}'s role to ${role.replace("_", " ")}`);
     }
   }
 
