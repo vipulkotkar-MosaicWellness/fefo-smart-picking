@@ -1,5 +1,8 @@
+import { useMemo, useState } from "react";
 import { allFacilityLists, useStore } from "../lib/store";
+import { pickerWorkload, queueMetrics } from "../lib/supervisorMetrics";
 import type { FacilityPicklist } from "../lib/types";
+import { PartnerMark } from "./partners/PartnerMark";
 import { Card, Tag } from "./Ui";
 import { FacilityBlock } from "./FacilityBlock";
 
@@ -14,12 +17,17 @@ function summary(f: FacilityPicklist) {
   return `${f.lines.length} line(s) · ${qty} units${assigned ? ` · ${assigned}/${f.lines.length} assigned` : ""}`;
 }
 
-function PicklistItem({ f, queuePos }: { f: FacilityPicklist; queuePos?: number }) {
+function channelOf(f: FacilityPicklist, tasks: ReturnType<typeof useStore.getState>["tasks"]): string {
+  return tasks.find((t) => t.no === f.taskNo)?.channel ?? "";
+}
+
+function PicklistItem({ f, channel, queuePos }: { f: FacilityPicklist; channel: string; queuePos?: number }) {
   return (
     <details className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden">
       <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-lg p-2.5 hover:bg-slate-50 dark:hover:bg-slate-900">
-        <span className="text-sm">
-          {queuePos != null && <Tag tone="info">#{queuePos}</Tag>}{" "}
+        <span className="flex items-center gap-1.5 text-sm">
+          {queuePos != null && <Tag tone="info">#{queuePos}</Tag>}
+          {channel && <PartnerMark name={channel} compact />}
           <b>{f.facility}</b> <span className="text-xs text-slate-500 dark:text-slate-400">{f.no}</span>{" "}
           {f.round > 1 && <Tag tone="info">Round {f.round}</Tag>}
         </span>
@@ -36,12 +44,14 @@ function Bucket({
   title,
   tone,
   items,
+  channelFor,
   emptyText,
   queued,
 }: {
   title: string;
   tone: "warn" | "info" | "ok";
   items: FacilityPicklist[];
+  channelFor: (f: FacilityPicklist) => string;
   emptyText: string;
   queued?: boolean;
 }) {
@@ -53,7 +63,7 @@ function Bucket({
       {items.length === 0 ? (
         <p className="rounded-lg border border-dashed border-slate-200 p-2.5 text-[11px] text-slate-400 dark:border-slate-700">{emptyText}</p>
       ) : (
-        items.map((f, i) => <PicklistItem key={f.no} f={f} queuePos={queued ? i + 1 : undefined} />)
+        items.map((f, i) => <PicklistItem key={f.no} f={f} channel={channelFor(f)} queuePos={queued ? i + 1 : undefined} />)
       )}
     </div>
   );
@@ -78,13 +88,42 @@ function ShortfallAlert() {
   );
 }
 
+function Metric({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+  return (
+    <div className="rounded-xl border border-[var(--fefo-line)] bg-white p-3.5 dark:border-slate-700 dark:bg-slate-800">
+      <p className="text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
+      <p className={`mt-1 text-2xl font-bold ${warn ? "text-rose-600 dark:text-rose-400" : "text-[var(--fefo-text)] dark:text-slate-100"}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
 export function SupervisorQueue() {
   const tasks = useStore((s) => s.tasks);
+  const facilityPriority = useStore((s) => s.facilityPriority);
+  const pickers = useStore((s) => s.pickers);
   const all = allFacilityLists(tasks); // already in task-creation order
 
-  const creation = all.filter((f) => bucketOf(f) === "creation");
-  const picking = all.filter((f) => bucketOf(f) === "picking");
-  const done = all.filter((f) => bucketOf(f) === "done");
+  const [facilityFilter, setFacilityFilter] = useState("");
+  const [channelFilter, setChannelFilter] = useState("");
+  const [pickerFilter, setPickerFilter] = useState("");
+  const channelFor = (f: FacilityPicklist) => channelOf(f, tasks);
+
+  const filtered = all.filter((f) => {
+    if (facilityFilter && f.facility !== facilityFilter) return false;
+    if (channelFilter && channelFor(f) !== channelFilter) return false;
+    if (pickerFilter && !f.lines.some((l) => l.picker === pickerFilter)) return false;
+    return true;
+  });
+
+  const creation = filtered.filter((f) => bucketOf(f) === "creation");
+  const picking = filtered.filter((f) => bucketOf(f) === "picking");
+  const done = filtered.filter((f) => bucketOf(f) === "done");
+
+  const metrics = useMemo(() => queueMetrics(all), [all]);
+  const workload = useMemo(() => pickerWorkload(all, pickers), [all, pickers]);
+  const channelOptions = useMemo(() => [...new Set(tasks.map((t) => t.channel))].sort(), [tasks]);
 
   if (all.length === 0) {
     return (
@@ -99,11 +138,54 @@ export function SupervisorQueue() {
 
   return (
     <Card title="Picking queue">
+      <div className="mb-4 grid grid-cols-2 gap-2.5 md:grid-cols-4">
+        <Metric label="Open picklists" value={String(metrics.openCount)} />
+        <Metric label="Awaiting assignment" value={String(metrics.unassignedCount)} warn={metrics.unassignedCount > 0} />
+        <Metric label="Stock exceptions" value={String(metrics.exceptionCount)} warn={metrics.exceptionCount > 0} />
+        <Metric label="Fill rate" value={metrics.fillRatePct == null ? "—" : `${metrics.fillRatePct}%`} />
+      </div>
+
       <ShortfallAlert />
-      <div className="space-y-5">
-        <Bucket title="Picklist creation pending" tone="warn" items={creation} queued emptyText="Nothing awaiting picker assignment." />
-        <Bucket title="Picking pending" tone="info" items={picking} queued emptyText="Nothing currently being picked." />
-        <Bucket title="Picking completed" tone="ok" items={done} emptyText="Nothing completed yet." />
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        <select value={facilityFilter} onChange={(e) => setFacilityFilter(e.target.value)} className="rounded-lg border border-slate-300 p-1.5 text-xs dark:border-slate-600 dark:bg-slate-900">
+          <option value="">All facilities</option>
+          {facilityPriority.map((f) => (
+            <option key={f} value={f}>{f}</option>
+          ))}
+        </select>
+        <select value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)} className="rounded-lg border border-slate-300 p-1.5 text-xs dark:border-slate-600 dark:bg-slate-900">
+          <option value="">All channels</option>
+          {channelOptions.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        <select value={pickerFilter} onChange={(e) => setPickerFilter(e.target.value)} className="rounded-lg border border-slate-300 p-1.5 text-xs dark:border-slate-600 dark:bg-slate-900">
+          <option value="">All pickers</option>
+          {pickers.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
+        <div className="space-y-5">
+          <Bucket title="Picklist creation pending" tone="warn" items={creation} channelFor={channelFor} queued emptyText="Nothing awaiting picker assignment." />
+          <Bucket title="Picking pending" tone="info" items={picking} channelFor={channelFor} queued emptyText="Nothing currently being picked." />
+          <Bucket title="Picking completed" tone="ok" items={done} channelFor={channelFor} emptyText="Nothing completed yet." />
+        </div>
+
+        <div className="rounded-xl border border-[var(--fefo-line)] p-3 dark:border-slate-700">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">Picker workload</h3>
+          <div className="space-y-2">
+            {workload.map((w) => (
+              <div key={w.picker} className="flex items-center justify-between text-xs">
+                <span>{w.picker}</span>
+                <Tag tone={w.activeLines === 0 ? "ok" : "info"}>{w.activeLines === 0 ? "Available" : `${w.activeLines} active`}</Tag>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </Card>
   );
