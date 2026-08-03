@@ -152,6 +152,23 @@ function mergeTask(tasks: PickingTask[], updated: PickingTask): PickingTask[] {
   return next;
 }
 
+export interface SavedInventoryView {
+  name: string;
+  filters: { text?: string; batch?: string; location?: string; minQty?: number; maxQty?: number };
+  sort: "expiry" | "facility";
+}
+
+export interface PartnerLogoState {
+  dataUrl: string;
+  approved: boolean;
+}
+
+export interface AuditEntry {
+  at: string;
+  by: string;
+  action: string;
+}
+
 export interface AppState {
   stock: StockRow[];
   skus: Record<string, SkuInfo>;
@@ -162,17 +179,27 @@ export interface AppState {
   syncing: boolean;
 
   visibleFacilities: string[];
-  skuFilter: string;
   demand: DemandLine[];
   tasks: PickingTask[];
   tasksLoaded: boolean;
   gpSeq: number;
   notice: string;
 
+  savedInventoryViews: SavedInventoryView[];
+  partnerActive: Record<string, boolean>;
+  partnerLogos: Record<string, PartnerLogoState>;
+  auditLog: AuditEntry[];
+
+  saveInventoryView: (v: SavedInventoryView) => void;
+  deleteInventoryView: (name: string) => void;
+  setPartnerActive: (channel: string, active: boolean) => void;
+  setPartnerLogo: (channel: string, dataUrl: string) => void;
+  approvePartnerLogo: (channel: string, approved: boolean) => void;
+  logAudit: (by: string, action: string) => void;
+
   locations: () => string[];
   anyOpen: () => boolean;
   toggleFacility: (f: string) => void;
-  setSkuFilter: (s: string) => void;
   syncStock: () => void;
   loadFromSupabase: () => Promise<void>;
   loadStock: (tuples: StockTuple[]) => void;
@@ -204,16 +231,33 @@ export const useStore = create<AppState>()(
       syncing: false,
 
       visibleFacilities: [...FACILITY_PRIORITY],
-      skuFilter: "",
       demand: [],
       tasks: [],
       tasksLoaded: false,
       gpSeq: 0,
       notice: "",
 
+      savedInventoryViews: [],
+      partnerActive: {},
+      partnerLogos: {},
+      auditLog: [],
+
+      saveInventoryView: (v) =>
+        set({ savedInventoryViews: [...get().savedInventoryViews.filter((x) => x.name !== v.name), v] }),
+      deleteInventoryView: (name) => set({ savedInventoryViews: get().savedInventoryViews.filter((v) => v.name !== name) }),
+      setPartnerActive: (channel, active) => set({ partnerActive: { ...get().partnerActive, [channel]: active } }),
+      setPartnerLogo: (channel, dataUrl) =>
+        set({ partnerLogos: { ...get().partnerLogos, [channel]: { dataUrl, approved: false } } }),
+      approvePartnerLogo: (channel, approved) => {
+        const existing = get().partnerLogos[channel];
+        if (!existing) return;
+        set({ partnerLogos: { ...get().partnerLogos, [channel]: { ...existing, approved } } });
+      },
+      logAudit: (by, action) =>
+        set({ auditLog: [{ at: new Date().toISOString(), by, action }, ...get().auditLog].slice(0, 200) }),
+
       locations: () => [...new Set(get().stock.map((b) => b.location))],
       anyOpen: () => allFacilityLists(get().tasks).some((f) => f.lines.some((l) => l.picked == null)),
-      setSkuFilter: (s) => set({ skuFilter: s }),
       toggleFacility: (f) =>
         set({
           visibleFacilities: get().visibleFacilities.includes(f)
@@ -477,6 +521,10 @@ export const useStore = create<AppState>()(
         facilityPriority: s.facilityPriority,
         pickers: s.pickers,
         visibleFacilities: s.visibleFacilities,
+        savedInventoryViews: s.savedInventoryViews,
+        partnerActive: s.partnerActive,
+        partnerLogos: s.partnerLogos,
+        auditLog: s.auditLog,
       }),
     },
   ),
