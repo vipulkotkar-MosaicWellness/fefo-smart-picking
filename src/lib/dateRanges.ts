@@ -1,9 +1,8 @@
-export type RangePreset = "today" | "yesterday" | "last7" | "last30";
+export type RangePreset = "today" | "yesterday" | "last30";
 
 export const RANGE_LABEL: Record<RangePreset, string> = {
   today: "Today",
   yesterday: "Yesterday",
-  last7: "Last 7 days",
   last30: "Last 30 days",
 };
 
@@ -22,11 +21,6 @@ export function rangeFor(preset: RangePreset, now: Date): { start: Date; end: Da
       y.setDate(y.getDate() - 1);
       return { start: y, end: today };
     }
-    case "last7": {
-      const s = new Date(today);
-      s.setDate(s.getDate() - 7);
-      return { start: s, end: now };
-    }
     case "last30": {
       const s = new Date(today);
       s.setDate(s.getDate() - 30);
@@ -44,24 +38,22 @@ export type Bucket = RangePreset | "older";
 
 export const BUCKET_LABEL: Record<Bucket, string> = {
   ...RANGE_LABEL,
-  older: "Older",
+  older: "Above 30 days",
 };
 
 /**
  * Mutually exclusive bucket for a timestamp — unlike rangeFor's windows
- * (which overlap: "last7" includes today), each timestamp lands in exactly
- * one bucket here, so a repository view built from these never lists the
- * same picklist twice.
+ * (which overlap: "last30" includes today), each timestamp lands in
+ * exactly one bucket here, so a repository view built from these never
+ * lists the same picklist twice.
  */
 export function bucketFor(iso: string, now: Date): Bucket {
   const today = rangeFor("today", now);
   const yesterday = rangeFor("yesterday", now);
-  const last7 = rangeFor("last7", now);
   const last30 = rangeFor("last30", now);
   const t = new Date(iso).getTime();
   if (t >= today.start.getTime()) return "today";
   if (t >= yesterday.start.getTime()) return "yesterday";
-  if (t >= last7.start.getTime()) return "last7";
   if (t >= last30.start.getTime()) return "last30";
   return "older";
 }

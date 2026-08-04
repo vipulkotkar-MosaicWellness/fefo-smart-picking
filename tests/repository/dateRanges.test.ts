@@ -22,12 +22,6 @@ describe("rangeFor", () => {
     expect(end.getHours()).toBe(0);
   });
 
-  it("last 7 days includes today and goes back 7 full days", () => {
-    const { start, end } = rangeFor("last7", now);
-    expect(ymd(start)).toBe("2026-08-08");
-    expect(end).toEqual(now);
-  });
-
   it("last 30 days goes back 30 full days", () => {
     const { start, end } = rangeFor("last30", now);
     expect(ymd(start)).toBe("2026-07-16");
