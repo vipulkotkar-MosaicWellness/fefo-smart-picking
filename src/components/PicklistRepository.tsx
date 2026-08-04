@@ -42,6 +42,8 @@ export function PicklistRepository() {
     <Card title="Picklist repository">
       <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
         Every picklist ever generated, grouped by when it was created. Downloads use the Uniware import format.
+        When a picker marks a line "Not found," a follow-up picklist for that shortfall is created automatically
+        under the same Task number, tagged <b>Round 2</b> below — no manual linking needed.
       </p>
       <div className="space-y-4">
         {BUCKET_ORDER.map((bucket) => {
@@ -75,7 +77,14 @@ export function PicklistRepository() {
                     const t = taskByNo.get(task);
                     return (
                       <tr key={f.no} className="text-slate-700 dark:text-slate-200">
-                        <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{task}</td>
+                        <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                          {task}
+                          {f.round > 1 && (
+                            <div className="mt-0.5">
+                              <Tag tone="info">Round {f.round} — re-offer for not-found stock</Tag>
+                            </div>
+                          )}
+                        </td>
                         <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{f.no}</td>
                         <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{f.facility}</td>
                         <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
