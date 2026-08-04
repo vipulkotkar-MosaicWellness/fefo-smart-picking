@@ -1,15 +1,11 @@
 import { useMemo, useState } from "react";
+import { primaryFacilityNo } from "../lib/format";
 import { allFacilityLists, useStore } from "../lib/store";
-import { pickerWorkload, queueMetrics } from "../lib/supervisorMetrics";
+import { pickerWorkload, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
 import type { FacilityPicklist } from "../lib/types";
 import { PartnerMark } from "./partners/PartnerMark";
 import { Card, Tag } from "./Ui";
 import { FacilityBlock } from "./FacilityBlock";
-
-function bucketOf(f: FacilityPicklist): "creation" | "picking" | "done" {
-  if (f.status === "completed") return "done";
-  return f.lines.some((l) => l.picker) ? "picking" : "creation";
-}
 
 function summary(f: FacilityPicklist) {
   const qty = f.lines.reduce((s, l) => s + l.qty, 0);
@@ -29,7 +25,9 @@ function PicklistItem({ f, channel, queuePos }: { f: FacilityPicklist; channel: 
           {queuePos != null && <Tag tone="info">#{queuePos}</Tag>}
           {channel && <PartnerMark name={channel} compact />}
           <b>{f.facility}</b> <span className="text-xs text-slate-500 dark:text-slate-400">{f.no}</span>{" "}
-          {f.round > 1 && <Tag tone="info">Round {f.round}</Tag>}
+          {f.round > 1 && (
+            <Tag tone="info">Alternate Picklist — for {primaryFacilityNo(f.no)}</Tag>
+          )}
         </span>
         <span className="text-[11px] text-slate-500 dark:text-slate-400">{summary(f)}</span>
       </summary>
@@ -49,7 +47,7 @@ function Bucket({
   queued,
 }: {
   title: string;
-  tone: "warn" | "info" | "ok";
+  tone: "warn" | "info" | "ok" | "bad";
   items: FacilityPicklist[];
   channelFor: (f: FacilityPicklist) => string;
   emptyText: string;
@@ -117,9 +115,10 @@ export function SupervisorQueue() {
     return true;
   });
 
-  const creation = filtered.filter((f) => bucketOf(f) === "creation");
-  const picking = filtered.filter((f) => bucketOf(f) === "picking");
-  const done = filtered.filter((f) => bucketOf(f) === "done");
+  const creation = filtered.filter((f) => queueBucket(f) === "creation");
+  const picking = filtered.filter((f) => queueBucket(f) === "picking");
+  const exceptions = filtered.filter((f) => queueBucket(f) === "exception");
+  const done = filtered.filter((f) => queueBucket(f) === "done");
 
   const metrics = useMemo(() => queueMetrics(all), [all]);
   const workload = useMemo(() => pickerWorkload(all, pickers), [all, pickers]);
@@ -172,6 +171,7 @@ export function SupervisorQueue() {
         <div className="space-y-5">
           <Bucket title="Picklist creation pending" tone="warn" items={creation} channelFor={channelFor} queued emptyText="Nothing awaiting picker assignment." />
           <Bucket title="Picking pending" tone="info" items={picking} channelFor={channelFor} queued emptyText="Nothing currently being picked." />
+          <Bucket title="Not found — needs an alternate" tone="bad" items={exceptions} channelFor={channelFor} emptyText="Nothing with a shortfall right now." />
           <Bucket title="Picking completed" tone="ok" items={done} channelFor={channelFor} emptyText="Nothing completed yet." />
         </div>
 

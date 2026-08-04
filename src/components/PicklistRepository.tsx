@@ -1,18 +1,14 @@
 import { BUCKET_LABEL, bucketFor, type Bucket } from "../lib/dateRanges";
 import { allFacilityLists, useStore } from "../lib/store";
 import type { FacilityPicklist } from "../lib/types";
-import { downloadCsv } from "../lib/format";
-import { uniwareCsv } from "../lib/uniwareExport";
+import { downloadCsv, primaryFacilityNo } from "../lib/format";
+import { uniwareCsv, uniwareReportCsv } from "../lib/uniwareExport";
 import { Button, Card, Tag } from "./Ui";
 
 const BUCKET_ORDER: Bucket[] = ["today", "yesterday", "last7", "last30", "older"];
 
 function timeLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-}
-
-function combinedCsv(lists: FacilityPicklist[]): string {
-  return uniwareCsv(lists.flatMap((f) => f.lines));
 }
 
 export function PicklistRepository() {
@@ -43,7 +39,8 @@ export function PicklistRepository() {
       <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
         Every picklist ever generated, grouped by when it was created. Downloads use the Uniware import format.
         When a picker marks a line "Not found," a follow-up picklist for that shortfall is created automatically
-        under the same Task number, tagged <b>Round 2</b> below — no manual linking needed.
+        under the same Task number, tagged <b>Alternate Picklist</b> below — no manual linking needed. Bucket
+        downloads include a Primary Picklist column so any alternate can be traced back to what it replaced.
       </p>
       <div className="space-y-4">
         {BUCKET_ORDER.map((bucket) => {
@@ -55,7 +52,7 @@ export function PicklistRepository() {
                 <span className="text-sm font-semibold">{BUCKET_LABEL[bucket]}</span>
                 <div className="flex items-center gap-2">
                   <Tag tone="muted">{rows.length} picklist(s)</Tag>
-                  <Button variant="sm" onClick={() => downloadCsv(combinedCsv(rows.map((r) => r.facility)), `picklists_${bucket}.csv`)}>
+                  <Button variant="sm" onClick={() => downloadCsv(uniwareReportCsv(rows.map((r) => r.facility)), `picklists_${bucket}.csv`)}>
                     Download
                   </Button>
                 </div>
@@ -81,7 +78,7 @@ export function PicklistRepository() {
                           {task}
                           {f.round > 1 && (
                             <div className="mt-0.5">
-                              <Tag tone="info">Round {f.round} — re-offer for not-found stock</Tag>
+                              <Tag tone="info">Alternate Picklist — for {primaryFacilityNo(f.no)}</Tag>
                             </div>
                           )}
                         </td>

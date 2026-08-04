@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickerWorkload, queueMetrics } from "../../src/lib/supervisorMetrics";
+import { pickerWorkload, queueBucket, queueMetrics } from "../../src/lib/supervisorMetrics";
 import type { FacilityPicklist } from "../../src/lib/types";
 
 function line(overrides: Partial<FacilityPicklist["lines"][number]> = {}) {
@@ -45,6 +45,24 @@ describe("queueMetrics", () => {
   it("returns null fill rate when nothing has completed yet, instead of a misleading 0%", () => {
     const m = queueMetrics([facility({ status: "open" })]);
     expect(m.fillRatePct).toBeNull();
+  });
+});
+
+describe("queueBucket", () => {
+  it("puts an unassigned open picklist in creation", () => {
+    expect(queueBucket(facility({ status: "open", lines: [line({ picker: undefined })] }))).toBe("creation");
+  });
+
+  it("puts an assigned open picklist in picking", () => {
+    expect(queueBucket(facility({ status: "open", lines: [line({ picker: "Ravi" })] }))).toBe("picking");
+  });
+
+  it("puts a fully completed picklist (no shortfall) in done", () => {
+    expect(queueBucket(facility({ status: "completed", bad: 0 }))).toBe("done");
+  });
+
+  it("puts a completed picklist with a not-found shortfall in exception, not done", () => {
+    expect(queueBucket(facility({ status: "completed", bad: 3 }))).toBe("exception");
   });
 });
 
