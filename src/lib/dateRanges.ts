@@ -39,3 +39,29 @@ export function inRange(iso: string, start: Date, end: Date): boolean {
   const t = new Date(iso).getTime();
   return t >= start.getTime() && t < end.getTime();
 }
+
+export type Bucket = RangePreset | "older";
+
+export const BUCKET_LABEL: Record<Bucket, string> = {
+  ...RANGE_LABEL,
+  older: "Older",
+};
+
+/**
+ * Mutually exclusive bucket for a timestamp — unlike rangeFor's windows
+ * (which overlap: "last7" includes today), each timestamp lands in exactly
+ * one bucket here, so a repository view built from these never lists the
+ * same picklist twice.
+ */
+export function bucketFor(iso: string, now: Date): Bucket {
+  const today = rangeFor("today", now);
+  const yesterday = rangeFor("yesterday", now);
+  const last7 = rangeFor("last7", now);
+  const last30 = rangeFor("last30", now);
+  const t = new Date(iso).getTime();
+  if (t >= today.start.getTime()) return "today";
+  if (t >= yesterday.start.getTime()) return "yesterday";
+  if (t >= last7.start.getTime()) return "last7";
+  if (t >= last30.start.getTime()) return "last30";
+  return "older";
+}
