@@ -75,6 +75,7 @@ export interface PickingTask {
   facilities: FacilityPicklist[]; // in priority order, only those with lines
   shortfall: Shortfall[];
   createdAt: string;
+  createdByName?: string; // display name of the planner who generated it
 }
 
 export interface ChannelRule {

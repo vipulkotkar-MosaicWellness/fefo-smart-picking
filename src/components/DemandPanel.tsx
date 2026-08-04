@@ -63,6 +63,7 @@ function WizardSteps({ step, furthest, onJump }: { step: Step; furthest: Step; o
 export function DemandPanel() {
   const { channelRules, skus, stock, facilityPriority, tasks, demand, setDemand, removeDemand, generate } = useStore();
   const userId = useAuth((s) => s.userId);
+  const displayName = useAuth((s) => s.profile?.display_name ?? null);
   const [step, setStep] = useState<Step>(1);
   const [furthest, setFurthest] = useState<Step>(1);
   const [text, setText] = useState("");
@@ -108,7 +109,7 @@ export function DemandPanel() {
   async function onGenerate() {
     setBusy(true);
     try {
-      await generate(userId);
+      await generate(userId, displayName);
       setStep(1);
       setFurthest(1);
       setText("");

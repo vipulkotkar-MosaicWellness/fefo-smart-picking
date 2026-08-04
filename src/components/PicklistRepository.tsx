@@ -1,21 +1,40 @@
+import { RANGE_LABEL, inRange, rangeFor, type RangePreset } from "../lib/dateRanges";
 import { allFacilityLists, useStore } from "../lib/store";
-import type { FacilityPicklist } from "../lib/types";
+import type { FacilityPicklist, PickingTask } from "../lib/types";
 import { downloadCsv } from "../lib/format";
 import { uniwareCsv } from "../lib/uniwareExport";
 import { Button, Card, Tag } from "./Ui";
 
+const RANGE_PRESETS: RangePreset[] = ["today", "yesterday", "last7", "last30"];
+
 function dayKey(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+}
+
+function timeLabel(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 function combinedCsv(lists: FacilityPicklist[]): string {
   return uniwareCsv(lists.flatMap((f) => f.lines));
 }
 
+function downloadRange(tasks: PickingTask[], preset: RangePreset) {
+  const { start, end } = rangeFor(preset, new Date());
+  const matching = tasks.filter((t) => inRange(t.createdAt, start, end));
+  const facilities = matching.flatMap((t) => t.facilities);
+  if (facilities.length === 0) {
+    alert(`No picklists were generated ${RANGE_LABEL[preset].toLowerCase()}.`);
+    return;
+  }
+  downloadCsv(combinedCsv(facilities), `picklists_${preset}.csv`);
+}
+
 export function PicklistRepository() {
   const tasks = useStore((s) => s.tasks);
   const all = allFacilityLists(tasks);
 
+  const taskByNo = new Map(tasks.map((t) => [t.no, t]));
   const groups = new Map<string, { task: string; facility: FacilityPicklist }[]>();
   for (const t of tasks) {
     for (const f of t.facilities) {
@@ -43,6 +62,16 @@ export function PicklistRepository() {
       <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
         Every picklist ever generated, grouped by the day it was created. Downloads use the Uniware import format.
       </p>
+
+      <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">
+        <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Download:</span>
+        {RANGE_PRESETS.map((p) => (
+          <Button key={p} variant="sm" onClick={() => downloadRange(tasks, p)}>
+            {RANGE_LABEL[p]}
+          </Button>
+        ))}
+      </div>
+
       <div className="space-y-4">
         {sortedDays.map((day) => {
           const rows = groups.get(day) ?? [];
@@ -63,26 +92,38 @@ export function PicklistRepository() {
                     <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Task</th>
                     <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Facility Picklist</th>
                     <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Facility</th>
+                    <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Generated</th>
                     <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Lines</th>
                     <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Status</th>
                     <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(({ task, facility: f }) => (
-                    <tr key={f.no} className="text-slate-700 dark:text-slate-200">
-                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{task}</td>
-                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{f.no}</td>
-                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{f.facility}</td>
-                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{f.lines.length}</td>
-                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                        <Tag tone={f.status === "completed" ? "ok" : "warn"}>{f.status}</Tag>
-                      </td>
-                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                        <Button variant="sm" onClick={() => downloadCsv(uniwareCsv(f.lines), `${f.no}.csv`)}>CSV</Button>
-                      </td>
-                    </tr>
-                  ))}
+                  {rows.map(({ task, facility: f }) => {
+                    const t = taskByNo.get(task);
+                    return (
+                      <tr key={f.no} className="text-slate-700 dark:text-slate-200">
+                        <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{task}</td>
+                        <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{f.no}</td>
+                        <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{f.facility}</td>
+                        <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                          {t && (
+                            <>
+                              {timeLabel(t.createdAt)}
+                              {t.createdByName && <div className="text-[10px] text-slate-500 dark:text-slate-400">by {t.createdByName}</div>}
+                            </>
+                          )}
+                        </td>
+                        <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{f.lines.length}</td>
+                        <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                          <Tag tone={f.status === "completed" ? "ok" : "warn"}>{f.status}</Tag>
+                        </td>
+                        <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                          <Button variant="sm" onClick={() => downloadCsv(uniwareCsv(f.lines), `${f.no}.csv`)}>CSV</Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

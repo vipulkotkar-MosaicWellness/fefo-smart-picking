@@ -209,7 +209,7 @@ export interface AppState {
   loadPickers: () => Promise<void>;
   setDemand: (d: DemandLine[]) => void;
   removeDemand: (i: number) => void;
-  generate: (createdBy: string | null) => Promise<void>;
+  generate: (createdBy: string | null, createdByName: string | null) => Promise<void>;
   assignAll: (facilityNo: string, picker: string) => Promise<void>;
   assignLine: (rid: number, facilityNo: string, picker: string) => Promise<void>;
   uploadAssignments: (facilityNo: string, text: string) => Promise<void>;
@@ -335,7 +335,7 @@ export const useStore = create<AppState>()(
 
       // One picking task per channel present in the demand list, created together
       // so a single multi-channel CSV upload queues multiple picklists at once.
-      generate: async (createdBy) => {
+      generate: async (createdBy, createdByName) => {
         const { skus, demand, channelRules, facilityPriority, stock, tasks } = get();
         if (Object.keys(skus).length === 0) {
           set({ notice: "No stock synced yet." });
@@ -365,6 +365,7 @@ export const useStore = create<AppState>()(
             facilities: buildFacilityLists(no, 1, byFacility, facilityPriority),
             shortfall,
             createdAt: new Date().toISOString(),
+            createdByName: createdByName ?? undefined,
           });
         }
 
