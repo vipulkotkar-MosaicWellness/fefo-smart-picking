@@ -10,6 +10,7 @@ import { DemandPanel } from "./components/DemandPanel";
 import { InventoryPanel } from "./components/InventoryPanel";
 import { PerformancePanel } from "./components/PerformancePanel";
 import { PickerView } from "./components/PickerView";
+import { NotFoundSummary } from "./components/NotFoundSummary";
 import { PicklistRepository } from "./components/PicklistRepository";
 import { SupervisorQueue } from "./components/SupervisorQueue";
 import { useAuth } from "./lib/authStore";
@@ -198,6 +199,7 @@ function Workspace() {
       {activeView === "supervisor" && (
         <div className="space-y-4">
           <SupervisorQueue />
+          <NotFoundSummary />
           <PicklistRepository />
         </div>
       )}

@@ -41,6 +41,7 @@ export function PickerView() {
   const [selectedNo, setSelectedNo] = useState<string | null>(null);
   const [idx, setIdx] = useState(0);
   const [nfMap, setNfMap] = useState<Record<number, number>>({});
+  const [nfReasonMap, setNfReasonMap] = useState<Record<number, string>>({});
   const [exceptionMode, setExceptionMode] = useState(false);
   const [exceptionReason, setExceptionReason] = useState<string>(EXCEPTION_REASONS[0]);
   const [nfVal, setNfVal] = useState(0);
@@ -53,16 +54,16 @@ export function PickerView() {
   const line = lines[idx];
   const next = lines[idx + 1];
 
-  function start(no: string) { setSelectedNo(no); setIdx(0); setNfMap({}); setExceptionMode(false); setDone(null); }
+  function start(no: string) { setSelectedNo(no); setIdx(0); setNfMap({}); setNfReasonMap({}); setExceptionMode(false); setDone(null); }
   function reset() { setSelectedNo(null); setDone(null); }
 
-  async function advance(nextNf: Record<number, number>) {
+  async function advance(nextNf: Record<number, number>, nextReasons: Record<number, string>) {
     setExceptionMode(false);
     if (idx + 1 < lines.length) { setIdx(idx + 1); return; }
     if (!f || busy) return;
     setBusy(true);
     try {
-      await applyPicks(f.no, nextNf);
+      await applyPicks(f.no, nextNf, nextReasons);
       const picked = lines.reduce((s, l) => s + (l.qty - (nextNf[l.rid] ?? 0)), 0);
       const nf = lines.reduce((s, l) => s + (nextNf[l.rid] ?? 0), 0);
       setDone({ facility: f.facility, picked, nf });
@@ -75,13 +76,15 @@ export function PickerView() {
     if (!line || busy) return; // duplicate-confirm protection: ignore a second tap while the first is still processing
     const next = { ...nfMap, [line.rid]: 0 };
     setNfMap(next);
-    void advance(next);
+    void advance(next, nfReasonMap);
   }
   function confirmException() {
     if (!line || busy) return;
     const next = { ...nfMap, [line.rid]: Math.min(Math.max(nfVal, 0), line.qty) };
+    const nextReasons = { ...nfReasonMap, [line.rid]: exceptionReason };
     setNfMap(next);
-    void advance(next);
+    setNfReasonMap(nextReasons);
+    void advance(next, nextReasons);
   }
 
   if (done) {

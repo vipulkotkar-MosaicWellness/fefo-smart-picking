@@ -39,6 +39,7 @@ export interface PickLine {
   rem: number; // remaining months at pick time
   qty: number; // suggested pick qty
   nf?: number; // not-found qty entered on completion
+  nfReason?: string; // picker's reason for the not-found qty, e.g. "Damaged stock"
   picked?: number; // actual picked (qty - nf)
   picker?: string; // assigned picker (child-picklist stage)
 }

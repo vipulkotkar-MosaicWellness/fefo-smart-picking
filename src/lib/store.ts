@@ -80,6 +80,21 @@ function waterfall(
   return { byFacility, short: remain };
 }
 
+/**
+ * Resolve one pick line's outcome from what the picker entered — unchanged
+ * if it's not in this batch of results or was already picked. Pure, so the
+ * not-found quantity + reason logic can be tested without touching
+ * applyPicks' Supabase write.
+ */
+export function resolvePickLine(line: PickLine, results: Record<number, number>, reasons?: Record<number, string>): PickLine {
+  if (line.picked != null || !(line.rid in results)) return line;
+  let n = results[line.rid];
+  if (isNaN(n) || n < 0) n = 0;
+  if (n > line.qty) n = line.qty;
+  const picked = line.qty - n;
+  return { ...line, nf: n, nfReason: n > 0 ? reasons?.[line.rid] : undefined, picked };
+}
+
 export interface ChannelAllocation {
   channel: string;
   byFacility: Record<string, PickLine[]>;
@@ -213,7 +228,7 @@ export interface AppState {
   assignAll: (facilityNo: string, picker: string) => Promise<void>;
   assignLine: (rid: number, facilityNo: string, picker: string) => Promise<void>;
   uploadAssignments: (facilityNo: string, text: string) => Promise<void>;
-  applyPicks: (facilityNo: string, results: Record<number, number>) => Promise<void>;
+  applyPicks: (facilityNo: string, results: Record<number, number>, reasons?: Record<number, string>) => Promise<void>;
   flushOfflineQueue: () => Promise<void>;
   updateChannelRule: (channel: string, rule: ChannelRule) => void;
   setFacilityPriority: (p: string[]) => void;
@@ -440,7 +455,7 @@ export const useStore = create<AppState>()(
         if (isSupabaseConfigured && changed) await updateTaskData(changed);
       },
 
-      applyPicks: async (facilityNo, results) => {
+      applyPicks: async (facilityNo, results, reasons) => {
         const state = get();
         const stock = state.stock.map((b) => ({ ...b }));
         let gpSeq = state.gpSeq;
@@ -450,14 +465,11 @@ export const useStore = create<AppState>()(
           facilities: t.facilities.map((f) => {
             if (f.no !== facilityNo) return f;
             const lines = f.lines.map((l) => {
-              if (l.picked != null || !(l.rid in results)) return l;
-              let n = results[l.rid];
-              if (isNaN(n) || n < 0) n = 0;
-              if (n > l.qty) n = l.qty;
-              const pk = l.qty - n;
+              const resolved = resolvePickLine(l, results, reasons);
+              if (resolved === l) return l;
               const b = stock.find((x) => x.rid === l.rid);
-              if (b) b.qty = Math.max(0, b.qty - pk);
-              return { ...l, nf: n, picked: pk };
+              if (b) b.qty = Math.max(0, b.qty - resolved.picked!);
+              return resolved;
             });
             return { ...f, lines };
           }),
