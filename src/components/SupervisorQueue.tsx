@@ -17,14 +17,31 @@ function channelOf(f: FacilityPicklist, tasks: ReturnType<typeof useStore.getSta
   return tasks.find((t) => t.no === f.taskNo)?.channel ?? "";
 }
 
-function PicklistItem({ f, channel, queuePos }: { f: FacilityPicklist; channel: string; queuePos?: number }) {
+function gatePassOf(f: FacilityPicklist, tasks: ReturnType<typeof useStore.getState>["tasks"]): string | undefined {
+  return tasks.find((t) => t.no === f.taskNo)?.gatePassNo;
+}
+
+function PicklistItem({
+  f,
+  channel,
+  gatePassNo,
+  queuePos,
+}: {
+  f: FacilityPicklist;
+  channel: string;
+  gatePassNo?: string;
+  queuePos?: number;
+}) {
   return (
     <details className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden">
       <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-lg p-2.5 hover:bg-slate-50 dark:hover:bg-slate-900">
         <span className="flex items-center gap-1.5 text-sm">
           {queuePos != null && <Tag tone="info">#{queuePos}</Tag>}
           {channel && <PartnerMark name={channel} compact />}
-          <b>{f.facility}</b> <span className="text-xs text-slate-500 dark:text-slate-400">{f.no}</span>{" "}
+          <b>{f.facility}</b>{" "}
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {gatePassNo ? `Gate Pass ${gatePassNo} · ` : ""}{f.no}
+          </span>{" "}
           {f.round > 1 && (
             <Tag tone="info">Alternate Picklist — for {primaryFacilityNo(f.no)}</Tag>
           )}
@@ -32,7 +49,7 @@ function PicklistItem({ f, channel, queuePos }: { f: FacilityPicklist; channel: 
         <span className="text-[11px] text-slate-500 dark:text-slate-400">{summary(f)}</span>
       </summary>
       <div className="border-t border-slate-200 p-2.5 dark:border-slate-700">
-        <FacilityBlock f={f} />
+        <FacilityBlock f={f} gatePassNo={gatePassNo} />
       </div>
     </details>
   );
@@ -43,6 +60,7 @@ function Bucket({
   tone,
   items,
   channelFor,
+  gatePassFor,
   emptyText,
   queued,
 }: {
@@ -50,6 +68,7 @@ function Bucket({
   tone: "warn" | "info" | "ok" | "bad";
   items: FacilityPicklist[];
   channelFor: (f: FacilityPicklist) => string;
+  gatePassFor: (f: FacilityPicklist) => string | undefined;
   emptyText: string;
   queued?: boolean;
 }) {
@@ -61,7 +80,9 @@ function Bucket({
       {items.length === 0 ? (
         <p className="rounded-lg border border-dashed border-slate-200 p-2.5 text-[11px] text-slate-400 dark:border-slate-700">{emptyText}</p>
       ) : (
-        items.map((f, i) => <PicklistItem key={f.no} f={f} channel={channelFor(f)} queuePos={queued ? i + 1 : undefined} />)
+        items.map((f, i) => (
+          <PicklistItem key={f.no} f={f} channel={channelFor(f)} gatePassNo={gatePassFor(f)} queuePos={queued ? i + 1 : undefined} />
+        ))
       )}
     </div>
   );
@@ -79,7 +100,7 @@ function ShortfallAlert() {
       </h3>
       {withShortfall.map((t) => (
         <p key={t.no} className="text-[11px] text-rose-800 dark:text-rose-200">
-          <b>{t.no}</b> ({t.channel}): {t.shortfall.map((s) => `${s.name} — ${s.qty} short`).join(", ")}
+          <b>Gate Pass {t.gatePassNo}</b> ({t.channel}): {t.shortfall.map((s) => `${s.name} — ${s.qty} short`).join(", ")}
         </p>
       ))}
     </div>
@@ -107,6 +128,7 @@ export function SupervisorQueue() {
   const [channelFilter, setChannelFilter] = useState("");
   const [pickerFilter, setPickerFilter] = useState("");
   const channelFor = (f: FacilityPicklist) => channelOf(f, tasks);
+  const gatePassFor = (f: FacilityPicklist) => gatePassOf(f, tasks);
 
   const filtered = all.filter((f) => {
     if (facilityFilter && f.facility !== facilityFilter) return false;
@@ -169,10 +191,10 @@ export function SupervisorQueue() {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
         <div className="space-y-5">
-          <Bucket title="Picklist creation pending" tone="warn" items={creation} channelFor={channelFor} queued emptyText="Nothing awaiting picker assignment." />
-          <Bucket title="Picking pending" tone="info" items={picking} channelFor={channelFor} queued emptyText="Nothing currently being picked." />
-          <Bucket title="Not found — needs an alternate" tone="bad" items={exceptions} channelFor={channelFor} emptyText="Nothing with a shortfall right now." />
-          <Bucket title="Picking completed" tone="ok" items={done} channelFor={channelFor} emptyText="Nothing completed yet." />
+          <Bucket title="Picklist creation pending" tone="warn" items={creation} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing awaiting picker assignment." />
+          <Bucket title="Picking pending" tone="info" items={picking} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing currently being picked." />
+          <Bucket title="Not found — needs an alternate" tone="bad" items={exceptions} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing with a shortfall right now." />
+          <Bucket title="Picking completed" tone="ok" items={done} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing completed yet." />
         </div>
 
         <div className="rounded-xl border border-[var(--fefo-line)] p-3 dark:border-slate-700">

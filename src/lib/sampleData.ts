@@ -61,22 +61,24 @@ export function parseStockCsv(text: string): StockTuple[] {
   return out;
 }
 
-/** Parse multi-channel demand CSV text (Channel, SKU Code, Qty). */
+/** Parse multi-channel demand CSV text (Channel, SKU Code, Qty, Gate Pass Number). */
 export function parseDemandCsv(
   text: string,
   known: Record<string, unknown>,
   knownChannels: Record<string, unknown>,
 ): {
-  demand: { channel: string; sku: string; qty: number }[];
+  demand: { channel: string; sku: string; qty: number; gatePassNo: string }[];
   badSku: string[];
   badChannel: string[];
   badQty: string[];
+  badGatePass: string[];
   duplicatesMerged: string[];
 } {
-  const demand: { channel: string; sku: string; qty: number }[] = [];
+  const demand: { channel: string; sku: string; qty: number; gatePassNo: string }[] = [];
   const badSku: string[] = [];
   const badChannel: string[] = [];
   const badQty: string[] = [];
+  const badGatePass: string[] = [];
   const duplicatesMerged: string[] = [];
   text
     .trim()
@@ -85,10 +87,11 @@ export function parseDemandCsv(
       if (!ln.trim()) return;
       const c = ln.split(",").map((s) => s.trim());
       if (/channel/i.test(c[0]) && /sku/i.test(ln)) return; // header
-      if (c.length < 3) return;
+      if (c.length < 4) return;
       const channel = c[0];
       const sku = c[1];
       const qty = parseInt(c[2], 10);
+      const gatePassNo = c[3];
       if (!(channel in knownChannels)) {
         badChannel.push(channel);
         return;
@@ -101,14 +104,18 @@ export function parseDemandCsv(
         badQty.push(`${channel} / ${sku}`);
         return;
       }
-      const ex = demand.find((d) => d.channel === channel && d.sku === sku);
+      if (!gatePassNo) {
+        badGatePass.push(`${channel} / ${sku}`);
+        return;
+      }
+      const ex = demand.find((d) => d.channel === channel && d.sku === sku && d.gatePassNo === gatePassNo);
       if (ex) {
         ex.qty += qty;
-        const key = `${channel} / ${sku}`;
+        const key = `${channel} / ${sku} / ${gatePassNo}`;
         if (!duplicatesMerged.includes(key)) duplicatesMerged.push(key);
       } else {
-        demand.push({ channel, sku, qty });
+        demand.push({ channel, sku, qty, gatePassNo });
       }
     });
-  return { demand, badSku, badChannel, badQty, duplicatesMerged };
+  return { demand, badSku, badChannel, badQty, badGatePass, duplicatesMerged };
 }

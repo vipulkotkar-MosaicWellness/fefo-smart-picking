@@ -15,7 +15,7 @@ describe("DemandPanel wizard", () => {
     const user = userEvent.setup();
     render(<DemandPanel />);
 
-    await user.type(screen.getByPlaceholderText(/Blinkit, MWMMHRP/), "Nowhere, MWMMHRP.0001.AAAA.B0_N, 10");
+    await user.type(screen.getByPlaceholderText(/Blinkit, MWMMHRP/), "Nowhere, MWMMHRP.0001.AAAA.B0_N, 10, GP-1001");
     await user.click(screen.getByRole("button", { name: "Parse" }));
 
     expect(screen.getByText("Unknown channel(s)")).toBeVisible();
@@ -29,7 +29,7 @@ describe("DemandPanel wizard", () => {
     render(<DemandPanel />);
 
     const [sku] = Object.keys(useStore.getState().skus);
-    await user.type(screen.getByPlaceholderText(/Blinkit, MWMMHRP/), `Blinkit, ${sku}, 5`);
+    await user.type(screen.getByPlaceholderText(/Blinkit, MWMMHRP/), `Blinkit, ${sku}, 5, GP-1001`);
     await user.click(screen.getByRole("button", { name: "Parse" }));
 
     expect(screen.getByRole("button", { name: "Review allocation" })).toBeEnabled();

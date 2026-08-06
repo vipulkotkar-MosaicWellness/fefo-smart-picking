@@ -8,9 +8,10 @@ import { PartnerMark } from "./partners/PartnerMark";
 import { Button, Card, Tag } from "./Ui";
 
 const SAMPLE_DEMAND =
-  "Blinkit, MWMMHRP.0001.AAAA.B0_N, 120\nAmazon, MWMMHRP.0004.AAAA.B0_N, 80\nMyntra, MWMMPRK.2026.AAAA.B0_N, 60";
+  "Blinkit, MWMMHRP.0001.AAAA.B0_N, 120, GP-100234\nAmazon, MWMMHRP.0004.AAAA.B0_N, 80, GP-100235\nMyntra, MWMMPRK.2026.AAAA.B0_N, 60, GP-100236";
 
-const TEMPLATE = "Channel,SKU Code,Qty\nBlinkit,MWMMHRP.0001.AAAA.B0_N,50\nAmazon,MWMMHRP.0004.AAAA.B0_N,30\n";
+const TEMPLATE =
+  "Channel,SKU Code,Qty,Gate Pass Number\nBlinkit,MWMMHRP.0001.AAAA.B0_N,50,GP-100234\nAmazon,MWMMHRP.0004.AAAA.B0_N,30,GP-100235\n";
 
 type Step = 1 | 2 | 3 | 4;
 const STEPS: { id: Step; label: string }[] = [
@@ -24,6 +25,7 @@ interface ValidationIssues {
   badSku: string[];
   badChannel: string[];
   badQty: string[];
+  badGatePass: string[];
   duplicatesMerged: string[];
 }
 
@@ -76,9 +78,9 @@ export function DemandPanel() {
   }
 
   function runParse(content: string) {
-    const { demand: rows, badSku, badChannel, badQty, duplicatesMerged } = parseDemandCsv(content, skus, channelRules);
+    const { demand: rows, badSku, badChannel, badQty, badGatePass, duplicatesMerged } = parseDemandCsv(content, skus, channelRules);
     setDemand(rows);
-    setIssues({ badSku, badChannel, badQty, duplicatesMerged });
+    setIssues({ badSku, badChannel, badQty, badGatePass, duplicatesMerged });
     goTo(2);
   }
 
@@ -102,9 +104,10 @@ export function DemandPanel() {
 
   const totalUnits = demand.reduce((s, d) => s + d.qty, 0);
   const facilitiesUsed = new Set(allocations.flatMap((a) => Object.keys(a.byFacility))).size;
-  const channelCount = new Set(demand.map((d) => d.channel)).size;
+  const picklistCount = allocations.length; // one per (channel, gate pass) group
   const totalShortfall = allocations.reduce((s, a) => s + a.shortfall.reduce((x, f) => x + f.qty, 0), 0);
-  const errorCount = (issues?.badSku.length ?? 0) + (issues?.badChannel.length ?? 0) + (issues?.badQty.length ?? 0);
+  const errorCount =
+    (issues?.badSku.length ?? 0) + (issues?.badChannel.length ?? 0) + (issues?.badQty.length ?? 0) + (issues?.badGatePass.length ?? 0);
 
   async function onGenerate() {
     setBusy(true);
@@ -133,13 +136,14 @@ export function DemandPanel() {
       {step === 1 && (
         <div>
           <label className="block text-[11px] font-semibold text-[var(--fefo-muted)] dark:text-slate-400">
-            Paste demand rows <span className="font-normal">(Channel, SKU Code, Qty)</span> — one channel per row, mix as
-            many channels as you like. A separate picking task is created per channel.
+            Paste demand rows <span className="font-normal">(Channel, SKU Code, Qty, Gate Pass Number)</span> — a gate
+            pass is one dispatch document and can carry several SKUs; every row under the same gate pass number
+            becomes one picklist.
           </label>
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={"Blinkit, MWMMHRP.0001.AAAA.B0_N, 50\nAmazon, MWMMHRP.0004.AAAA.B0_N, 30"}
+            placeholder={"Blinkit, MWMMHRP.0001.AAAA.B0_N, 50, GP-100234\nAmazon, MWMMHRP.0004.AAAA.B0_N, 30, GP-100235"}
             className="mt-1 min-h-24 w-full rounded-lg border border-slate-300 bg-white p-2 font-mono text-xs dark:border-slate-600 dark:bg-slate-900"
           />
           <div className="mt-2 flex flex-wrap gap-2">
@@ -165,11 +169,12 @@ export function DemandPanel() {
 
       {step === 2 && issues && (
         <div>
-          <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+          <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-5">
             <ValidationSummary tone="ok" value={demand.length} label="Valid rows" />
             <ValidationSummary tone="warn" value={issues.duplicatesMerged.length} label="Duplicates merged" />
             <ValidationSummary tone="bad" value={issues.badChannel.length} label="Unknown channel" />
             <ValidationSummary tone="bad" value={issues.badSku.length + issues.badQty.length} label="SKU / qty errors" />
+            <ValidationSummary tone="bad" value={issues.badGatePass.length} label="Missing gate pass" />
           </div>
 
           {errorCount > 0 && (
@@ -189,6 +194,11 @@ export function DemandPanel() {
                   <b>Invalid quantity</b> — {[...new Set(issues.badQty)].join(", ")}
                 </p>
               )}
+              {issues.badGatePass.length > 0 && (
+                <p>
+                  <b>Missing gate pass number</b> — {[...new Set(issues.badGatePass)].join(", ")}
+                </p>
+              )}
               <p className="text-rose-700 dark:text-rose-300">These rows are excluded and won't be part of the picklist.</p>
             </div>
           )}
@@ -199,11 +209,12 @@ export function DemandPanel() {
             ) : (
               demand.map((d, i) => (
                 <div
-                  key={`${d.channel}-${d.sku}`}
+                  key={`${d.channel}-${d.sku}-${d.gatePassNo}`}
                   className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
                 >
                   <span className="inline-flex items-center gap-1.5">
-                    <PartnerMark name={d.channel} compact /> · {skus[d.sku]?.name ?? d.sku} · <b>{d.qty}</b>
+                    <PartnerMark name={d.channel} compact /> · {skus[d.sku]?.name ?? d.sku} · <b>{d.qty}</b> ·{" "}
+                    <span className="text-[var(--fefo-muted)] dark:text-slate-400">GP {d.gatePassNo}</span>
                   </span>
                   <Button variant="sm" onClick={() => removeDemand(i)}>
                     Exclude
@@ -235,9 +246,12 @@ export function DemandPanel() {
 
           <div className="space-y-2.5">
             {allocations.map((a) => (
-              <div key={a.channel} className="rounded-lg border border-[var(--fefo-line)] p-2.5 dark:border-slate-700">
+              <div key={`${a.channel}-${a.gatePassNo}`} className="rounded-lg border border-[var(--fefo-line)] p-2.5 dark:border-slate-700">
                 <div className="mb-1.5 flex items-center justify-between">
-                  <PartnerMark name={a.channel} />
+                  <span className="inline-flex items-center gap-1.5">
+                    <PartnerMark name={a.channel} />
+                    <Tag tone="info">Gate Pass {a.gatePassNo}</Tag>
+                  </span>
                   <span className="text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">
                     {Object.values(a.byFacility).reduce((s, lines) => s + lines.reduce((x, l) => x + l.qty, 0), 0)} units
                     allocated
@@ -275,11 +289,11 @@ export function DemandPanel() {
       {step === 4 && (
         <div className="rounded-xl border border-dashed border-[var(--fefo-line)] p-6 text-center dark:border-slate-700">
           <p className="text-lg font-bold text-[var(--fefo-text)] dark:text-slate-100">
-            Ready to generate {channelCount} picklist{channelCount === 1 ? "" : "s"}
+            Ready to generate {picklistCount} picklist{picklistCount === 1 ? "" : "s"}
           </p>
           <p className="mt-1 text-xs text-[var(--fefo-muted)] dark:text-slate-400">
-            {totalUnits} units · {facilitiesUsed} facilit{facilitiesUsed === 1 ? "y" : "ies"} · {channelCount} channel
-            {channelCount === 1 ? "" : "s"}
+            {totalUnits} units · {facilitiesUsed} facilit{facilitiesUsed === 1 ? "y" : "ies"} · {picklistCount} gate pass
+            {picklistCount === 1 ? "" : "es"}
             {totalShortfall > 0 && ` · ${totalShortfall} unit(s) short`}
           </p>
           <div className="mt-3 flex justify-center gap-2">

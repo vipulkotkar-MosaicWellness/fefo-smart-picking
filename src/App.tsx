@@ -11,6 +11,7 @@ import { InventoryPanel } from "./components/InventoryPanel";
 import { PerformancePanel } from "./components/PerformancePanel";
 import { PickerView } from "./components/PickerView";
 import { NotFoundSummary } from "./components/NotFoundSummary";
+import { OverallReport } from "./components/OverallReport";
 import { PicklistRepository } from "./components/PicklistRepository";
 import { SupervisorQueue } from "./components/SupervisorQueue";
 import { useAuth } from "./lib/authStore";
@@ -200,6 +201,7 @@ function Workspace() {
         <div className="space-y-4">
           <SupervisorQueue />
           <NotFoundSummary />
+          <OverallReport />
           <PicklistRepository />
         </div>
       )}

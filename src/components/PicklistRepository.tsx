@@ -3,7 +3,7 @@ import { BUCKET_LABEL, bucketFor, type Bucket } from "../lib/dateRanges";
 import { downloadCsv, primaryFacilityNo } from "../lib/format";
 import { allFacilityLists, useStore } from "../lib/store";
 import type { FacilityPicklist } from "../lib/types";
-import { uniwareCsv, uniwareReportCsv } from "../lib/uniwareExport";
+import { gatePassBulkCsv, uniwareCsv, uniwareReportCsv } from "../lib/uniwareExport";
 import { Button, Card, Tag } from "./Ui";
 
 const BUCKET_ORDER: Bucket[] = ["today", "yesterday", "last30", "older"];
@@ -55,9 +55,22 @@ export function PicklistRepository() {
           ))}
         </div>
         {rows.length > 0 && (
-          <Button variant="sm" onClick={() => downloadCsv(uniwareReportCsv(rows.map((r) => r.facility)), `picklists_${active}.csv`)}>
-            Download {BUCKET_LABEL[active]}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="sm" onClick={() => downloadCsv(uniwareReportCsv(rows.map((r) => r.facility)), `picklists_${active}.csv`)}>
+              Download {BUCKET_LABEL[active]}
+            </Button>
+            <Button
+              variant="sm"
+              onClick={() =>
+                downloadCsv(
+                  gatePassBulkCsv(rows.map((r) => ({ gatePassNo: taskByNo.get(r.task)?.gatePassNo ?? r.task, lines: r.facility.lines }))),
+                  `gate_pass_bulk_${active}.csv`,
+                )
+              }
+            >
+              Bulk Gate Pass CSV
+            </Button>
+          </div>
         )}
       </div>
 
@@ -67,6 +80,7 @@ export function PicklistRepository() {
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+              <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Gate Pass</th>
               <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Task</th>
               <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Facility Picklist</th>
               <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Facility</th>
@@ -81,6 +95,7 @@ export function PicklistRepository() {
               const t = taskByNo.get(task);
               return (
                 <tr key={f.no} className="text-slate-700 dark:text-slate-200">
+                  <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">{t?.gatePassNo ?? "—"}</td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
                     {task}
                     {f.round > 1 && (
@@ -104,7 +119,7 @@ export function PicklistRepository() {
                     <Tag tone={f.status === "completed" ? "ok" : "warn"}>{f.status}</Tag>
                   </td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                    <Button variant="sm" onClick={() => downloadCsv(uniwareCsv(f.lines), `${f.no}.csv`)}>CSV</Button>
+                    <Button variant="sm" onClick={() => downloadCsv(uniwareCsv(f.lines), `${t?.gatePassNo || f.no}.csv`)}>CSV</Button>
                   </td>
                 </tr>
               );

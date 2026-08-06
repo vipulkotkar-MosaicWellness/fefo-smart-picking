@@ -46,3 +46,13 @@ export function uniwareReportCsv(facilities: FacilityPicklist[]): string {
   });
   return `${HEADER},Primary Picklist\n${rows.join("\n")}\n`;
 }
+
+/**
+ * Bulk gate pass CSV — Gate Pass ID, SKU, Qty. Minimal, reconciliation-style
+ * export across many picklists at once (as opposed to the Uniware import
+ * format above, which is one specific picklist's full detail).
+ */
+export function gatePassBulkCsv(entries: { gatePassNo: string; lines: PickLine[] }[]): string {
+  const rows = entries.flatMap(({ gatePassNo, lines }) => lines.map((l) => `${csvCell(gatePassNo)},${csvCell(l.sku)},${csvCell(l.qty)}`));
+  return "Gate Pass ID,SKU,Qty\n" + rows.join("\n") + "\n";
+}

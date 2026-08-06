@@ -7,7 +7,7 @@ import type { FacilityPicklist } from "../lib/types";
 import { Button, Tag } from "./Ui";
 
 /** The full picklist detail: assignment controls, share buttons, line table, complete button. */
-export function FacilityBlock({ f }: { f: FacilityPicklist }) {
+export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePassNo?: string }) {
   const { pickers, assignAll, assignLine, uploadAssignments, applyPicks } = useStore();
   const [nf, setNf] = useState<Record<number, number>>({});
   const [assignTo, setAssignTo] = useState("");
@@ -27,8 +27,10 @@ export function FacilityBlock({ f }: { f: FacilityPicklist }) {
   }
   function csv() {
     // Uniware-import-ready format: SKU, Qty, Inventory Type, Shelf Code, Unit
-    // Price (from the COGS sheet), Batch Code, Force Allocate.
-    downloadCsv(uniwareCsv(lines), `${f.no}.csv`);
+    // Price (from the COGS sheet), Batch Code, Force Allocate. Filename uses
+    // the gate pass number (the customer-facing label) when known, so the
+    // exported file matches what ops already calls this dispatch.
+    downloadCsv(uniwareCsv(lines), `${gatePassNo || f.no}.csv`);
   }
   function print() {
     const html =
@@ -58,7 +60,8 @@ export function FacilityBlock({ f }: { f: FacilityPicklist }) {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm">
-          <b>{f.taskNo}</b> <span className="text-xs text-slate-500 dark:text-slate-400">{f.no}</span>{" "}
+          {gatePassNo && <><b>Gate Pass {gatePassNo}</b> · </>}
+          <span className="text-xs text-slate-500 dark:text-slate-400">{f.taskNo} · {f.no}</span>{" "}
           {f.round > 1 && <Tag tone="info">Round {f.round}</Tag>}
           {f.bad ? <span className="ml-1 text-xs text-rose-600 dark:text-rose-400">· {f.bad} not found</span> : null}
         </div>

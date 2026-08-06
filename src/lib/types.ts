@@ -26,6 +26,7 @@ export interface DemandLine {
   channel: string;
   sku: string;
   qty: number;
+  gatePassNo: string; // externally supplied gate pass document number, captured at demand upload
 }
 
 export interface PickLine {
@@ -70,7 +71,8 @@ export interface Shortfall {
 
 /** A demand upload from the planner — the top-level unit the warehouse acts on. */
 export interface PickingTask {
-  no: string; // PT-260722-001
+  no: string; // PT-260722-001 — internal ID, kept for FEFO/reservation bookkeeping
+  gatePassNo: string; // externally supplied gate pass number — the customer-facing label
   channel: string;
   demand: DemandLine[];
   facilities: FacilityPicklist[]; // in priority order, only those with lines
