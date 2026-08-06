@@ -58,6 +58,7 @@ export interface FacilityPicklist {
   gp?: string; // gatepass number
   pickedTotal?: number;
   lines: PickLine[];
+  createdAt?: string; // when this specific round was generated — undefined on data from before this field existed, falls back to the parent task's createdAt
 }
 
 export type Role = "super_admin" | "admin" | "planner" | "picker";

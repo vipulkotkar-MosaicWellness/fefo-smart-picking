@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { BUCKET_LABEL, bucketFor, type Bucket } from "../lib/dateRanges";
-import { downloadCsv, primaryFacilityNo } from "../lib/format";
-import { allFacilityLists, useStore } from "../lib/store";
-import type { FacilityPicklist } from "../lib/types";
+import { downloadCsv } from "../lib/format";
+import { groupPicklistFamilies, type PicklistFamily } from "../lib/picklistFamilies";
+import { useStore } from "../lib/store";
 import { gatePassBulkCsv, uniwareCsv } from "../lib/uniwareExport";
 import { Button, Card, Tag } from "./Ui";
 
@@ -12,28 +12,100 @@ function timeLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
+function roundLabel(round: number): string {
+  if (round === 1) return "Original";
+  if (round === 2) return "Not-Found Re-offer";
+  return `Round ${round}`;
+}
+
+function FamilyRow({
+  family,
+  gatePassNo,
+  createdByName,
+  selectedRound,
+  onSelectRound,
+}: {
+  family: PicklistFamily;
+  gatePassNo: string;
+  createdByName?: string;
+  selectedRound: number;
+  onSelectRound: (round: number) => void;
+}) {
+  const active = family.rounds.find((r) => r.round === selectedRound) ?? family.rounds[family.rounds.length - 1];
+  const hasAlternates = family.rounds.length > 1;
+
+  return (
+    <div className="rounded-lg border border-slate-200 dark:border-slate-700">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+        <div>
+          <span className="text-sm font-semibold">{gatePassNo}</span>
+          <span className="ml-2 text-[11px] text-slate-500 dark:text-slate-400">{family.taskNo} · {active.facility}</span>
+        </div>
+        {hasAlternates && (
+          <div className="flex gap-1 rounded-md border border-slate-300 bg-white p-0.5 dark:border-slate-600 dark:bg-slate-800">
+            {family.rounds.map((r) => (
+              <button
+                key={r.round}
+                onClick={() => onSelectRound(r.round)}
+                className={`rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
+                  active.round === r.round ? "bg-teal-700 text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                }`}
+              >
+                {roundLabel(r.round)}
+                {r.round === 1 && r.bad > 0 && <Tag tone="bad">short</Tag>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <table className="w-full border-collapse text-xs">
+        <tbody>
+          <tr className="text-slate-700 dark:text-slate-200">
+            <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{active.no}</td>
+            <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+              {timeLabel(active.createdAt ?? family.latestCreatedAt)}
+              {active.round === 1 && createdByName && <div className="text-[10px] text-slate-500 dark:text-slate-400">by {createdByName}</div>}
+            </td>
+            <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{active.lines.length} line(s)</td>
+            <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+              <Tag tone={active.status === "completed" ? "ok" : "warn"}>{active.status}</Tag>
+              {active.bad > 0 && <Tag tone="bad">{active.bad} not found</Tag>}
+            </td>
+            <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
+              <Button variant="sm" onClick={() => downloadCsv(uniwareCsv(active.lines, gatePassNo), `${gatePassNo}-${roundLabel(active.round).replace(/\s+/g, "_")}.csv`)}>
+                CSV
+              </Button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function PicklistRepository() {
   const tasks = useStore((s) => s.tasks);
-  const all = allFacilityLists(tasks);
   const now = new Date();
   const [active, setActive] = useState<Bucket>("today");
+  const [selectedRounds, setSelectedRounds] = useState<Record<string, number>>({});
 
   const taskByNo = new Map(tasks.map((t) => [t.no, t]));
-  const groups = new Map<Bucket, { task: string; facility: FacilityPicklist }[]>();
-  for (const t of tasks) {
-    const bucket = bucketFor(t.createdAt, now);
-    for (const f of t.facilities) {
-      if (!groups.has(bucket)) groups.set(bucket, []);
-      groups.get(bucket)!.push({ task: t.no, facility: f });
-    }
-  }
+  const families = groupPicklistFamilies(tasks);
 
-  if (all.length === 0) {
+  if (families.length === 0) {
     return (
       <Card title="Picklist repository">
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No picklists generated yet.</p>
       </Card>
     );
+  }
+
+  const groups = new Map<Bucket, PicklistFamily[]>();
+  for (const fam of families) {
+    const bucket = bucketFor(fam.latestCreatedAt, now);
+    if (!groups.has(bucket)) groups.set(bucket, []);
+    groups.get(bucket)!.push(fam);
   }
 
   const rows = groups.get(active) ?? [];
@@ -55,74 +127,43 @@ export function PicklistRepository() {
           ))}
         </div>
         {rows.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="sm"
-              onClick={() =>
-                downloadCsv(
-                  gatePassBulkCsv(rows.map((r) => ({ gatePassNo: taskByNo.get(r.task)?.gatePassNo ?? r.task, lines: r.facility.lines }))),
-                  `gate_pass_bulk_${active}.csv`,
-                )
-              }
-            >
-              Bulk Gate Pass CSV
-            </Button>
-          </div>
+          <Button
+            variant="sm"
+            onClick={() =>
+              downloadCsv(
+                gatePassBulkCsv(
+                  rows.flatMap((fam) => {
+                    const r = fam.rounds.find((x) => x.round === (selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round)) ?? fam.rounds[fam.rounds.length - 1];
+                    return [{ gatePassNo: taskByNo.get(fam.taskNo)?.gatePassNo ?? fam.taskNo, lines: r.lines }];
+                  }),
+                ),
+                `gate_pass_bulk_${active}.csv`,
+              )
+            }
+          >
+            Bulk Gate Pass CSV
+          </Button>
         )}
       </div>
 
       {rows.length === 0 ? (
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">Nothing in {BUCKET_LABEL[active].toLowerCase()}.</p>
       ) : (
-        <table className="w-full border-collapse text-xs">
-          <thead>
-            <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
-              <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Gate Pass</th>
-              <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Task</th>
-              <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Facility Picklist</th>
-              <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Facility</th>
-              <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Generated</th>
-              <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Lines</th>
-              <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">Status</th>
-              <th className="border-b border-slate-100 p-1.5 dark:border-slate-700/60"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ task, facility: f }) => {
-              const t = taskByNo.get(task);
-              return (
-                <tr key={f.no} className="text-slate-700 dark:text-slate-200">
-                  <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">{t?.gatePassNo ?? "—"}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                    {task}
-                    {f.round > 1 && (
-                      <div className="mt-0.5">
-                        <Tag tone="info">Alternate Picklist — for {primaryFacilityNo(f.no)}</Tag>
-                      </div>
-                    )}
-                  </td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{f.no}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{f.facility}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                    {t && (
-                      <>
-                        {timeLabel(t.createdAt)}
-                        {t.createdByName && <div className="text-[10px] text-slate-500 dark:text-slate-400">by {t.createdByName}</div>}
-                      </>
-                    )}
-                  </td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{f.lines.length}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                    <Tag tone={f.status === "completed" ? "ok" : "warn"}>{f.status}</Tag>
-                  </td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                    <Button variant="sm" onClick={() => downloadCsv(uniwareCsv(f.lines, t?.gatePassNo || f.no), `${t?.gatePassNo || f.no}.csv`)}>CSV</Button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="space-y-3">
+          {rows.map((fam) => {
+            const t = taskByNo.get(fam.taskNo);
+            return (
+              <FamilyRow
+                key={fam.key}
+                family={fam}
+                gatePassNo={t?.gatePassNo ?? fam.taskNo}
+                createdByName={t?.createdByName}
+                selectedRound={selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round}
+                onSelectRound={(round) => setSelectedRounds((prev) => ({ ...prev, [fam.key]: round }))}
+              />
+            );
+          })}
+        </div>
       )}
     </Card>
   );
