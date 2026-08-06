@@ -10,6 +10,11 @@ export function cutoffMonths(rule: ChannelRule, shelf: number): number {
   return rule.type === "fixed" ? rule.val : +(rule.val * shelf).toFixed(1);
 }
 
+/** Bins holding physically set-aside not-found/exception stock — never real pickable inventory. */
+export function isExceptionBin(bin: string): boolean {
+  return bin.trim().toUpperCase().startsWith("CC-NTF");
+}
+
 /** Parse a bin code into [zone letter, position number] for path ordering. */
 export function binKey(bin: string): [string, number] {
   const m = /([A-Za-z]+)-?([A-Za-z])(\d+)/.exec(bin) || /([A-Za-z])(\d+)/.exec(bin);
@@ -45,8 +50,9 @@ export interface AllocateResult {
 
 /**
  * Allocate demand for one SKU at one facility: keep Good + Active stock,
- * keep only batches meeting the channel shelf-life cutoff, sort FEFO, and
- * fill across bins using currently available (un-reserved) qty.
+ * excluding not-found exception bins (CC-NTF*), keep only batches meeting
+ * the channel shelf-life cutoff, sort FEFO, and fill across bins using
+ * currently available (un-reserved) qty.
  */
 export function allocate(args: AllocateArgs): AllocateResult {
   const { sku, need, location, cutoff, stock, reservedFor } = args;
@@ -60,6 +66,7 @@ export function allocate(args: AllocateArgs): AllocateResult {
         b.location === location &&
         b.type === "Good" &&
         b.active === "Active" &&
+        !isExceptionBin(b.bin) &&
         !exclude.includes(b.rid),
     )
     .map((b) => ({ b, rem: monthsRemaining(b.exp, today), av: b.qty - reservedFor(b.rid) }))
