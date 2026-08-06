@@ -26,11 +26,12 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
     navigator.clipboard.writeText(txt).then(() => alert("Picklist copied."), () => alert("Copy blocked; use CSV."));
   }
   function csv() {
-    // Uniware-import-ready format: SKU, Qty, Inventory Type, Shelf Code, Unit
-    // Price (from the COGS sheet), Batch Code, Force Allocate. Filename uses
-    // the gate pass number (the customer-facing label) when known, so the
-    // exported file matches what ops already calls this dispatch.
-    downloadCsv(uniwareCsv(lines), `${gatePassNo || f.no}.csv`);
+    // Uniware-import-ready format: Gate Pass ID, SKU, Qty, Inventory Type,
+    // Shelf Code, Unit Price (from the COGS sheet), Batch Code, Force
+    // Allocate. Filename uses the gate pass number (the customer-facing
+    // label) when known, so the exported file matches what ops already
+    // calls this dispatch.
+    downloadCsv(uniwareCsv(lines, gatePassNo || f.no), `${gatePassNo || f.no}.csv`);
   }
   function print() {
     const html =

@@ -3,7 +3,7 @@ import { BUCKET_LABEL, bucketFor, type Bucket } from "../lib/dateRanges";
 import { downloadCsv, primaryFacilityNo } from "../lib/format";
 import { allFacilityLists, useStore } from "../lib/store";
 import type { FacilityPicklist } from "../lib/types";
-import { gatePassBulkCsv, uniwareCsv, uniwareReportCsv } from "../lib/uniwareExport";
+import { gatePassBulkCsv, uniwareCsv } from "../lib/uniwareExport";
 import { Button, Card, Tag } from "./Ui";
 
 const BUCKET_ORDER: Bucket[] = ["today", "yesterday", "last30", "older"];
@@ -56,9 +56,6 @@ export function PicklistRepository() {
         </div>
         {rows.length > 0 && (
           <div className="flex flex-wrap gap-2">
-            <Button variant="sm" onClick={() => downloadCsv(uniwareReportCsv(rows.map((r) => r.facility)), `picklists_${active}.csv`)}>
-              Download {BUCKET_LABEL[active]}
-            </Button>
             <Button
               variant="sm"
               onClick={() =>
@@ -119,7 +116,7 @@ export function PicklistRepository() {
                     <Tag tone={f.status === "completed" ? "ok" : "warn"}>{f.status}</Tag>
                   </td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                    <Button variant="sm" onClick={() => downloadCsv(uniwareCsv(f.lines), `${t?.gatePassNo || f.no}.csv`)}>CSV</Button>
+                    <Button variant="sm" onClick={() => downloadCsv(uniwareCsv(f.lines, t?.gatePassNo || f.no), `${t?.gatePassNo || f.no}.csv`)}>CSV</Button>
                   </td>
                 </tr>
               );
