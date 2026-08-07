@@ -2,7 +2,7 @@ import { useState } from "react";
 import { BUCKET_LABEL, bucketFor, type Bucket } from "../lib/dateRanges";
 import { downloadCsv } from "../lib/format";
 import { groupPicklistFamilies, type PicklistFamily } from "../lib/picklistFamilies";
-import { useStore } from "../lib/store";
+import { activeTasks, useStore } from "../lib/store";
 import { gatePassBulkCsv, uniwareCsv } from "../lib/uniwareExport";
 import { Button, Card, Tag } from "./Ui";
 
@@ -85,7 +85,7 @@ function FamilyRow({
 }
 
 export function PicklistRepository() {
-  const tasks = useStore((s) => s.tasks);
+  const tasks = activeTasks(useStore((s) => s.tasks));
   const now = new Date();
   const [active, setActive] = useState<Bucket>("today");
   const [selectedRounds, setSelectedRounds] = useState<Record<string, number>>({});

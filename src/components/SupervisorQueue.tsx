@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { primaryFacilityNo } from "../lib/format";
-import { allFacilityLists, useStore } from "../lib/store";
+import { activeTasks, allFacilityLists, useStore } from "../lib/store";
 import { pickerWorkload, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
 import type { FacilityPicklist } from "../lib/types";
 import { PartnerMark } from "./partners/PartnerMark";
@@ -89,7 +89,7 @@ function Bucket({
 }
 
 function ShortfallAlert() {
-  const tasks = useStore((s) => s.tasks);
+  const tasks = activeTasks(useStore((s) => s.tasks));
   const withShortfall = tasks.filter((t) => t.shortfall.length > 0);
   if (withShortfall.length === 0) return null;
 
@@ -119,7 +119,7 @@ function Metric({ label, value, warn }: { label: string; value: string; warn?: b
 }
 
 export function SupervisorQueue() {
-  const tasks = useStore((s) => s.tasks);
+  const tasks = activeTasks(useStore((s) => s.tasks));
   const facilityPriority = useStore((s) => s.facilityPriority);
   const pickers = useStore((s) => s.pickers);
   const all = allFacilityLists(tasks); // already in task-creation order

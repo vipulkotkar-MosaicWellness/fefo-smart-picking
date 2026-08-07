@@ -1,6 +1,6 @@
 import { downloadCsv } from "../lib/format";
 import { overallReport } from "../lib/overallReport";
-import { useStore } from "../lib/store";
+import { activeTasks, useStore } from "../lib/store";
 import { PartnerMark } from "./partners/PartnerMark";
 import { Button, Card } from "./Ui";
 
@@ -11,7 +11,7 @@ function toCsv(rows: ReturnType<typeof overallReport>): string {
 }
 
 export function OverallReport() {
-  const tasks = useStore((s) => s.tasks);
+  const tasks = activeTasks(useStore((s) => s.tasks));
   const rows = overallReport(tasks);
 
   if (rows.length === 0) {

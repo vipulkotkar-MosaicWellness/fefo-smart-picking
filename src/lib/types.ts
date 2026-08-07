@@ -80,6 +80,7 @@ export interface PickingTask {
   shortfall: Shortfall[];
   createdAt: string;
   createdByName?: string; // display name of the planner who generated it
+  archived?: boolean; // moved out of every operational view/report and out of FEFO reservation, without deleting the record
 }
 
 export interface ChannelRule {

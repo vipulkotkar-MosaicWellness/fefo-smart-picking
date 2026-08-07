@@ -3,7 +3,7 @@ import { useAuth } from "../lib/authStore";
 import { CHANNELS } from "../lib/channels";
 import { downloadCsv } from "../lib/format";
 import { parseDemandCsv } from "../lib/sampleData";
-import { computeChannelAllocations, useStore } from "../lib/store";
+import { activeTasks, computeChannelAllocations, useStore } from "../lib/store";
 import { PartnerMark } from "./partners/PartnerMark";
 import { Button, Card, Tag } from "./Ui";
 
@@ -98,7 +98,7 @@ export function DemandPanel() {
 
   const allocations = useMemo(() => {
     if (demand.length === 0) return [];
-    return computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, tasks);
+    return computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, activeTasks(tasks));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [demand, channelRules, skus, stock, facilityPriority]);
 

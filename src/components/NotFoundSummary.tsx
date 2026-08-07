@@ -1,6 +1,6 @@
 import { downloadCsv } from "../lib/format";
 import { notFoundSummary } from "../lib/notFoundSummary";
-import { useStore } from "../lib/store";
+import { activeTasks, useStore } from "../lib/store";
 import { Button, Card, Tag } from "./Ui";
 
 function toCsv(entries: ReturnType<typeof notFoundSummary>): string {
@@ -14,7 +14,7 @@ function toCsv(entries: ReturnType<typeof notFoundSummary>): string {
 }
 
 export function NotFoundSummary() {
-  const tasks = useStore((s) => s.tasks);
+  const tasks = activeTasks(useStore((s) => s.tasks));
   const entries = notFoundSummary(tasks);
 
   if (entries.length === 0) {

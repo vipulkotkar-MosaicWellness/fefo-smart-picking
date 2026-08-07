@@ -25,10 +25,21 @@ export function allFacilityLists(tasks: PickingTask[]): FacilityPicklist[] {
   return tasks.flatMap((t) => t.facilities);
 }
 
-/** A line still reserves stock until it has actually been picked. */
+/**
+ * Every task except ones that have been archived — the default view for
+ * every operational screen, report, and the FEFO reservation engine.
+ * Archiving hides a picklist and frees the stock it was holding without
+ * deleting the underlying record (still reachable, read-only, under
+ * Archived picklists).
+ */
+export function activeTasks(tasks: PickingTask[]): PickingTask[] {
+  return tasks.filter((t) => !t.archived);
+}
+
+/** A line still reserves stock until it has actually been picked. Archived tasks never reserve. */
 export function reservedFor(tasks: PickingTask[], rid: number): number {
   let r = 0;
-  for (const f of allFacilityLists(tasks)) {
+  for (const f of allFacilityLists(activeTasks(tasks))) {
     for (const l of f.lines) if (l.rid === rid && l.picked == null) r += l.qty;
   }
   return r;
@@ -244,6 +255,9 @@ export interface AppState {
   flushOfflineQueue: () => Promise<void>;
   updateChannelRule: (channel: string, rule: ChannelRule) => void;
   setFacilityPriority: (p: string[]) => void;
+  archiveTask: (taskNo: string) => Promise<void>;
+  unarchiveTask: (taskNo: string) => Promise<void>;
+  archiveAllActiveTasks: () => Promise<void>;
 }
 
 const initialStock = rowsFromTuples(REAL_STOCK);
@@ -286,7 +300,7 @@ export const useStore = create<AppState>()(
         set({ auditLog: [{ at: new Date().toISOString(), by, action }, ...get().auditLog].slice(0, 200) }),
 
       locations: () => [...new Set(get().stock.map((b) => b.location))],
-      anyOpen: () => allFacilityLists(get().tasks).some((f) => f.lines.some((l) => l.picked == null)),
+      anyOpen: () => allFacilityLists(activeTasks(get().tasks)).some((f) => f.lines.some((l) => l.picked == null)),
       toggleFacility: (f) =>
         set({
           visibleFacilities: get().visibleFacilities.includes(f)
@@ -376,7 +390,7 @@ export const useStore = create<AppState>()(
           return;
         }
 
-        const allocations = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, tasks);
+        const allocations = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, activeTasks(tasks));
         const demandByGroup = new Map<string, DemandLine[]>();
         for (const d of demand) {
           const key = `${d.channel}::${d.gatePassNo}`;
@@ -570,6 +584,44 @@ export const useStore = create<AppState>()(
 
       updateChannelRule: (channel, rule) => set({ channelRules: { ...get().channelRules, [channel]: rule } }),
       setFacilityPriority: (p) => set({ facilityPriority: p }),
+
+      archiveTask: async (taskNo) => {
+        const updated = get().tasks.find((t) => t.no === taskNo);
+        if (!updated) return;
+        const archived = { ...updated, archived: true };
+        set({ tasks: mergeTask(get().tasks, archived) });
+        if (isSupabaseConfigured) await updateTaskData(archived);
+      },
+
+      unarchiveTask: async (taskNo) => {
+        const existing = get().tasks.find((t) => t.no === taskNo);
+        if (!existing) return;
+        const restored = { ...existing, archived: false };
+        set({ tasks: mergeTask(get().tasks, restored) });
+        if (isSupabaseConfigured) await updateTaskData(restored);
+      },
+
+      // The non-destructive "start fresh" action: every currently-active
+      // picklist moves to Archived (out of every operational view/report and
+      // out of FEFO reservation) without deleting anything. Reversible via
+      // unarchiveTask, unlike a database delete.
+      archiveAllActiveTasks: async () => {
+        const toArchive = activeTasks(get().tasks);
+        if (toArchive.length === 0) return;
+        const archivedTasks = toArchive.map((t) => ({ ...t, archived: true }));
+        let tasks = get().tasks;
+        for (const t of archivedTasks) tasks = mergeTask(tasks, t);
+        set({ tasks, notice: `${archivedTasks.length} picklist(s) archived.` });
+        if (isSupabaseConfigured) {
+          for (const t of archivedTasks) {
+            try {
+              await updateTaskData(t);
+            } catch (e) {
+              set({ notice: "Could not archive " + t.no + ": " + (e as Error).message });
+            }
+          }
+        }
+      },
     }),
     {
       name: "fefo-smart-picking-v7",
