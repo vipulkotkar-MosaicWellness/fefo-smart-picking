@@ -639,9 +639,8 @@ export const useStore = create<AppState>()(
           // Sequential, not Promise.all: each placeHold() re-fetches holds from
           // Supabase afterward, so awaiting one at a time keeps that re-fetch
           // authoritative instead of racing on fetch-completion order.
-          // TODO(task-7): heldBy is always undefined until FacilityBlock.tsx/PickerView.tsx pass it.
           for (const req of requests) {
-            await get().placeHold({ ...req, heldBy: heldBy ?? "Unknown" });
+            await get().placeHold({ ...req, heldBy: heldBy || "Unknown" });
           }
         }
 
