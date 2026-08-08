@@ -135,9 +135,9 @@ function ShortfallAlert() {
 
 function Metric({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
   return (
-    <div className="rounded-xl border border-[var(--fefo-line)] bg-white p-3.5 dark:border-slate-700 dark:bg-slate-800">
-      <p className="text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
-      <p className={`mt-1 text-2xl font-bold ${warn ? "text-rose-600 dark:text-rose-400" : "text-[var(--fefo-text)] dark:text-slate-100"}`}>
+    <div className="rounded-xl border border-[var(--fefo-line)] bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
+      <p className={`mt-1.5 text-3xl font-bold tabular-nums md:text-4xl ${warn ? "text-rose-600 dark:text-rose-400" : "text-[var(--fefo-text)] dark:text-slate-100"}`}>
         {value}
       </p>
     </div>

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { MosaicLogo } from "./brand/MosaicLogo";
 import type { NavItem, ViewId } from "../lib/navigation";
+import { BellIcon, GearIcon } from "./icons";
 
 const SECTION_LABEL: Record<NavItem["section"], string> = {
   workflow: "Workflow",
@@ -77,7 +78,34 @@ export function AppShell({
           <span aria-hidden>/</span>
           <b className="font-semibold text-[var(--fefo-text)] dark:text-slate-100">{breadcrumb}</b>
         </div>
-        <div className="ml-auto flex items-center gap-2.5">{headerActions}</div>
+        <div className="ml-auto flex items-center gap-2.5">
+          {navItems.some((i) => i.id === "supervisor") && (
+            <button
+              onClick={() => onNavigate("supervisor")}
+              aria-label="Picking queue notifications"
+              title="Open picklists awaiting assignment"
+              className="relative rounded-full border border-[var(--fefo-line)] bg-slate-50 p-2 text-[var(--fefo-teal-700)] hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-teal-300 dark:hover:bg-slate-600"
+            >
+              <BellIcon className="h-5 w-5" />
+              {badges?.supervisor != null && badges.supervisor > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white ring-2 ring-white dark:ring-slate-800">
+                  {badges.supervisor}
+                </span>
+              )}
+            </button>
+          )}
+          {navItems.some((i) => i.id === "admin") && (
+            <button
+              onClick={() => onNavigate("admin")}
+              aria-label="Admin settings"
+              title="Admin settings"
+              className="rounded-full border border-[var(--fefo-line)] bg-slate-50 p-2 text-[var(--fefo-teal-700)] hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-teal-300 dark:hover:bg-slate-600"
+            >
+              <GearIcon className="h-5 w-5" />
+            </button>
+          )}
+          {headerActions}
+        </div>
       </header>
 
       <div className="flex">
