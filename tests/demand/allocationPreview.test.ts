@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeChannelAllocations } from "../../src/lib/store";
+import { activeHoldKeys, holdKey } from "../../src/lib/holds";
 import type { DemandLine, SkuInfo, StockRow } from "../../src/lib/types";
 
 // Cutoff 0 + far-future expiry means every batch below always qualifies,
@@ -130,5 +131,19 @@ describe("computeChannelAllocations (pure — no Supabase, no side effects)", ()
     const result = computeChannelAllocations(demand, channelRules, skus2, stock, facilityPriority, []);
     expect(result).toHaveLength(1);
     expect(result[0].byFacility["SL Mother Hub"].map((l) => l.sku).sort()).toEqual(["TEST-SKU", "TEST-SKU-2"]);
+  });
+
+  it("skips a held batch and waterfalls into an unheld one for the same sku+bin", () => {
+    const stock: StockRow[] = [
+      stockRow({ rid: 1, location: "SL Mother Hub", batch: "B1", qty: 20 }),
+      stockRow({ rid: 2, location: "SL Mother Hub", batch: "B2", qty: 20 }),
+    ];
+    const demand: DemandLine[] = [demandLine({ qty: 10 })];
+    const heldKeys = activeHoldKeys([
+      { id: 1, sku: "TEST-SKU", facility: "SL Mother Hub", bin: "A1", batch: "B1", heldAt: "2026-08-08T00:00:00.000Z", heldBy: "Admin" },
+    ]);
+    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, [], heldKeys);
+    const lines = result.byFacility["SL Mother Hub"];
+    expect(lines.every((l) => l.batch === "B2")).toBe(true);
   });
 });

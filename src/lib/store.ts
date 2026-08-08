@@ -80,12 +80,13 @@ function waterfall(
   priority: string[],
   reserved: (rid: number) => number,
   exclude: number[],
+  heldKeys: Set<string>,
 ): { byFacility: Record<string, PickLine[]>; short: number } {
   const byFacility: Record<string, PickLine[]> = {};
   let remain = need;
   for (const facility of priority) {
     if (remain <= 0) break;
-    const r = allocate({ sku, need: remain, location: facility, cutoff, stock, reservedFor: reserved, exclude });
+    const r = allocate({ sku, need: remain, location: facility, cutoff, stock, reservedFor: reserved, exclude, heldKeys });
     if (r.lines.length) {
       (byFacility[facility] ??= []).push(...r.lines);
       remain = r.short;
@@ -135,6 +136,7 @@ export function computeChannelAllocations(
   stock: StockRow[],
   facilityPriority: string[],
   existingTasks: PickingTask[],
+  heldKeys: Set<string> = new Set(),
 ): ChannelAllocation[] {
   const byGroup = new Map<string, DemandLine[]>();
   for (const d of demand) {
@@ -154,7 +156,7 @@ export function computeChannelAllocations(
     const shortfall: Shortfall[] = [];
     for (const d of lines) {
       const cutoff = cutoffMonths(rule, skus[d.sku].shelf);
-      const w = waterfall(d.sku, d.qty, cutoff, stock, facilityPriority, reserved, []);
+      const w = waterfall(d.sku, d.qty, cutoff, stock, facilityPriority, reserved, [], heldKeys);
       for (const f of Object.keys(w.byFacility)) (byFacility[f] ??= []).push(...w.byFacility[f]);
       if (w.short > 0) shortfall.push({ sku: d.sku, name: skus[d.sku].name, qty: w.short });
     }
