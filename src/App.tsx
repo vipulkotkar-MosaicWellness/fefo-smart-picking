@@ -129,7 +129,7 @@ function OperationsToolbar() {
 }
 
 function Workspace() {
-  const { loadFromSupabase, loadTasks, startTasksRealtime, loadPickers, tasks, flushOfflineQueue } = useStore();
+  const { loadFromSupabase, loadTasks, startTasksRealtime, tasks, flushOfflineQueue } = useStore();
   const { profile, signOut } = useAuth();
   const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
   const isAdminTier = role === "admin" || role === "super_admin";
@@ -148,7 +148,6 @@ function Workspace() {
   useEffect(() => {
     void loadFromSupabase();
     void loadTasks();
-    void loadPickers();
     void flushOfflineQueue();
     const stop = startTasksRealtime();
     const onOnline = () => void flushOfflineQueue();

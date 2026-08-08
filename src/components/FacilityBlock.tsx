@@ -34,8 +34,15 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
     downloadCsv(uniwareCsv(lines, gatePassNo || f.no), `${gatePassNo || f.no}.csv`);
   }
   function print() {
+    const assignedPickers = [...new Set(lines.map((l) => l.picker).filter((p): p is string => !!p))];
+    const pickerHeader =
+      assignedPickers.length === 1
+        ? `<p style="font-size:20px;font-weight:bold;margin:4px 0">Picker: ${assignedPickers[0]}</p>`
+        : assignedPickers.length > 1
+          ? `<p style="font-size:14px;color:#555;margin:4px 0">Multiple pickers assigned — see table</p>`
+          : "";
     const html =
-      `<h2>${f.no}</h2><p>${f.facility}</p><table border=1 cellpadding=6 style="border-collapse:collapse;font-family:Arial"><tr><th>Sr #</th><th>Location</th><th>SKU / SKU Name</th><th>Qty</th><th>Picker</th><th>Picked</th></tr>` +
+      `<h2>${f.no}</h2><p>${f.facility}</p>${pickerHeader}<table border=1 cellpadding=6 style="border-collapse:collapse;font-family:Arial"><tr><th>Sr #</th><th>Location</th><th>SKU / SKU Name</th><th>Qty</th><th>Picker</th><th>Picked</th></tr>` +
       shareRows().map((r) => `<tr><td>${r.sr}</td><td>${r.bin}</td><td>${r.sku}<br><small>${r.name}</small></td><td>${r.qty}</td><td>${r.picker}</td><td></td></tr>`).join("") +
       `</table>`;
     const w = window.open("", "_blank");

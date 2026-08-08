@@ -5,7 +5,7 @@ import { Button, Card, Tag } from "../Ui";
 
 export function ArchivedPicklists() {
   const tasks = useStore((s) => s.tasks);
-  const { archiveAllActiveTasks, archiveByCutoff, unarchiveTask, logAudit } = useStore();
+  const { archiveAllActiveTasks, archiveByCutoff, unarchiveTask, unarchiveAllTasks, logAudit } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
   const [cutoffDate, setCutoffDate] = useState("");
 
@@ -33,6 +33,15 @@ export function ArchivedPicklists() {
   async function restore(taskNo: string) {
     await unarchiveTask(taskNo);
     logAudit(myName, `Unarchived picklist ${taskNo}`);
+  }
+
+  async function restoreAll() {
+    if (archived.length === 0) return;
+    if (!window.confirm(`Unarchive all ${archived.length} picklist(s)? They'll return to every operational screen and report, and reserve stock again.`)) {
+      return;
+    }
+    await unarchiveAllTasks();
+    logAudit(myName, `Unarchived all ${archived.length} picklist(s)`);
   }
 
   return (
@@ -66,9 +75,14 @@ export function ArchivedPicklists() {
       </div>
 
       <div className="mt-4">
-        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          Currently archived ({archived.length})
-        </p>
+        <div className="mb-1.5 flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Currently archived ({archived.length})
+          </p>
+          {archived.length > 0 && (
+            <Button variant="sm" onClick={() => void restoreAll()}>Unarchive all {archived.length}</Button>
+          )}
+        </div>
         {archived.length === 0 ? (
           <p className="text-[11px] text-slate-400">Nothing archived right now.</p>
         ) : (

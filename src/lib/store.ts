@@ -5,7 +5,6 @@ import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_PRIORITY, facilityCode } from "./facilities";
 import { matchesCutoff } from "./dateRanges";
 import { dequeue as dequeuePick, enqueue as enqueuePick, loadQueue as loadPickQueue } from "./offlineQueue";
-import { PICKERS_DEFAULT, usePickers } from "./pickersStore";
 import { rowsFromTuples, type StockTuple } from "./sampleData";
 import { REAL_STOCK } from "./stockSnapshot";
 import { isSupabaseConfigured } from "./supabaseClient";
@@ -21,6 +20,9 @@ import type {
   SkuInfo,
   StockRow,
 } from "./types";
+
+/** Seed names shown until an Admin adds/renames pickers for this warehouse. */
+export const PICKERS_DEFAULT = ["Ravi", "Sunil", "Amit"];
 
 export function allFacilityLists(tasks: PickingTask[]): FacilityPicklist[] {
   return tasks.flatMap((t) => t.facilities);
@@ -246,7 +248,9 @@ export interface AppState {
   loadStock: (tuples: StockTuple[]) => void;
   loadTasks: () => Promise<void>;
   startTasksRealtime: () => () => void;
-  loadPickers: () => Promise<void>;
+  addPicker: (name: string) => void;
+  renamePicker: (oldName: string, newName: string) => Promise<void>;
+  removePicker: (name: string) => void;
   setDemand: (d: DemandLine[]) => void;
   removeDemand: (i: number) => void;
   generate: (createdBy: string | null, createdByName: string | null) => Promise<void>;
@@ -261,6 +265,7 @@ export interface AppState {
   archiveTask: (taskNo: string) => Promise<void>;
   unarchiveTask: (taskNo: string) => Promise<void>;
   archiveAllActiveTasks: () => Promise<void>;
+  unarchiveAllTasks: () => Promise<void>;
   archiveByCutoff: (cutoffDate: string, direction: "before" | "after") => Promise<number>;
 }
 
@@ -313,12 +318,45 @@ export const useStore = create<AppState>()(
             : [...get().visibleFacilities, f],
         }),
 
-      loadPickers: async () => {
-        if (!isSupabaseConfigured) return;
-        await usePickers.getState().load();
-        const live = usePickers.getState().pickers;
-        set({ pickers: live.length ? live : [...PICKERS_DEFAULT] });
+      addPicker: (name) => {
+        const trimmed = name.trim();
+        if (!trimmed || get().pickers.includes(trimmed)) return;
+        set({ pickers: [...get().pickers, trimmed] });
       },
+
+      // Renames the picker everywhere: the managed list, and every not-yet-picked
+      // line already assigned to their old name (so in-flight assignments and the
+      // Picker workload panel keep matching correctly instead of orphaning).
+      renamePicker: async (oldName, newName) => {
+        const trimmed = newName.trim();
+        if (!trimmed || trimmed === oldName) return;
+        set({ pickers: get().pickers.map((p) => (p === oldName ? trimmed : p)) });
+
+        const affected = get().tasks.filter((t) => t.facilities.some((f) => f.lines.some((l) => l.picker === oldName)));
+        let tasks = get().tasks;
+        for (const t of affected) {
+          const updated: PickingTask = {
+            ...t,
+            facilities: t.facilities.map((f) => ({
+              ...f,
+              lines: f.lines.map((l) => (l.picker === oldName ? { ...l, picker: trimmed } : l)),
+            })),
+          };
+          tasks = mergeTask(tasks, updated);
+        }
+        set({ tasks });
+        if (isSupabaseConfigured) {
+          for (const t of tasks.filter((t) => affected.some((a) => a.no === t.no))) {
+            try {
+              await updateTaskData(t);
+            } catch (e) {
+              set({ notice: "Could not rename picker on " + t.no + ": " + (e as Error).message });
+            }
+          }
+        }
+      },
+
+      removePicker: (name) => set({ pickers: get().pickers.filter((p) => p !== name) }),
 
       loadTasks: async () => {
         if (!isSupabaseConfigured) {
@@ -628,6 +666,24 @@ export const useStore = create<AppState>()(
               await updateTaskData(t);
             } catch (e) {
               set({ notice: "Could not archive " + t.no + ": " + (e as Error).message });
+            }
+          }
+        }
+      },
+
+      unarchiveAllTasks: async () => {
+        const toRestore = get().tasks.filter((t) => t.archived);
+        if (toRestore.length === 0) return;
+        const restoredTasks = toRestore.map((t) => ({ ...t, archived: false }));
+        let tasks = get().tasks;
+        for (const t of restoredTasks) tasks = mergeTask(tasks, t);
+        set({ tasks, notice: `${restoredTasks.length} picklist(s) unarchived.` });
+        if (isSupabaseConfigured) {
+          for (const t of restoredTasks) {
+            try {
+              await updateTaskData(t);
+            } catch (e) {
+              set({ notice: "Could not unarchive " + t.no + ": " + (e as Error).message });
             }
           }
         }

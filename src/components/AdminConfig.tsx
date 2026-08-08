@@ -5,13 +5,63 @@ import { useStore } from "../lib/store";
 import { Button, Card } from "./Ui";
 
 export function AdminConfig() {
-  const { channelRules, updateChannelRule, addChannel, facilityPriority, setFacilityPriority, logAudit } = useStore();
+  const {
+    channelRules,
+    updateChannelRule,
+    addChannel,
+    facilityPriority,
+    setFacilityPriority,
+    pickers,
+    addPicker,
+    renamePicker,
+    removePicker,
+    logAudit,
+  } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
 
   const [newName, setNewName] = useState("");
   const [newBucket, setNewBucket] = useState<ChannelBucket>(BUCKET_LABELS[0]);
   const [newRuleType, setNewRuleType] = useState<"fixed" | "pct">("fixed");
   const [newRuleVal, setNewRuleVal] = useState(6);
+  const [newPickerName, setNewPickerName] = useState("");
+  const [editingPicker, setEditingPicker] = useState<string | null>(null);
+  const [editPickerName, setEditPickerName] = useState("");
+
+  function submitNewPicker() {
+    const name = newPickerName.trim();
+    if (!name) return;
+    if (pickers.includes(name)) {
+      alert(`"${name}" is already a picker.`);
+      return;
+    }
+    addPicker(name);
+    logAudit(myName, `Added picker ${name}`);
+    setNewPickerName("");
+  }
+
+  function startEditPicker(name: string) {
+    setEditingPicker(name);
+    setEditPickerName(name);
+  }
+
+  async function saveEditPicker() {
+    if (!editingPicker) return;
+    const name = editPickerName.trim();
+    if (!name || name === editingPicker) { setEditingPicker(null); return; }
+    if (pickers.includes(name)) {
+      alert(`"${name}" is already a picker.`);
+      return;
+    }
+    await renamePicker(editingPicker, name);
+    logAudit(myName, `Renamed picker ${editingPicker} to ${name}`);
+    setEditingPicker(null);
+  }
+
+  function deletePicker(name: string) {
+    if (!window.confirm(`Remove ${name} from the picker list? Already-assigned picklists keep their history — this only affects future assignments.`)) return;
+    removePicker(name);
+    logAudit(myName, `Removed picker ${name}`);
+  }
 
   function setRule(channel: string, rule: Parameters<typeof updateChannelRule>[1]) {
     updateChannelRule(channel, rule);
@@ -180,6 +230,55 @@ export function AdminConfig() {
                 </span>
               </div>
             ))}
+          </div>
+        </Card>
+
+        <Card title="Pickers">
+          <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
+            Names available in the "Assign to" dropdown, the picker workload panel, and printed picklists. Renaming
+            updates every not-yet-picked assignment already made to that name.
+          </p>
+
+          <div className="mb-2 flex gap-1.5">
+            <input
+              value={newPickerName}
+              onChange={(e) => setNewPickerName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submitNewPicker(); }}
+              placeholder="New picker name"
+              className="min-w-32 flex-1 rounded-lg border border-slate-300 p-1.5 text-xs dark:border-slate-600 dark:bg-slate-900"
+            />
+            <Button variant="sm" onClick={submitNewPicker}>Add picker</Button>
+          </div>
+
+          <div className="space-y-1.5">
+            {pickers.map((p) => (
+              <div key={p} className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900">
+                {editingPicker === p ? (
+                  <>
+                    <input
+                      value={editPickerName}
+                      onChange={(e) => setEditPickerName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") void saveEditPicker(); }}
+                      autoFocus
+                      className="mr-2 flex-1 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-800"
+                    />
+                    <span className="flex gap-1">
+                      <Button variant="sm" onClick={() => void saveEditPicker()}>Save</Button>
+                      <Button variant="sm" onClick={() => setEditingPicker(null)}>Cancel</Button>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span>{p}</span>
+                    <span className="flex gap-1">
+                      <Button variant="sm" onClick={() => startEditPicker(p)}>Rename</Button>
+                      <Button variant="sm" onClick={() => deletePicker(p)}>Remove</Button>
+                    </span>
+                  </>
+                )}
+              </div>
+            ))}
+            {pickers.length === 0 && <p className="text-[11px] text-slate-400">No pickers yet — add one above.</p>}
           </div>
         </Card>
       </div>
