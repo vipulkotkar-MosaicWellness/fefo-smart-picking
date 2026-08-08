@@ -4,6 +4,8 @@ import { bucketCode, channelCode, CHANNELS, type ChannelBucket } from "./channel
 import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_PRIORITY, facilityCode } from "./facilities";
 import { matchesCutoff } from "./dateRanges";
+import { activeHoldKeys, holdKey } from "./holds";
+import { fetchHolds, insertHold, releaseHoldRow } from "./holdsSupabase";
 import { dequeue as dequeuePick, enqueue as enqueuePick, loadQueue as loadPickQueue } from "./offlineQueue";
 import { rowsFromTuples, type StockTuple } from "./sampleData";
 import { REAL_STOCK } from "./stockSnapshot";
@@ -14,6 +16,7 @@ import type {
   ChannelRule,
   DemandLine,
   FacilityPicklist,
+  Hold,
   PickingTask,
   PickLine,
   Shortfall,
@@ -220,6 +223,7 @@ export interface AppState {
   channelBuckets: Record<string, ChannelBucket>; // Admin-added channels only — built-in ones live in CHANNEL_BUCKETS
   facilityPriority: string[];
   pickers: string[];
+  holds: Hold[];
   lastSync: string;
   syncing: boolean;
 
@@ -253,6 +257,9 @@ export interface AppState {
   addPicker: (name: string) => void;
   renamePicker: (oldName: string, newName: string) => Promise<void>;
   removePicker: (name: string) => void;
+  loadHolds: () => Promise<void>;
+  placeHold: (h: { sku: string; facility: string; bin: string; batch: string; heldBy: string; reason?: string; sourceTaskNo?: string }) => Promise<void>;
+  releaseHold: (id: number, releasedBy: string) => Promise<void>;
   setDemand: (d: DemandLine[]) => void;
   removeDemand: (i: number) => void;
   generate: (createdBy: string | null, createdByName: string | null) => Promise<void>;
@@ -282,6 +289,7 @@ export const useStore = create<AppState>()(
       channelBuckets: {},
       facilityPriority: [...FACILITY_PRIORITY],
       pickers: [...PICKERS_DEFAULT],
+      holds: [],
       lastSync: new Date().toISOString(),
       syncing: false,
 
@@ -359,6 +367,38 @@ export const useStore = create<AppState>()(
       },
 
       removePicker: (name) => set({ pickers: get().pickers.filter((p) => p !== name) }),
+
+      loadHolds: async () => {
+        if (!isSupabaseConfigured) return;
+        try {
+          const holds = await fetchHolds();
+          set({ holds });
+        } catch (e) {
+          set({ notice: "Could not load stock holds: " + (e as Error).message });
+        }
+      },
+
+      placeHold: async (h) => {
+        const key = holdKey(h.sku, h.facility, h.bin, h.batch);
+        if (activeHoldKeys(get().holds).has(key)) return; // already on hold, nothing to do
+        if (!isSupabaseConfigured) return;
+        try {
+          await insertHold(h);
+          await get().loadHolds();
+        } catch (e) {
+          set({ notice: "Could not place hold: " + (e as Error).message });
+        }
+      },
+
+      releaseHold: async (id, releasedBy) => {
+        if (!isSupabaseConfigured) return;
+        try {
+          await releaseHoldRow(id, releasedBy);
+          await get().loadHolds();
+        } catch (e) {
+          set({ notice: "Could not release hold: " + (e as Error).message });
+        }
+      },
 
       loadTasks: async () => {
         if (!isSupabaseConfigured) {
