@@ -1,4 +1,5 @@
 import type { ChannelRule, Expiry, PickLine, StockRow } from "./types";
+import { holdKey } from "./holds";
 
 /** Remaining shelf life in whole months from `today` to expiry. */
 export function monthsRemaining(exp: Expiry, today = new Date()): number {
@@ -39,6 +40,7 @@ export interface AllocateArgs {
   stock: StockRow[];
   reservedFor: (rid: number) => number;
   exclude?: number[];
+  heldKeys?: Set<string>;
   today?: Date;
 }
 
@@ -57,6 +59,7 @@ export interface AllocateResult {
 export function allocate(args: AllocateArgs): AllocateResult {
   const { sku, need, location, cutoff, stock, reservedFor } = args;
   const exclude = args.exclude ?? [];
+  const heldKeys = args.heldKeys;
   const today = args.today ?? new Date();
 
   const eligible = stock
@@ -67,7 +70,8 @@ export function allocate(args: AllocateArgs): AllocateResult {
         b.type === "Good" &&
         b.active === "Active" &&
         !isExceptionBin(b.bin) &&
-        !exclude.includes(b.rid),
+        !exclude.includes(b.rid) &&
+        !(heldKeys?.has(holdKey(b.sku, b.location, b.bin, b.batch)) ?? false),
     )
     .map((b) => ({ b, rem: monthsRemaining(b.exp, today), av: b.qty - reservedFor(b.rid) }))
     .filter((o) => o.rem >= cutoff && o.av > 0)
