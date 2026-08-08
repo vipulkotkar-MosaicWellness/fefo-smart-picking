@@ -4,7 +4,7 @@ import { bucketCode, channelCode, CHANNELS, type ChannelBucket } from "./channel
 import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_PRIORITY, facilityCode } from "./facilities";
 import { matchesCutoff } from "./dateRanges";
-import { activeHoldKeys, holdKey } from "./holds";
+import { activeHoldKeys, holdKey, holdsToCreate } from "./holds";
 import { fetchHolds, insertHold, releaseHoldRow } from "./holdsSupabase";
 import { dequeue as dequeuePick, enqueue as enqueuePick, loadQueue as loadPickQueue } from "./offlineQueue";
 import { rowsFromTuples, type StockTuple } from "./sampleData";
@@ -266,7 +266,7 @@ export interface AppState {
   assignAll: (facilityNo: string, picker: string) => Promise<void>;
   assignLine: (rid: number, facilityNo: string, picker: string) => Promise<void>;
   uploadAssignments: (facilityNo: string, text: string) => Promise<void>;
-  applyPicks: (facilityNo: string, results: Record<number, number>, reasons?: Record<number, string>) => Promise<void>;
+  applyPicks: (facilityNo: string, results: Record<number, number>, reasons?: Record<number, string>, heldBy?: string) => Promise<void>;
   flushOfflineQueue: () => Promise<void>;
   updateChannelRule: (channel: string, rule: ChannelRule) => void;
   addChannel: (name: string, bucket: ChannelBucket, rule: ChannelRule) => void;
@@ -475,7 +475,7 @@ export const useStore = create<AppState>()(
           return;
         }
 
-        const allocations = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, activeTasks(tasks));
+        const allocations = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, activeTasks(tasks), activeHoldKeys(get().holds));
         const demandByGroup = new Map<string, DemandLine[]>();
         for (const d of demand) {
           const key = `${d.channel}::${d.gatePassNo}`;
@@ -571,7 +571,7 @@ export const useStore = create<AppState>()(
         if (isSupabaseConfigured && changed) await updateTaskData(changed);
       },
 
-      applyPicks: async (facilityNo, results, reasons) => {
+      applyPicks: async (facilityNo, results, reasons, heldBy) => {
         const state = get();
         const stock = state.stock.map((b) => ({ ...b }));
         let gpSeq = state.gpSeq;
@@ -616,9 +616,10 @@ export const useStore = create<AppState>()(
           const r2: Record<string, PickLine[]> = {};
           const extraShort: Shortfall[] = [];
           const reserved = (rid: number) => reservedFor(tasks, rid);
+          const heldKeysForRound2 = activeHoldKeys(state.holds);
           for (const sku of Object.keys(nfBySku)) {
             const cutoff = cutoffMonths(rule, state.skus[sku].shelf);
-            const w = waterfall(sku, nfBySku[sku], cutoff, stock, state.facilityPriority, reserved, [...usedRids]);
+            const w = waterfall(sku, nfBySku[sku], cutoff, stock, state.facilityPriority, reserved, [...usedRids], heldKeysForRound2);
             for (const f of Object.keys(w.byFacility)) {
               (r2[f] ??= []).push(...w.byFacility[f]);
               w.byFacility[f].forEach((l) => usedRids.add(l.rid));
@@ -632,6 +633,13 @@ export const useStore = create<AppState>()(
         }
 
         set({ tasks, stock, gpSeq, notice: `${facilityNo} updated.` });
+
+        if (completedFacility) {
+          const requests = holdsToCreate(completedFacility.lines, completedFacility.facility, parentTask?.no ?? facilityNo, activeHoldKeys(get().holds));
+          for (const req of requests) {
+            await get().placeHold({ ...req, heldBy: heldBy ?? "Unknown" });
+          }
+        }
 
         const finalTask = tasks.find((t) => t.no === (parentTask?.no ?? ""));
         if (isSupabaseConfigured && finalTask) {
