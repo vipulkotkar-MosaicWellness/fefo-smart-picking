@@ -1,6 +1,7 @@
 import { downloadCsv } from "../lib/format";
 import { overallReport } from "../lib/overallReport";
 import { activeTasks, useStore } from "../lib/store";
+import type { PickingTask } from "../lib/types";
 import { PartnerMark } from "./partners/PartnerMark";
 import { Button, Card } from "./Ui";
 
@@ -10,14 +11,15 @@ function toCsv(rows: ReturnType<typeof overallReport>): string {
   return header + "\n" + body.join("\n") + "\n";
 }
 
-export function OverallReport() {
-  const tasks = activeTasks(useStore((s) => s.tasks));
+export function OverallReport({ tasks: tasksProp }: { tasks?: PickingTask[] } = {}) {
+  const storeTasks = useStore((s) => s.tasks);
+  const tasks = tasksProp ?? activeTasks(storeTasks);
   const rows = overallReport(tasks);
 
   if (rows.length === 0) {
     return (
       <Card title="Overall report">
-        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No demand uploaded yet.</p>
+        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No demand in this range.</p>
       </Card>
     );
   }

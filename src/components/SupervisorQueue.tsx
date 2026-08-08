@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { primaryFacilityNo } from "../lib/format";
 import { activeTasks, allFacilityLists, useStore } from "../lib/store";
-import { pickerWorkload, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
+import { bucketSummary, pickerWorkload, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
 import type { FacilityPicklist } from "../lib/types";
 import { PartnerMark } from "./partners/PartnerMark";
 import { Card, Tag } from "./Ui";
@@ -72,19 +72,39 @@ function Bucket({
   emptyText: string;
   queued?: boolean;
 }) {
-  return (
-    <div>
-      <h3 className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-        {title} <Tag tone={tone}>{items.length}</Tag>
-      </h3>
-      {items.length === 0 ? (
+  if (items.length === 0) {
+    return (
+      <div>
+        <h3 className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+          {title} <Tag tone={tone}>0</Tag>
+        </h3>
         <p className="rounded-lg border border-dashed border-slate-200 p-2.5 text-[11px] text-slate-400 dark:border-slate-700">{emptyText}</p>
-      ) : (
-        items.map((f, i) => (
+      </div>
+    );
+  }
+
+  const s = bucketSummary(items);
+
+  return (
+    <details className="group rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-lg p-2.5 hover:bg-slate-50 dark:hover:bg-slate-900">
+        <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+          <span aria-hidden className="inline-block transition-transform group-open:rotate-90">▸</span>
+          {title} <Tag tone={tone}>{s.picklistCount}</Tag>
+        </span>
+        <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+          <span>{s.lineCount} line(s)</span>
+          <span>{s.unitCount} units</span>
+          <span className="text-emerald-700 dark:text-emerald-400">{s.pickedUnits} picked</span>
+          <span className={s.pendingUnits > 0 ? "text-amber-700 dark:text-amber-400" : ""}>{s.pendingUnits} pending</span>
+        </span>
+      </summary>
+      <div className="border-t border-slate-200 p-2.5 dark:border-slate-700">
+        {items.map((f, i) => (
           <PicklistItem key={f.no} f={f} channel={channelFor(f)} gatePassNo={gatePassFor(f)} queuePos={queued ? i + 1 : undefined} />
-        ))
-      )}
-    </div>
+        ))}
+      </div>
+    </details>
   );
 }
 

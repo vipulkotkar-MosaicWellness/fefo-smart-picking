@@ -1,14 +1,13 @@
 import type { ChangeEvent } from "react";
 import { useAuth } from "../../lib/authStore";
-import { CHANNELS } from "../../lib/channels";
 import { useStore } from "../../lib/store";
 import { PartnerMark } from "../partners/PartnerMark";
 import { Button, Card, Tag } from "../Ui";
 
 export function PartnerDirectory() {
-  const { partnerActive, partnerLogos, setPartnerActive, setPartnerLogo, approvePartnerLogo, logAudit } = useStore();
+  const { channelRules, partnerActive, partnerLogos, setPartnerActive, setPartnerLogo, approvePartnerLogo, logAudit } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
-  const channels = Object.keys(CHANNELS).sort();
+  const channels = Object.keys(channelRules).sort();
 
   function onUpload(channel: string, e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];

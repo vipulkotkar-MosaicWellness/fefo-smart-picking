@@ -1,12 +1,10 @@
 import { useState } from "react";
-import { BUCKET_LABEL, bucketFor, type Bucket } from "../lib/dateRanges";
 import { downloadCsv } from "../lib/format";
 import { groupPicklistFamilies, type PicklistFamily } from "../lib/picklistFamilies";
 import { activeTasks, useStore } from "../lib/store";
+import type { PickingTask } from "../lib/types";
 import { gatePassBulkCsv, uniwareCsv } from "../lib/uniwareExport";
 import { Button, Card, Tag } from "./Ui";
-
-const BUCKET_ORDER: Bucket[] = ["today", "yesterday", "last30", "older"];
 
 function timeLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
@@ -84,10 +82,9 @@ function FamilyRow({
   );
 }
 
-export function PicklistRepository() {
-  const tasks = activeTasks(useStore((s) => s.tasks));
-  const now = new Date();
-  const [active, setActive] = useState<Bucket>("today");
+export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[] } = {}) {
+  const storeTasks = useStore((s) => s.tasks);
+  const tasks = tasksProp ?? activeTasks(storeTasks);
   const [selectedRounds, setSelectedRounds] = useState<Record<string, number>>({});
 
   const taskByNo = new Map(tasks.map((t) => [t.no, t]));
@@ -96,75 +93,47 @@ export function PicklistRepository() {
   if (families.length === 0) {
     return (
       <Card title="Picklist repository">
-        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No picklists generated yet.</p>
+        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No picklists in this range.</p>
       </Card>
     );
   }
 
-  const groups = new Map<Bucket, PicklistFamily[]>();
-  for (const fam of families) {
-    const bucket = bucketFor(fam.latestCreatedAt, now);
-    if (!groups.has(bucket)) groups.set(bucket, []);
-    groups.get(bucket)!.push(fam);
-  }
-
-  const rows = groups.get(active) ?? [];
-
   return (
     <Card title="Picklist repository">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900">
-          {BUCKET_ORDER.map((bucket) => (
-            <button
-              key={bucket}
-              onClick={() => setActive(bucket)}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                active === bucket ? "bg-teal-700 text-white" : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
-              }`}
-            >
-              {BUCKET_LABEL[bucket]} <span className="opacity-70">({(groups.get(bucket) ?? []).length})</span>
-            </button>
-          ))}
-        </div>
-        {rows.length > 0 && (
-          <Button
-            variant="sm"
-            onClick={() =>
-              downloadCsv(
-                gatePassBulkCsv(
-                  rows.flatMap((fam) => {
-                    const r = fam.rounds.find((x) => x.round === (selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round)) ?? fam.rounds[fam.rounds.length - 1];
-                    return [{ gatePassNo: taskByNo.get(fam.taskNo)?.gatePassNo ?? fam.taskNo, lines: r.lines }];
-                  }),
-                ),
-                `gate_pass_bulk_${active}.csv`,
-              )
-            }
-          >
-            Bulk Gate Pass CSV
-          </Button>
-        )}
+      <div className="mb-3 flex justify-end">
+        <Button
+          variant="sm"
+          onClick={() =>
+            downloadCsv(
+              gatePassBulkCsv(
+                families.flatMap((fam) => {
+                  const r = fam.rounds.find((x) => x.round === (selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round)) ?? fam.rounds[fam.rounds.length - 1];
+                  return [{ gatePassNo: taskByNo.get(fam.taskNo)?.gatePassNo ?? fam.taskNo, lines: r.lines }];
+                }),
+              ),
+              `gate_pass_bulk.csv`,
+            )
+          }
+        >
+          Bulk Gate Pass CSV
+        </Button>
       </div>
 
-      {rows.length === 0 ? (
-        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">Nothing in {BUCKET_LABEL[active].toLowerCase()}.</p>
-      ) : (
-        <div className="space-y-3">
-          {rows.map((fam) => {
-            const t = taskByNo.get(fam.taskNo);
-            return (
-              <FamilyRow
-                key={fam.key}
-                family={fam}
-                gatePassNo={t?.gatePassNo ?? fam.taskNo}
-                createdByName={t?.createdByName}
-                selectedRound={selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round}
-                onSelectRound={(round) => setSelectedRounds((prev) => ({ ...prev, [fam.key]: round }))}
-              />
-            );
-          })}
-        </div>
-      )}
+      <div className="space-y-3">
+        {families.map((fam) => {
+          const t = taskByNo.get(fam.taskNo);
+          return (
+            <FamilyRow
+              key={fam.key}
+              family={fam}
+              gatePassNo={t?.gatePassNo ?? fam.taskNo}
+              createdByName={t?.createdByName}
+              selectedRound={selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round}
+              onSelectRound={(round) => setSelectedRounds((prev) => ({ ...prev, [fam.key]: round }))}
+            />
+          );
+        })}
+      </div>
     </Card>
   );
 }

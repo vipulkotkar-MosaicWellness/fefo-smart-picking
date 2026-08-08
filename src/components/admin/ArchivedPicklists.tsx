@@ -1,11 +1,13 @@
+import { useState } from "react";
 import { useAuth } from "../../lib/authStore";
 import { activeTasks, useStore } from "../../lib/store";
 import { Button, Card, Tag } from "../Ui";
 
 export function ArchivedPicklists() {
   const tasks = useStore((s) => s.tasks);
-  const { archiveAllActiveTasks, unarchiveTask, logAudit } = useStore();
+  const { archiveAllActiveTasks, archiveByCutoff, unarchiveTask, logAudit } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
+  const [cutoffDate, setCutoffDate] = useState("");
 
   const archived = tasks.filter((t) => t.archived);
   const activeCount = activeTasks(tasks).length;
@@ -17,6 +19,15 @@ export function ArchivedPicklists() {
     }
     await archiveAllActiveTasks();
     logAudit(myName, `Archived all ${activeCount} active picklist(s) to start fresh`);
+  }
+
+  async function archiveDirection(direction: "before" | "after") {
+    if (!cutoffDate) return;
+    const label = direction === "before" ? `before ${cutoffDate}` : `${cutoffDate} onward`;
+    if (!window.confirm(`Archive every active picklist ${label}?`)) return;
+    const count = await archiveByCutoff(cutoffDate, direction);
+    if (count > 0) logAudit(myName, `Archived ${count} picklist(s) ${label}`);
+    else alert(`Nothing matched ${label}.`);
   }
 
   async function restore(taskNo: string) {
@@ -31,9 +42,28 @@ export function ArchivedPicklists() {
         stock it was reserving — without deleting anything. Use this instead of asking for a database delete when
         you want a clean slate for testing.
       </p>
+
       <Button variant="ghost" onClick={() => void archiveAll()} disabled={activeCount === 0}>
         Archive all {activeCount} active picklist{activeCount === 1 ? "" : "s"}
       </Button>
+
+      <div className="mt-3 flex flex-wrap items-end gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-900">
+        <label className="text-[11px]">
+          <span className="block text-slate-500 dark:text-slate-400">Or archive by date</span>
+          <input
+            type="date"
+            value={cutoffDate}
+            onChange={(e) => setCutoffDate(e.target.value)}
+            className="mt-0.5 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-800"
+          />
+        </label>
+        <Button variant="sm" onClick={() => void archiveDirection("before")} disabled={!cutoffDate}>
+          Archive everything before this date
+        </Button>
+        <Button variant="sm" onClick={() => void archiveDirection("after")} disabled={!cutoffDate}>
+          Archive this date onward
+        </Button>
+      </div>
 
       <div className="mt-4">
         <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">

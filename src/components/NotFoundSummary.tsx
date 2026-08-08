@@ -1,20 +1,22 @@
 import { downloadCsv } from "../lib/format";
 import { notFoundSummary } from "../lib/notFoundSummary";
 import { activeTasks, useStore } from "../lib/store";
+import type { PickingTask } from "../lib/types";
 import { Button, Card, Tag } from "./Ui";
 
 function toCsv(entries: ReturnType<typeof notFoundSummary>): string {
-  const header = "SKU,Product,Total Not-Found Qty,Reason Breakdown,Facilities,Picklists";
+  const header = "SKU,Product,Total Not-Found Qty,Reason Breakdown,Facilities,Shelf/Bin,Picklists";
   const rows = entries.map((e) => {
     const reasons = Object.entries(e.byReason).map(([r, q]) => `${r}: ${q}`).join(" | ");
     const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    return [e.sku, e.name, e.totalQty, reasons, e.facilities.join(" | "), e.picklists.join(" | ")].map((v) => cell(String(v))).join(",");
+    return [e.sku, e.name, e.totalQty, reasons, e.facilities.join(" | "), e.bins.join(" | "), e.picklists.join(" | ")].map((v) => cell(String(v))).join(",");
   });
   return header + "\n" + rows.join("\n") + "\n";
 }
 
-export function NotFoundSummary() {
-  const tasks = activeTasks(useStore((s) => s.tasks));
+export function NotFoundSummary({ tasks: tasksProp }: { tasks?: PickingTask[] } = {}) {
+  const storeTasks = useStore((s) => s.tasks);
+  const tasks = tasksProp ?? activeTasks(storeTasks);
   const entries = notFoundSummary(tasks);
 
   if (entries.length === 0) {
@@ -46,6 +48,7 @@ export function NotFoundSummary() {
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Not-found qty</th>
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Reasons</th>
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Facilities</th>
+              <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Shelf / Bin</th>
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Picklists</th>
             </tr>
           </thead>
@@ -63,6 +66,13 @@ export function NotFoundSummary() {
                   </div>
                 </td>
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{e.facilities.join(", ")}</td>
+                <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                  <div className="flex flex-wrap gap-1">
+                    {e.bins.map((bin) => (
+                      <Tag key={bin} tone="warn">{bin}</Tag>
+                    ))}
+                  </div>
+                </td>
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
                   <div className="flex flex-wrap gap-1">
                     {e.picklists.map((p) => (

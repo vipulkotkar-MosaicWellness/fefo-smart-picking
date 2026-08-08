@@ -1,6 +1,5 @@
 import { useMemo, useState, type ChangeEvent } from "react";
 import { useAuth } from "../lib/authStore";
-import { CHANNELS } from "../lib/channels";
 import { downloadCsv } from "../lib/format";
 import { parseDemandCsv } from "../lib/sampleData";
 import { activeTasks, computeChannelAllocations, useStore } from "../lib/store";
@@ -162,7 +161,7 @@ export function DemandPanel() {
             </Button>
           </div>
           <p className="mt-2 text-[10px] text-[var(--fefo-muted)] dark:text-slate-400">
-            Valid channels: {Object.keys(CHANNELS).join(", ")}
+            Valid channels: {Object.keys(channelRules).join(", ")}
           </p>
         </div>
       )}

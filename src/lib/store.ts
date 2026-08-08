@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { bucketCode, channelCode, CHANNELS } from "./channels";
+import { bucketCode, channelCode, CHANNELS, type ChannelBucket } from "./channels";
 import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_PRIORITY, facilityCode } from "./facilities";
+import { matchesCutoff } from "./dateRanges";
 import { dequeue as dequeuePick, enqueue as enqueuePick, loadQueue as loadPickQueue } from "./offlineQueue";
 import { PICKERS_DEFAULT, usePickers } from "./pickersStore";
 import { rowsFromTuples, type StockTuple } from "./sampleData";
@@ -64,8 +65,8 @@ function todayYmd(): string {
   const d = new Date();
   return `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
 }
-function taskNumberPrefix(channel: string): string {
-  return `${bucketCode(channel)}-${channelCode(channel)}-${todayYmd()}-`;
+function taskNumberPrefix(channel: string, customBuckets: Record<string, ChannelBucket>): string {
+  return `${bucketCode(channel, customBuckets)}-${channelCode(channel)}-${todayYmd()}-`;
 }
 
 /** Fill one SKU's need across facilities in priority order (FEFO + tolerance). */
@@ -212,6 +213,7 @@ export interface AppState {
   stock: StockRow[];
   skus: Record<string, SkuInfo>;
   channelRules: Record<string, ChannelRule>;
+  channelBuckets: Record<string, ChannelBucket>; // Admin-added channels only — built-in ones live in CHANNEL_BUCKETS
   facilityPriority: string[];
   pickers: string[];
   lastSync: string;
@@ -254,10 +256,12 @@ export interface AppState {
   applyPicks: (facilityNo: string, results: Record<number, number>, reasons?: Record<number, string>) => Promise<void>;
   flushOfflineQueue: () => Promise<void>;
   updateChannelRule: (channel: string, rule: ChannelRule) => void;
+  addChannel: (name: string, bucket: ChannelBucket, rule: ChannelRule) => void;
   setFacilityPriority: (p: string[]) => void;
   archiveTask: (taskNo: string) => Promise<void>;
   unarchiveTask: (taskNo: string) => Promise<void>;
   archiveAllActiveTasks: () => Promise<void>;
+  archiveByCutoff: (cutoffDate: string, direction: "before" | "after") => Promise<number>;
 }
 
 const initialStock = rowsFromTuples(REAL_STOCK);
@@ -268,6 +272,7 @@ export const useStore = create<AppState>()(
       stock: initialStock,
       skus: skusFromStock(initialStock),
       channelRules: { ...CHANNELS },
+      channelBuckets: {},
       facilityPriority: [...FACILITY_PRIORITY],
       pickers: [...PICKERS_DEFAULT],
       lastSync: new Date().toISOString(),
@@ -400,7 +405,7 @@ export const useStore = create<AppState>()(
         const newTasks: PickingTask[] = [];
 
         for (const { channel, gatePassNo, byFacility, shortfall } of allocations) {
-          const prefix = taskNumberPrefix(channel);
+          const prefix = taskNumberPrefix(channel, get().channelBuckets);
           const seq = isSupabaseConfigured ? await nextSequence(prefix) : newTasks.length + 1;
           const no = `${prefix}${String(seq).padStart(3, "0")}`;
           newTasks.push({
@@ -583,6 +588,11 @@ export const useStore = create<AppState>()(
       },
 
       updateChannelRule: (channel, rule) => set({ channelRules: { ...get().channelRules, [channel]: rule } }),
+      addChannel: (name, bucket, rule) =>
+        set({
+          channelRules: { ...get().channelRules, [name]: rule },
+          channelBuckets: { ...get().channelBuckets, [name]: bucket },
+        }),
       setFacilityPriority: (p) => set({ facilityPriority: p }),
 
       archiveTask: async (taskNo) => {
@@ -622,6 +632,27 @@ export const useStore = create<AppState>()(
           }
         }
       },
+
+      // Archive by a chosen cutoff date instead of all-or-nothing — e.g.
+      // "everything before 7 Aug" or "everything from 7 Aug onward".
+      archiveByCutoff: async (cutoffDate, direction) => {
+        const toArchive = activeTasks(get().tasks).filter((t) => matchesCutoff(t.createdAt, cutoffDate, direction));
+        if (toArchive.length === 0) return 0;
+        const archivedTasks = toArchive.map((t) => ({ ...t, archived: true }));
+        let tasks = get().tasks;
+        for (const t of archivedTasks) tasks = mergeTask(tasks, t);
+        set({ tasks, notice: `${archivedTasks.length} picklist(s) archived.` });
+        if (isSupabaseConfigured) {
+          for (const t of archivedTasks) {
+            try {
+              await updateTaskData(t);
+            } catch (e) {
+              set({ notice: "Could not archive " + t.no + ": " + (e as Error).message });
+            }
+          }
+        }
+        return archivedTasks.length;
+      },
     }),
     {
       name: "fefo-smart-picking-v7",
@@ -632,6 +663,7 @@ export const useStore = create<AppState>()(
         tasks: isSupabaseConfigured ? [] : s.tasks,
         gpSeq: s.gpSeq,
         channelRules: s.channelRules,
+        channelBuckets: s.channelBuckets,
         facilityPriority: s.facilityPriority,
         pickers: s.pickers,
         visibleFacilities: s.visibleFacilities,

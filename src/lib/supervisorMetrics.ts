@@ -34,6 +34,37 @@ export function queueBucket(f: FacilityPicklist): QueueBucket {
   return f.lines.some((l) => l.picker) ? "picking" : "creation";
 }
 
+export interface BucketSummary {
+  picklistCount: number;
+  lineCount: number;
+  unitCount: number;
+  pickedUnits: number;
+  pendingUnits: number;
+}
+
+/**
+ * Aggregate stats for a collapsed bucket header — enough for a supervisor to
+ * gauge scale at a glance without expanding every picklist in it.
+ * "Pending" means not yet actioned at all (line.picked == null); a line
+ * that's already resolved with some not-found quantity isn't "pending" —
+ * that outcome is recorded, just not counted as still-picked units.
+ */
+export function bucketSummary(items: FacilityPicklist[]): BucketSummary {
+  let lineCount = 0;
+  let unitCount = 0;
+  let pickedUnits = 0;
+  let pendingUnits = 0;
+  for (const f of items) {
+    for (const l of f.lines) {
+      lineCount++;
+      unitCount += l.qty;
+      if (l.picked == null) pendingUnits += l.qty;
+      else pickedUnits += l.picked;
+    }
+  }
+  return { picklistCount: items.length, lineCount, unitCount, pickedUnits, pendingUnits };
+}
+
 export interface PickerWorkload {
   picker: string;
   activeLines: number;

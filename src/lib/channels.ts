@@ -63,8 +63,11 @@ const BUCKET_CODE: Record<ChannelBucket, string> = {
   "B2B Offline": "B2BO",
 };
 
-export function bucketCode(channel: string): string {
-  const bucket = CHANNEL_BUCKETS[channel];
+export const BUCKET_LABELS: ChannelBucket[] = ["Replenishment", "B2B Ecom", "B2B Offline"];
+
+/** `custom` carries Admin-added channels' bucket assignment — checked before the built-in list. */
+export function bucketCode(channel: string, custom: Record<string, ChannelBucket> = {}): string {
+  const bucket = custom[channel] ?? CHANNEL_BUCKETS[channel];
   return bucket ? BUCKET_CODE[bucket] : "GEN";
 }
 

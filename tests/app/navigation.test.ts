@@ -7,6 +7,7 @@ describe("getNavigation", () => {
       "Demand Planner",
       "Picking Supervisor",
       "Inventory",
+      "Reports",
       "Admin",
     ]);
   });
@@ -16,6 +17,7 @@ describe("getNavigation", () => {
       "Demand Planner",
       "Picking Supervisor",
       "Inventory",
+      "Reports",
       "Admin",
     ]);
   });

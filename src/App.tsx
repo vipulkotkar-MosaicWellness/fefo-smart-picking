@@ -11,9 +11,7 @@ import { DemandPanel } from "./components/DemandPanel";
 import { InventoryPanel } from "./components/InventoryPanel";
 import { PerformancePanel } from "./components/PerformancePanel";
 import { PickerView } from "./components/PickerView";
-import { NotFoundSummary } from "./components/NotFoundSummary";
-import { OverallReport } from "./components/OverallReport";
-import { PicklistRepository } from "./components/PicklistRepository";
+import { Reports } from "./components/Reports";
 import { SupervisorQueue } from "./components/SupervisorQueue";
 import { useAuth } from "./lib/authStore";
 import { getNavigation, type ViewId } from "./lib/navigation";
@@ -30,6 +28,7 @@ const VIEW_LABEL: Record<ViewId, string> = {
   supervisor: "Picking Supervisor",
   picker: "Picker",
   inventory: "Inventory",
+  reports: "Reports",
   admin: "Admin",
 };
 
@@ -201,12 +200,10 @@ function Workspace() {
       {activeView === "supervisor" && (
         <div className="space-y-4">
           <SupervisorQueue />
-          <NotFoundSummary />
-          <OverallReport />
-          <PicklistRepository />
         </div>
       )}
       {activeView === "inventory" && <InventoryPanel />}
+      {activeView === "reports" && <Reports />}
       {activeView === "admin" && isAdminTier && (
         <div className="space-y-4">
           <AdminConfig />

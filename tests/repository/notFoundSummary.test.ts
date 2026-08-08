@@ -48,6 +48,23 @@ describe("notFoundSummary", () => {
     expect(entry.byReason).toEqual({ "Not specified": 2 });
   });
 
+  it("tracks which shelf/bin the SKU couldn't be found at, so the shelf can be investigated", () => {
+    const t = task({
+      facilities: [
+        {
+          no: "TASK-1-MH", taskNo: "TASK-1", facility: "SL Mother Hub", status: "completed", round: 1, bad: 6,
+          lines: [
+            line({ rid: 1, sku: "SKU-A", bin: "A1-05", nf: 4, picked: 6 }),
+            line({ rid: 2, sku: "SKU-A", bin: "A1-05", nf: 0, picked: 10 }), // found here — shouldn't add a bin
+            line({ rid: 3, sku: "SKU-A", bin: "B2-01", nf: 2, picked: 8 }),
+          ],
+        },
+      ],
+    });
+    const [entry] = notFoundSummary([t]);
+    expect(entry.bins).toEqual(["A1-05", "B2-01"]);
+  });
+
   it("tracks which facilities and picklists a SKU went not-found in, without duplicates", () => {
     const t = task({
       facilities: [
