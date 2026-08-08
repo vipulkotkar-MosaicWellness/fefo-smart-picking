@@ -1,15 +1,16 @@
+import { ageDays } from "../lib/ageing";
 import { downloadCsv } from "../lib/format";
 import { notFoundSummary } from "../lib/notFoundSummary";
 import { activeTasks, useStore } from "../lib/store";
 import type { PickingTask } from "../lib/types";
 import { Button, Card, Tag } from "./Ui";
 
-function toCsv(entries: ReturnType<typeof notFoundSummary>): string {
-  const header = "SKU,Product,Total Not-Found Qty,Reason Breakdown,Facilities,Shelf/Bin,Picklists";
+function toCsv(entries: ReturnType<typeof notFoundSummary>, now: Date): string {
+  const header = "SKU,Product,Total Not-Found Qty,Reason Breakdown,Facilities,Shelf/Bin,Batch #,Ageing (days),Picklists";
   const rows = entries.map((e) => {
     const reasons = Object.entries(e.byReason).map(([r, q]) => `${r}: ${q}`).join(" | ");
     const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    return [e.sku, e.name, e.totalQty, reasons, e.facilities.join(" | "), e.bins.join(" | "), e.picklists.join(" | ")].map((v) => cell(String(v))).join(",");
+    return [e.sku, e.name, e.totalQty, reasons, e.facilities.join(" | "), e.bins.join(" | "), e.batches.join(" | "), ageDays(e.latestNotFoundAt, now), e.picklists.join(" | ")].map((v) => cell(String(v))).join(",");
   });
   return header + "\n" + rows.join("\n") + "\n";
 }
@@ -18,6 +19,7 @@ export function NotFoundSummary({ tasks: tasksProp }: { tasks?: PickingTask[] } 
   const storeTasks = useStore((s) => s.tasks);
   const tasks = tasksProp ?? activeTasks(storeTasks);
   const entries = notFoundSummary(tasks);
+  const now = new Date();
 
   if (entries.length === 0) {
     return (
@@ -35,7 +37,7 @@ export function NotFoundSummary({ tasks: tasksProp }: { tasks?: PickingTask[] } 
         <p className="text-[11px] text-slate-500 dark:text-slate-400">
           Every SKU a picker reported not-found at the shelf, with why and where — largest shortfall first.
         </p>
-        <Button variant="sm" onClick={() => downloadCsv(toCsv(entries), "not_found_summary.csv")}>
+        <Button variant="sm" onClick={() => downloadCsv(toCsv(entries, now), "not_found_summary.csv")}>
           Export CSV
         </Button>
       </div>
@@ -49,6 +51,8 @@ export function NotFoundSummary({ tasks: tasksProp }: { tasks?: PickingTask[] } 
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Reasons</th>
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Facilities</th>
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Shelf / Bin</th>
+              <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Batch #</th>
+              <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Ageing</th>
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Picklists</th>
             </tr>
           </thead>
@@ -73,6 +77,14 @@ export function NotFoundSummary({ tasks: tasksProp }: { tasks?: PickingTask[] } 
                     ))}
                   </div>
                 </td>
+                <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                  <div className="flex flex-wrap gap-1">
+                    {e.batches.map((batch) => (
+                      <Tag key={batch} tone="muted">{batch}</Tag>
+                    ))}
+                  </div>
+                </td>
+                <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{ageDays(e.latestNotFoundAt, now)}d</td>
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
                   <div className="flex flex-wrap gap-1">
                     {e.picklists.map((p) => (

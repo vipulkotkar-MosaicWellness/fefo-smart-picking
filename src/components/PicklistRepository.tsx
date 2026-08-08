@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ageDays } from "../lib/ageing";
 import { downloadCsv } from "../lib/format";
 import { groupPicklistFamilies, type PicklistFamily } from "../lib/picklistFamilies";
 import { activeTasks, useStore } from "../lib/store";
@@ -31,6 +32,8 @@ function FamilyRow({
 }) {
   const active = family.rounds.find((r) => r.round === selectedRound) ?? family.rounds[family.rounds.length - 1];
   const hasAlternates = family.rounds.length > 1;
+  const batches = [...new Set(active.lines.map((l) => l.batch))];
+  const now = new Date();
 
   return (
     <div className="rounded-lg border border-slate-200 dark:border-slate-700">
@@ -63,9 +66,19 @@ function FamilyRow({
             <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{active.no}</td>
             <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
               {timeLabel(active.createdAt ?? family.latestCreatedAt)}
+              <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                {ageDays(active.createdAt ?? family.latestCreatedAt, now)}d ago
+              </div>
               {active.round === 1 && createdByName && <div className="text-[10px] text-slate-500 dark:text-slate-400">by {createdByName}</div>}
             </td>
             <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{active.lines.length} line(s)</td>
+            <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+              <div className="flex flex-wrap gap-1">
+                {batches.map((batch) => (
+                  <Tag key={batch} tone="muted">{batch}</Tag>
+                ))}
+              </div>
+            </td>
             <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
               <Tag tone={active.status === "completed" ? "ok" : "warn"}>{active.status}</Tag>
               {active.bad > 0 && <Tag tone="bad">{active.bad} not found</Tag>}

@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { BUCKET_LABEL, bucketFor, type Bucket } from "../lib/dateRanges";
+import { ageingRangeFor, inAgeingRange, type AgeingPreset } from "../lib/ageing";
 import { activeTasks, useStore } from "../lib/store";
+import { AgeingFilter } from "./AgeingFilter";
 import { NotFoundSummary } from "./NotFoundSummary";
 import { OverallReport } from "./OverallReport";
 import { PicklistRepository } from "./PicklistRepository";
 
-const BUCKET_ORDER: Bucket[] = ["today", "yesterday", "last30", "older"];
 type ReportTab = "notfound" | "overall" | "repository";
 
 const TABS: { id: ReportTab; label: string }[] = [
@@ -18,12 +18,12 @@ export function Reports() {
   const tasks = activeTasks(useStore((s) => s.tasks));
   const now = new Date();
   const [tab, setTab] = useState<ReportTab>("notfound");
-  const [bucket, setBucket] = useState<Bucket>("today");
+  const [preset, setPreset] = useState<AgeingPreset>("today");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
 
-  const bucketed = tasks.map((t) => ({ task: t, bucket: bucketFor(t.createdAt, now) }));
-  const counts = new Map<Bucket, number>();
-  for (const { bucket: b } of bucketed) counts.set(b, (counts.get(b) ?? 0) + 1);
-  const filtered = bucketed.filter((x) => x.bucket === bucket).map((x) => x.task);
+  const range = ageingRangeFor(preset, now, { from, to });
+  const filtered = tasks.filter((t) => inAgeingRange(t.createdAt, range));
 
   return (
     <div className="space-y-3">
@@ -41,19 +41,7 @@ export function Reports() {
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900">
-        {BUCKET_ORDER.map((b) => (
-          <button
-            key={b}
-            onClick={() => setBucket(b)}
-            className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-              bucket === b ? "bg-teal-700 text-white" : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
-            }`}
-          >
-            {BUCKET_LABEL[b]} <span className="opacity-70">({counts.get(b) ?? 0})</span>
-          </button>
-        ))}
-      </div>
+      <AgeingFilter preset={preset} onPresetChange={setPreset} from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
 
       {tab === "notfound" && <NotFoundSummary tasks={filtered} />}
       {tab === "overall" && <OverallReport tasks={filtered} />}

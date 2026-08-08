@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
+import { ageingRangeFor, inAgeingRange, type AgeingPreset } from "../lib/ageing";
 import { primaryFacilityNo } from "../lib/format";
 import { activeTasks, allFacilityLists, useStore } from "../lib/store";
 import { bucketSummary, pickerWorkload, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
 import type { FacilityPicklist } from "../lib/types";
+import { AgeingFilter } from "./AgeingFilter";
 import { PartnerMark } from "./partners/PartnerMark";
 import { Card, Tag } from "./Ui";
 import { FacilityBlock } from "./FacilityBlock";
@@ -19,6 +21,10 @@ function channelOf(f: FacilityPicklist, tasks: ReturnType<typeof useStore.getSta
 
 function gatePassOf(f: FacilityPicklist, tasks: ReturnType<typeof useStore.getState>["tasks"]): string | undefined {
   return tasks.find((t) => t.no === f.taskNo)?.gatePassNo;
+}
+
+function createdAtOf(f: FacilityPicklist, tasks: ReturnType<typeof useStore.getState>["tasks"]): string {
+  return f.createdAt ?? tasks.find((t) => t.no === f.taskNo)?.createdAt ?? new Date(0).toISOString();
 }
 
 function PicklistItem({
@@ -147,13 +153,22 @@ export function SupervisorQueue() {
   const [facilityFilter, setFacilityFilter] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
   const [pickerFilter, setPickerFilter] = useState("");
+  const [ageingPreset, setAgeingPreset] = useState<AgeingPreset>("last30");
+  const [ageingFrom, setAgeingFrom] = useState("");
+  const [ageingTo, setAgeingTo] = useState("");
   const channelFor = (f: FacilityPicklist) => channelOf(f, tasks);
   const gatePassFor = (f: FacilityPicklist) => gatePassOf(f, tasks);
+
+  const ageingRange = useMemo(
+    () => ageingRangeFor(ageingPreset, new Date(), { from: ageingFrom, to: ageingTo }),
+    [ageingPreset, ageingFrom, ageingTo],
+  );
 
   const filtered = all.filter((f) => {
     if (facilityFilter && f.facility !== facilityFilter) return false;
     if (channelFilter && channelFor(f) !== channelFilter) return false;
     if (pickerFilter && !f.lines.some((l) => l.picker === pickerFilter)) return false;
+    if (!inAgeingRange(createdAtOf(f, tasks), ageingRange)) return false;
     return true;
   });
 
@@ -207,6 +222,17 @@ export function SupervisorQueue() {
             <option key={p} value={p}>{p}</option>
           ))}
         </select>
+      </div>
+
+      <div className="mb-3">
+        <AgeingFilter
+          preset={ageingPreset}
+          onPresetChange={setAgeingPreset}
+          from={ageingFrom}
+          to={ageingTo}
+          onFromChange={setAgeingFrom}
+          onToChange={setAgeingTo}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">

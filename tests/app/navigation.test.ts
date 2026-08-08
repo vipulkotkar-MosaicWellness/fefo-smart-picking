@@ -6,8 +6,8 @@ describe("getNavigation", () => {
     expect(getNavigation("admin").map((item) => item.label)).toEqual([
       "Demand Planner",
       "Picking Supervisor",
-      "Inventory",
       "Reports",
+      "Inventory",
       "Admin",
     ]);
   });
@@ -16,8 +16,8 @@ describe("getNavigation", () => {
     expect(getNavigation("super_admin").map((item) => item.label)).toEqual([
       "Demand Planner",
       "Picking Supervisor",
-      "Inventory",
       "Reports",
+      "Inventory",
       "Admin",
     ]);
   });

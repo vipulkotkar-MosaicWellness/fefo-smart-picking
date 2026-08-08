@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminConfig } from "./components/AdminConfig";
 import { AdminUsers } from "./components/AdminUsers";
 import { ArchivedPicklists } from "./components/admin/ArchivedPicklists";
-import { AuditLog } from "./components/admin/AuditLog";
 import { PartnerDirectory } from "./components/admin/PartnerDirectory";
 import { AppShell } from "./components/AppShell";
 import { MosaicLogo } from "./components/brand/MosaicLogo";
@@ -208,9 +207,8 @@ function Workspace() {
         <div className="space-y-4">
           <AdminConfig />
           <ArchivedPicklists />
-          <PartnerDirectory />
-          <AuditLog />
           <AdminUsers />
+          <PartnerDirectory />
         </div>
       )}
     </AppShell>
