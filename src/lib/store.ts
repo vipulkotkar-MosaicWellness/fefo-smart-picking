@@ -636,6 +636,10 @@ export const useStore = create<AppState>()(
 
         if (completedFacility) {
           const requests = holdsToCreate(completedFacility.lines, completedFacility.facility, parentTask?.no ?? facilityNo, activeHoldKeys(get().holds));
+          // Sequential, not Promise.all: each placeHold() re-fetches holds from
+          // Supabase afterward, so awaiting one at a time keeps that re-fetch
+          // authoritative instead of racing on fetch-completion order.
+          // TODO(task-7): heldBy is always undefined until FacilityBlock.tsx/PickerView.tsx pass it.
           for (const req of requests) {
             await get().placeHold({ ...req, heldBy: heldBy ?? "Unknown" });
           }
@@ -649,7 +653,9 @@ export const useStore = create<AppState>()(
             // Offline or a transient failure — the pick is already applied
             // locally above; queue the sync so it isn't silently lost.
             enqueuePick({ facilityNo, results });
-            set({ notice: "⚠ Saved on this device — will sync once you're back online." });
+            const offlineMsg = "⚠ Saved on this device — will sync once you're back online.";
+            const priorNotice = get().notice;
+            set({ notice: priorNotice.startsWith("Could not place hold") ? `${priorNotice} Also: ${offlineMsg}` : offlineMsg });
           }
         }
       },
