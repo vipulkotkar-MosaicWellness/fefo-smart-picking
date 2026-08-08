@@ -13,7 +13,7 @@ describe("uniwareCsv", () => {
     const csv = uniwareCsv([line({ sku: "SKU-A", qty: 5, bin: "A1", batch: "B1" })], "GP-1001");
     const [header, row] = csv.trim().split("\n");
     expect(header).toBe(HEADER);
-    expect(row.startsWith("GP-1001,SKU-A,5,Good Inventory,A1,")).toBe(true);
+    expect(row.startsWith("GP-1001,SKU-A,5,GOOD_INVENTORY,A1,")).toBe(true);
   });
 });
 
@@ -29,8 +29,8 @@ describe("gatePassBulkCsv", () => {
     ]);
     const rows = csv.trim().split("\n").slice(1);
     expect(rows).toHaveLength(3);
-    expect(rows[0].startsWith("GP-1001,SKU-A,5,Good Inventory,")).toBe(true);
-    expect(rows[1].startsWith("GP-1001,SKU-B,3,Good Inventory,")).toBe(true);
-    expect(rows[2].startsWith("GP-1002,SKU-A,9,Good Inventory,")).toBe(true);
+    expect(rows[0].startsWith("GP-1001,SKU-A,5,GOOD_INVENTORY,")).toBe(true);
+    expect(rows[1].startsWith("GP-1001,SKU-B,3,GOOD_INVENTORY,")).toBe(true);
+    expect(rows[2].startsWith("GP-1002,SKU-A,9,GOOD_INVENTORY,")).toBe(true);
   });
 });

@@ -14,7 +14,7 @@ function lineRow(gatePassNo: string, l: PickLine): string {
     csvCell(gatePassNo),
     csvCell(l.sku),
     csvCell(l.qty),
-    "Good Inventory",
+    "GOOD_INVENTORY",
     csvCell(l.bin),
     price != null ? price : "",
     csvCell(l.batch ?? ""),
