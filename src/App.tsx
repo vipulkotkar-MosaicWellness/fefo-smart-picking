@@ -11,6 +11,7 @@ import { InventoryPanel } from "./components/InventoryPanel";
 import { PerformancePanel } from "./components/PerformancePanel";
 import { PickerView } from "./components/PickerView";
 import { Reports } from "./components/Reports";
+import { StockHolds } from "./components/StockHolds";
 import { SupervisorQueue } from "./components/SupervisorQueue";
 import { useAuth } from "./lib/authStore";
 import { getNavigation, type ViewId } from "./lib/navigation";
@@ -27,6 +28,7 @@ const VIEW_LABEL: Record<ViewId, string> = {
   supervisor: "Picking Supervisor",
   picker: "Picker",
   inventory: "Inventory",
+  holds: "Stock Holds",
   reports: "Reports",
   admin: "Admin",
 };
@@ -129,7 +131,7 @@ function OperationsToolbar() {
 }
 
 function Workspace() {
-  const { loadFromSupabase, loadTasks, startTasksRealtime, tasks, flushOfflineQueue } = useStore();
+  const { loadFromSupabase, loadTasks, startTasksRealtime, loadHolds, tasks, flushOfflineQueue } = useStore();
   const { profile, signOut } = useAuth();
   const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
   const isAdminTier = role === "admin" || role === "super_admin";
@@ -137,6 +139,7 @@ function Workspace() {
   const unassignedCount = allFacilityLists(tasks).filter(
     (f) => f.status !== "completed" && !f.lines.some((l) => l.picker),
   ).length;
+  const activeHoldsCount = useStore((s) => s.holds).filter((h) => !h.releasedAt).length;
 
   const navItems = useMemo(() => getNavigation(role), [role]);
   const [activeView, setActiveView] = useState<ViewId>(navItems[0]?.id ?? "picker");
@@ -148,6 +151,7 @@ function Workspace() {
   useEffect(() => {
     void loadFromSupabase();
     void loadTasks();
+    void loadHolds();
     void flushOfflineQueue();
     const stop = startTasksRealtime();
     const onOnline = () => void flushOfflineQueue();
@@ -186,7 +190,7 @@ function Workspace() {
       onNavigate={setActiveView}
       breadcrumb={VIEW_LABEL[activeView]}
       headerActions={<HeaderActions role={role} displayName={profile!.display_name} onSignOut={() => void signOut()} />}
-      badges={{ supervisor: unassignedCount }}
+      badges={{ supervisor: unassignedCount, holds: activeHoldsCount }}
     >
       <OperationsToolbar />
       {activeView === "demand" && (
@@ -201,6 +205,7 @@ function Workspace() {
         </div>
       )}
       {activeView === "inventory" && <InventoryPanel />}
+      {activeView === "holds" && <StockHolds />}
       {activeView === "reports" && <Reports />}
       {activeView === "admin" && isAdminTier && (
         <div className="space-y-4">

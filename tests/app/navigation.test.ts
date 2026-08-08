@@ -8,6 +8,7 @@ describe("getNavigation", () => {
       "Picking Supervisor",
       "Reports",
       "Inventory",
+      "Stock Holds",
       "Admin",
     ]);
   });
@@ -18,6 +19,7 @@ describe("getNavigation", () => {
       "Picking Supervisor",
       "Reports",
       "Inventory",
+      "Stock Holds",
       "Admin",
     ]);
   });

@@ -1,6 +1,6 @@
 import type { Role } from "./types";
 
-export type ViewId = "demand" | "supervisor" | "picker" | "inventory" | "reports" | "admin";
+export type ViewId = "demand" | "supervisor" | "picker" | "inventory" | "holds" | "reports" | "admin";
 
 export interface NavItem {
   id: ViewId;
@@ -15,6 +15,7 @@ const ALL_ITEMS: (NavItem & { roles: Role[] })[] = [
   { id: "reports", label: "Reports", icon: "↗", section: "workflow", roles: ["planner", "admin", "super_admin"] },
   { id: "picker", label: "Picker", icon: "▣", section: "workflow", roles: ["picker"] },
   { id: "inventory", label: "Inventory", icon: "⌕", section: "shared", roles: ["planner", "admin", "super_admin"] },
+  { id: "holds", label: "Stock Holds", icon: "⏸", section: "shared", roles: ["planner", "admin", "super_admin"] },
   { id: "admin", label: "Admin", icon: "⚙", section: "settings", roles: ["admin", "super_admin"] },
 ];
 
