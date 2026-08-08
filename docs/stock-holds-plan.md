@@ -38,12 +38,21 @@ alter table stock_holds enable row level security;
 create policy "authenticated read" on stock_holds
   for select to authenticated using (true);
 
-create policy "authenticated write" on stock_holds
-  for insert to authenticated with check (true);
+-- Picker completes a picklist with a not-found line -> a hold gets created
+-- automatically, so insert must allow every role that can complete a picklist.
+create policy "assigned roles create holds" on stock_holds
+  for insert to authenticated
+  with check (current_role_name() in ('planner', 'admin', 'super_admin', 'picker'));
 
-create policy "authenticated update" on stock_holds
-  for update to authenticated using (true);
+-- Only Admin/Super Admin/Planner may release a hold.
+create policy "planner admin release holds" on stock_holds
+  for update to authenticated
+  using (current_role_name() in ('planner', 'admin', 'super_admin'))
+  with check (current_role_name() in ('planner', 'admin', 'super_admin'));
 ```
+
+This reuses the `current_role_name()` helper already defined in
+`supabase/schema_step3_complete.sql`.
 
 - [ ] **Step 2: Confirm the table exists**
 
