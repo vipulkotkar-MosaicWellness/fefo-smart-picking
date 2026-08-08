@@ -63,7 +63,7 @@ export function PickerView() {
     if (!f || busy) return;
     setBusy(true);
     try {
-      await applyPicks(f.no, nextNf, nextReasons);
+      await applyPicks(f.no, nextNf, nextReasons, myName);
       const picked = lines.reduce((s, l) => s + (l.qty - (nextNf[l.rid] ?? 0)), 0);
       const nf = lines.reduce((s, l) => s + (nextNf[l.rid] ?? 0), 0);
       setDone({ facility: f.facility, picked, nf });

@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent } from "react";
+import { useAuth } from "../lib/authStore";
 import { criticalPathSort } from "../lib/engine";
 import { downloadCsv, monLabel } from "../lib/format";
 import { useStore } from "../lib/store";
@@ -9,6 +10,7 @@ import { Button, Tag } from "./Ui";
 /** The full picklist detail: assignment controls, share buttons, line table, complete button. */
 export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePassNo?: string }) {
   const { pickers, assignAll, assignLine, uploadAssignments, applyPicks } = useStore();
+  const myName = useAuth((s) => s.profile?.display_name ?? "Supervisor");
   const [nf, setNf] = useState<Record<number, number>>({});
   const [assignTo, setAssignTo] = useState("");
   const open = f.status === "open";
@@ -61,7 +63,7 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
   function complete() {
     const results: Record<number, number> = {};
     lines.forEach((l) => (results[l.rid] = nf[l.rid] ?? 0));
-    void applyPicks(f.no, results);
+    void applyPicks(f.no, results, undefined, myName);
   }
 
   return (
