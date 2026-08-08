@@ -87,3 +87,18 @@ export interface ChannelRule {
   type: "fixed" | "pct";
   val: number; // fixed = months; pct = fraction of total shelf life
 }
+
+/** A SKU+Facility+Bin+Batch combination excluded from allocation until released. */
+export interface Hold {
+  id: number;
+  sku: string;
+  facility: string;
+  bin: string;
+  batch: string;
+  heldAt: string;
+  heldBy: string;
+  reason?: string;
+  sourceTaskNo?: string;
+  releasedAt?: string;
+  releasedBy?: string;
+}
