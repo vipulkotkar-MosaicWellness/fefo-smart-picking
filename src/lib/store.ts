@@ -10,7 +10,8 @@ import { dequeue as dequeuePick, enqueue as enqueuePick, loadQueue as loadPickQu
 import { rowsFromTuples, type StockTuple } from "./sampleData";
 import { REAL_STOCK } from "./stockSnapshot";
 import { isSupabaseConfigured } from "./supabaseClient";
-import { fetchLastSync, fetchStock } from "./supabaseStock";
+import type { ShelfwiseStockRow } from "./shelfwiseCsv";
+import { fetchLastSync, fetchStock, replaceStock } from "./supabaseStock";
 import { fetchAllTasks, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
   ChannelRule,
@@ -252,6 +253,7 @@ export interface AppState {
   syncStock: () => void;
   loadFromSupabase: () => Promise<void>;
   loadStock: (tuples: StockTuple[]) => void;
+  uploadStockFallback: (rows: ShelfwiseStockRow[]) => Promise<boolean>;
   loadTasks: () => Promise<void>;
   startTasksRealtime: () => () => void;
   addPicker: (name: string) => void;
@@ -454,6 +456,30 @@ export const useStore = create<AppState>()(
       loadStock: (tuples) => {
         const stock = rowsFromTuples(tuples);
         set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString() });
+      },
+
+      // Admin/Super Admin fallback for when the hourly Shelfwise pipeline is
+      // down — replaces the shared stock table directly, same freeze rule as
+      // the automated sync so it can't shift stock under an active picker.
+      uploadStockFallback: async (rows) => {
+        if (get().anyOpen()) {
+          set({ notice: "⚠ Feed frozen — complete open picking before uploading." });
+          return false;
+        }
+        if (!isSupabaseConfigured) {
+          set({ notice: "✗ Upload requires Supabase to be configured." });
+          return false;
+        }
+        set({ syncing: true, notice: `Uploading ${rows.length.toLocaleString()} row(s)…` });
+        try {
+          await replaceStock(rows);
+          await get().loadFromSupabase();
+          set({ notice: `✓ Inventory replaced — ${rows.length.toLocaleString()} row(s) uploaded.` });
+          return true;
+        } catch (e) {
+          set({ syncing: false, notice: "✗ Upload failed: " + (e as Error).message });
+          return false;
+        }
       },
 
       setDemand: (d) => set({ demand: d }),

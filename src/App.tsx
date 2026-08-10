@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminConfig } from "./components/AdminConfig";
 import { AdminUsers } from "./components/AdminUsers";
 import { ArchivedPicklists } from "./components/admin/ArchivedPicklists";
+import { InventoryUploadFallback } from "./components/admin/InventoryUploadFallback";
 import { PartnerDirectory } from "./components/admin/PartnerDirectory";
 import { AppShell } from "./components/AppShell";
 import { MosaicLogo } from "./components/brand/MosaicLogo";
@@ -210,6 +211,7 @@ function Workspace() {
       {activeView === "admin" && isAdminTier && (
         <div className="space-y-4">
           <AdminConfig />
+          <InventoryUploadFallback />
           <ArchivedPicklists />
           <AdminUsers />
           <PartnerDirectory />

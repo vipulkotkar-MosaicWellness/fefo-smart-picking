@@ -1,3 +1,4 @@
+import type { ShelfwiseStockRow } from "./shelfwiseCsv";
 import { supabase } from "./supabaseClient";
 import type { Expiry, StockRow } from "./types";
 
@@ -53,4 +54,31 @@ export async function fetchLastSync(): Promise<string | null> {
   if (!supabase) return null;
   const { data } = await supabase.from("sync_state").select("last_synced").eq("id", 1).maybeSingle();
   return (data as { last_synced: string | null } | null)?.last_synced ?? null;
+}
+
+/**
+ * Admin/Super Admin fallback for when the hourly Shelfwise pipeline is down:
+ * wipes the shared `stock` table and reloads it from a manually-uploaded
+ * export, then updates `sync_state` the same way the Apps Script does — so
+ * every signed-in user sees the same fallback data, not just this browser.
+ * Requires the "admin upload stock" / "admin clear stock" / "admin update
+ * sync_state" RLS policies (Admin/Super Admin only) to be in place.
+ */
+export async function replaceStock(rows: ShelfwiseStockRow[]): Promise<void> {
+  if (!supabase) return;
+  const { error: delError } = await supabase.from("stock").delete().gte("id", 0);
+  if (delError) throw delError;
+
+  const page = 500;
+  for (let from = 0; from < rows.length; from += page) {
+    const chunk = rows.slice(from, from + page);
+    const { error } = await supabase.from("stock").insert(chunk);
+    if (error) throw error;
+  }
+
+  const { error: syncError } = await supabase
+    .from("sync_state")
+    .update({ last_synced: new Date().toISOString(), rows: rows.length, status: "ok" })
+    .eq("id", 1);
+  if (syncError) throw syncError;
 }
