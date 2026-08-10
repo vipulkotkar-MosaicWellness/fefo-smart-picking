@@ -11,7 +11,8 @@ import { rowsFromTuples, type StockTuple } from "./sampleData";
 import { REAL_STOCK } from "./stockSnapshot";
 import { isSupabaseConfigured } from "./supabaseClient";
 import type { ShelfwiseStockRow } from "./shelfwiseCsv";
-import { fetchLastSync, fetchStock, replaceStock } from "./supabaseStock";
+import { fetchStock, fetchSyncState, replaceStock } from "./supabaseStock";
+import type { SyncSource } from "./syncSource";
 import { fetchAllTasks, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
   ChannelRule,
@@ -226,6 +227,8 @@ export interface AppState {
   pickers: string[];
   holds: Hold[];
   lastSync: string;
+  lastSyncSource: SyncSource;
+  lastSyncBy: string | null;
   syncing: boolean;
 
   visibleFacilities: string[];
@@ -253,7 +256,7 @@ export interface AppState {
   syncStock: () => void;
   loadFromSupabase: () => Promise<void>;
   loadStock: (tuples: StockTuple[]) => void;
-  uploadStockFallback: (rows: ShelfwiseStockRow[]) => Promise<boolean>;
+  uploadStockFallback: (rows: ShelfwiseStockRow[], uploadedBy: string) => Promise<boolean>;
   loadTasks: () => Promise<void>;
   startTasksRealtime: () => () => void;
   addPicker: (name: string) => void;
@@ -293,6 +296,8 @@ export const useStore = create<AppState>()(
       pickers: [...PICKERS_DEFAULT],
       holds: [],
       lastSync: new Date().toISOString(),
+      lastSyncSource: null,
+      lastSyncBy: null,
       syncing: false,
 
       visibleFacilities: [...FACILITY_PRIORITY],
@@ -428,7 +433,7 @@ export const useStore = create<AppState>()(
           return;
         }
         const stock = rowsFromTuples(REAL_STOCK);
-        set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString(), notice: "✓ Stock reloaded from snapshot." });
+        set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString(), lastSyncSource: null, lastSyncBy: null, notice: "✓ Stock reloaded from snapshot." });
       },
 
       loadFromSupabase: async () => {
@@ -437,12 +442,14 @@ export const useStore = create<AppState>()(
         set({ syncing: true, notice: "Checking for new stock…" });
         try {
           const rows = await fetchStock();
-          const last = await fetchLastSync();
-          const changed = last && last !== prevLast;
+          const syncState = await fetchSyncState();
+          const changed = syncState.lastSynced && syncState.lastSynced !== prevLast;
           set({
             stock: rows,
             skus: skusFromStock(rows),
-            lastSync: last ?? new Date().toISOString(),
+            lastSync: syncState.lastSynced ?? new Date().toISOString(),
+            lastSyncSource: syncState.source,
+            lastSyncBy: syncState.updatedBy,
             syncing: false,
             notice: changed
               ? `✓ New stock loaded — ${rows.length.toLocaleString()} rows.`
@@ -455,13 +462,13 @@ export const useStore = create<AppState>()(
 
       loadStock: (tuples) => {
         const stock = rowsFromTuples(tuples);
-        set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString() });
+        set({ stock, skus: skusFromStock(stock), lastSync: new Date().toISOString(), lastSyncSource: null, lastSyncBy: null });
       },
 
       // Admin/Super Admin fallback for when the hourly Shelfwise pipeline is
       // down — replaces the shared stock table directly, same freeze rule as
       // the automated sync so it can't shift stock under an active picker.
-      uploadStockFallback: async (rows) => {
+      uploadStockFallback: async (rows, uploadedBy) => {
         if (get().anyOpen()) {
           set({ notice: "⚠ Feed frozen — complete open picking before uploading." });
           return false;
@@ -472,7 +479,7 @@ export const useStore = create<AppState>()(
         }
         set({ syncing: true, notice: `Uploading ${rows.length.toLocaleString()} row(s)…` });
         try {
-          await replaceStock(rows);
+          await replaceStock(rows, uploadedBy);
           await get().loadFromSupabase();
           set({ notice: `✓ Inventory replaced — ${rows.length.toLocaleString()} row(s) uploaded.` });
           return true;

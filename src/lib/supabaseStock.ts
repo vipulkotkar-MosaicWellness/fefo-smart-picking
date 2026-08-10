@@ -1,5 +1,6 @@
 import type { ShelfwiseStockRow } from "./shelfwiseCsv";
 import { supabase } from "./supabaseClient";
+import type { SyncSource } from "./syncSource";
 import type { Expiry, StockRow } from "./types";
 
 function expFromDate(d: string | null): Expiry {
@@ -49,11 +50,22 @@ export async function fetchStock(): Promise<StockRow[]> {
   }));
 }
 
-/** Last sync time recorded by the Apps Script. */
-export async function fetchLastSync(): Promise<string | null> {
-  if (!supabase) return null;
-  const { data } = await supabase.from("sync_state").select("last_synced").eq("id", 1).maybeSingle();
-  return (data as { last_synced: string | null } | null)?.last_synced ?? null;
+export interface SyncStateInfo {
+  lastSynced: string | null;
+  source: SyncSource;
+  updatedBy: string | null;
+}
+
+/** Last sync time + who/what last updated stock (email pipeline vs. a manual upload). */
+export async function fetchSyncState(): Promise<SyncStateInfo> {
+  if (!supabase) return { lastSynced: null, source: null, updatedBy: null };
+  const { data } = await supabase.from("sync_state").select("last_synced,source,updated_by").eq("id", 1).maybeSingle();
+  const row = data as { last_synced: string | null; source: string | null; updated_by: string | null } | null;
+  return {
+    lastSynced: row?.last_synced ?? null,
+    source: (row?.source as SyncSource) ?? null,
+    updatedBy: row?.updated_by ?? null,
+  };
 }
 
 /**
@@ -64,7 +76,7 @@ export async function fetchLastSync(): Promise<string | null> {
  * Requires the "admin upload stock" / "admin clear stock" / "admin update
  * sync_state" RLS policies (Admin/Super Admin only) to be in place.
  */
-export async function replaceStock(rows: ShelfwiseStockRow[]): Promise<void> {
+export async function replaceStock(rows: ShelfwiseStockRow[], uploadedBy: string): Promise<void> {
   if (!supabase) return;
   const { error: delError } = await supabase.from("stock").delete().gte("id", 0);
   if (delError) throw delError;
@@ -78,7 +90,7 @@ export async function replaceStock(rows: ShelfwiseStockRow[]): Promise<void> {
 
   const { error: syncError } = await supabase
     .from("sync_state")
-    .update({ last_synced: new Date().toISOString(), rows: rows.length, status: "ok" })
+    .update({ last_synced: new Date().toISOString(), rows: rows.length, status: "ok", source: "manual", updated_by: uploadedBy })
     .eq("id", 1);
   if (syncError) throw syncError;
 }

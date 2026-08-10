@@ -107,7 +107,7 @@ function ingest() {
   }
 
   supa(SUPABASE_URL, SERVICE_KEY, 'PATCH', '/rest/v1/sync_state?id=eq.1',
-    { last_synced: new Date().toISOString(), rows: out.length, status: 'ok' });
+    { last_synced: new Date().toISOString(), rows: out.length, status: 'ok', source: 'email', updated_by: null });
   Logger.log('Done — ' + out.length + ' rows synced.');
 }
 

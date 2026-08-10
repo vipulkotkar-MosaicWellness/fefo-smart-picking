@@ -17,12 +17,16 @@ create table if not exists stock (
 );
 create index if not exists stock_fac_sku on stock (facility, sku);
 
--- one-row table holding the last sync time / status shown in the app header
+-- one-row table holding the last sync time / status shown in the app header.
+-- source + updated_by let the app show clearly whether the current stock
+-- came from the automated email pipeline or a manual admin upload.
 create table if not exists sync_state (
   id           int primary key default 1,
   last_synced  timestamptz,
   rows         integer,
-  status       text
+  status       text,
+  source       text,  -- 'email' (Apps Script) | 'manual' (fallback upload)
+  updated_by   text    -- display name of whoever ran a manual upload; null for email
 );
 insert into sync_state (id) values (1) on conflict (id) do nothing;
 

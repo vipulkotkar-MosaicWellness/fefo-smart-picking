@@ -1,10 +1,12 @@
 import { useState, type ChangeEvent } from "react";
+import { useAuth } from "../../lib/authStore";
 import { parseShelfwiseCsv, type ParseShelfwiseResult } from "../../lib/shelfwiseCsv";
 import { useStore } from "../../lib/store";
 import { Button, Card, Tag } from "../Ui";
 
 export function InventoryUploadFallback() {
   const uploadStockFallback = useStore((s) => s.uploadStockFallback);
+  const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
   const [fileName, setFileName] = useState("");
   const [preview, setPreview] = useState<ParseShelfwiseResult | null>(null);
   const [parseError, setParseError] = useState("");
@@ -37,7 +39,7 @@ export function InventoryUploadFallback() {
   async function confirmUpload() {
     if (!preview || preview.rows.length === 0) return;
     setUploading(true);
-    const ok = await uploadStockFallback(preview.rows);
+    const ok = await uploadStockFallback(preview.rows, myName);
     setUploading(false);
     if (ok) reset();
   }

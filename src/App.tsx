@@ -14,10 +14,12 @@ import { PickerView } from "./components/PickerView";
 import { Reports } from "./components/Reports";
 import { StockHolds } from "./components/StockHolds";
 import { SupervisorQueue } from "./components/SupervisorQueue";
+import { Tag } from "./components/Ui";
 import { useAuth } from "./lib/authStore";
 import { getNavigation, type ViewId } from "./lib/navigation";
 import { isSupabaseConfigured } from "./lib/supabaseClient";
 import { allFacilityLists, useStore } from "./lib/store";
+import { syncSourceLabel } from "./lib/syncSource";
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -62,9 +64,10 @@ function HeaderActions({ role, displayName, onSignOut }: { role: string; display
 }
 
 function OperationsToolbar() {
-  const { locations, visibleFacilities, toggleFacility, anyOpen, tasks, lastSync, syncStock, syncing, notice } = useStore();
+  const { locations, visibleFacilities, toggleFacility, anyOpen, tasks, lastSync, lastSyncSource, lastSyncBy, syncStock, syncing, notice } = useStore();
   const openNos = tasks.filter((t) => t.facilities.some((f) => f.lines.some((l) => l.picked == null))).map((t) => t.no).join(", ");
   const syncLabel = new Date(lastSync).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  const source = syncSourceLabel(lastSyncSource, lastSyncBy);
 
   return (
     <div className="rounded-2xl border border-[var(--fefo-line)] bg-white p-3.5 shadow-[var(--fefo-shadow)] dark:border-slate-700 dark:bg-slate-800">
@@ -84,8 +87,9 @@ function OperationsToolbar() {
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2 text-xs">
+          <Tag tone={source.tone}>{source.text}</Tag>
           <span className="text-[var(--fefo-muted)] dark:text-slate-400">
-            Stock synced from email · <b className="text-[var(--fefo-text)] dark:text-slate-200">{syncLabel}</b>
+            <b className="text-[var(--fefo-text)] dark:text-slate-200">{syncLabel}</b>
           </span>
           <button
             onClick={syncStock}
