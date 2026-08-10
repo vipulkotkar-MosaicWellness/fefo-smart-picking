@@ -14,12 +14,18 @@ interface AuthState {
   userId: string | null;
   profile: Profile | null;
   error: string;
+  // True once Supabase confirms the visitor arrived via a password-reset
+  // email link — App.tsx shows the "set a new password" screen instead of
+  // the normal sign-in/workspace routing while this is set.
+  passwordRecovery: boolean;
 
   init: () => void;
   signIn: (email: string, password: string) => Promise<string | null>;
   signUp: (email: string, password: string, displayName: string) => Promise<string | null>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<string | null>;
+  updatePassword: (newPassword: string) => Promise<string | null>;
 }
 
 /** Pull a readable message out of whatever Supabase (or a network failure) gave us. */
@@ -39,6 +45,7 @@ export const useAuth = create<AuthState>()((set, get) => ({
   userId: null,
   profile: null,
   error: "",
+  passwordRecovery: false,
 
   init: () => {
     if (!supabase) return set({ loading: false });
@@ -47,9 +54,10 @@ export const useAuth = create<AuthState>()((set, get) => ({
       set({ userId: uid, loading: false });
       if (uid) void get().refreshProfile();
     });
-    supabase.auth.onAuthStateChange((_event, session) => {
+    supabase.auth.onAuthStateChange((event, session) => {
       const uid = session?.user.id ?? null;
       set({ userId: uid });
+      if (event === "PASSWORD_RECOVERY") set({ passwordRecovery: true });
       if (uid) void get().refreshProfile();
       else set({ profile: null });
     });
@@ -111,7 +119,48 @@ export const useAuth = create<AuthState>()((set, get) => ({
   signOut: async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
-    set({ userId: null, profile: null });
+    set({ userId: null, profile: null, passwordRecovery: false });
+  },
+
+  requestPasswordReset: async (email) => {
+    if (!supabase) return "Supabase is not configured.";
+    set({ error: "" });
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+      if (error) {
+        console.error("requestPasswordReset error:", error);
+        const msg = readableError(error);
+        set({ error: msg });
+        return msg;
+      }
+      return null;
+    } catch (e) {
+      console.error("requestPasswordReset threw:", e);
+      const msg = readableError(e);
+      set({ error: msg });
+      return msg;
+    }
+  },
+
+  updatePassword: async (newPassword) => {
+    if (!supabase) return "Supabase is not configured.";
+    set({ error: "" });
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        console.error("updatePassword error:", error);
+        const msg = readableError(error);
+        set({ error: msg });
+        return msg;
+      }
+      set({ passwordRecovery: false });
+      return null;
+    } catch (e) {
+      console.error("updatePassword threw:", e);
+      const msg = readableError(e);
+      set({ error: msg });
+      return msg;
+    }
   },
 }));
 

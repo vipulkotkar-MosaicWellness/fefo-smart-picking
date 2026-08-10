@@ -6,7 +6,7 @@ import { InventoryUploadFallback } from "./components/admin/InventoryUploadFallb
 import { PartnerDirectory } from "./components/admin/PartnerDirectory";
 import { AppShell } from "./components/AppShell";
 import { MosaicLogo } from "./components/brand/MosaicLogo";
-import { AuthGate, PendingApproval } from "./components/AuthGate";
+import { AuthGate, PendingApproval, SetNewPassword } from "./components/AuthGate";
 import { DemandPanel } from "./components/DemandPanel";
 import { InventoryPanel } from "./components/InventoryPanel";
 import { PerformancePanel } from "./components/PerformancePanel";
@@ -226,7 +226,7 @@ function Workspace() {
 }
 
 export default function App() {
-  const { loading, userId, profile, init } = useAuth();
+  const { loading, userId, profile, passwordRecovery, init } = useAuth();
 
   useEffect(() => {
     init();
@@ -240,6 +240,9 @@ export default function App() {
   if (loading) {
     return <div className="flex min-h-screen items-center justify-center text-sm text-slate-500 dark:text-slate-400">Loading…</div>;
   }
+  // Takes priority over normal routing — a password-reset email link signs
+  // the visitor into a temporary recovery session, not a real login.
+  if (passwordRecovery) return <SetNewPassword />;
   if (!userId) return <AuthGate />;
   if (!profile || profile.role === "pending") return <PendingApproval email={profile?.email ?? ""} />;
   return <Workspace />;

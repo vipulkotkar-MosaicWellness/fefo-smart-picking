@@ -26,19 +26,27 @@ function Field({ label, ...props }: { label: string } & React.InputHTMLAttribute
 }
 
 export function AuthGate() {
-  const { signIn, signUp } = useAuth();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const { signIn, signUp, requestPasswordReset } = useAuth();
+  const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [signedUp, setSignedUp] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setErr("");
     setBusy(true);
+    if (mode === "reset") {
+      const msg = await requestPasswordReset(email);
+      setBusy(false);
+      if (msg) setErr(msg);
+      else setResetSent(true);
+      return;
+    }
     const msg = mode === "signin" ? await signIn(email, password) : await signUp(email, password, name);
     setBusy(false);
     if (msg) setErr(msg);
@@ -56,23 +64,100 @@ export function AuthGate() {
     );
   }
 
+  if (mode === "reset" && resetSent) {
+    return (
+      <Shell>
+        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+          If an account exists for <b>{email}</b>, a password reset link has been sent — check your inbox (and spam
+          folder).
+        </p>
+        <button
+          onClick={() => { setMode("signin"); setResetSent(false); setErr(""); }}
+          className="mt-4 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+        >
+          Back to sign in
+        </button>
+      </Shell>
+    );
+  }
+
   return (
     <Shell>
-      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">{mode === "signin" ? "Sign in to your account" : "Create your account"}</p>
+      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+        {mode === "signin" ? "Sign in to your account" : mode === "signup" ? "Create your account" : "Reset your password"}
+      </p>
       <form onSubmit={submit}>
         {mode === "signup" && (
           <Field label="Your name" value={name} onChange={(e) => setName(e.target.value)} required />
         )}
         <Field label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <Field label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+        {mode !== "reset" && (
+          <Field label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+        )}
         {err && <p className="mb-3 text-xs font-semibold text-rose-600 dark:text-rose-400">{err}</p>}
-        <Button>{busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}</Button>
+        <Button>{busy ? "Please wait…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset link"}</Button>
+      </form>
+      <div className="mt-4 flex flex-col items-start gap-2">
+        {mode === "signin" && (
+          <button onClick={() => { setMode("reset"); setErr(""); }} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300">
+            Forgot password?
+          </button>
+        )}
+        <button
+          onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setErr(""); }}
+          className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
+        >
+          {mode === "signin" ? "New here? Create an account" : "Already have an account? Sign in"}
+        </button>
+      </div>
+    </Shell>
+  );
+}
+
+export function SetNewPassword() {
+  const { updatePassword, signOut } = useAuth();
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setErr("");
+    if (password !== confirm) {
+      setErr("Passwords don't match.");
+      return;
+    }
+    setBusy(true);
+    const msg = await updatePassword(password);
+    setBusy(false);
+    if (msg) setErr(msg);
+    else setDone(true);
+  }
+
+  if (done) {
+    return (
+      <Shell>
+        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">Password updated — you're signed in.</p>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell>
+      <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">Set a new password</p>
+      <form onSubmit={submit}>
+        <Field label="New password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+        <Field label="Confirm new password" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required minLength={6} />
+        {err && <p className="mb-3 text-xs font-semibold text-rose-600 dark:text-rose-400">{err}</p>}
+        <Button>{busy ? "Please wait…" : "Update password"}</Button>
       </form>
       <button
-        onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setErr(""); }}
+        onClick={() => void signOut()}
         className="mt-4 text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300"
       >
-        {mode === "signin" ? "New here? Create an account" : "Already have an account? Sign in"}
+        Cancel and sign out
       </button>
     </Shell>
   );
