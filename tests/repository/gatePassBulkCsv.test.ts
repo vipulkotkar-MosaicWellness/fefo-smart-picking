@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { gatePassBulkCsv, uniwareCsv } from "../../src/lib/uniwareExport";
 import type { PickLine } from "../../src/lib/types";
 
-const HEADER = "Gate Pass ID,Item Sku Code*,Qty,Inventory Type,Shelf Code,Unit Price,Uniware Batch Code,Force Allocate";
+const HEADER = "Gatepass Code*,Item Or Sku Code*,Qty,Inventory Type,Shelf Code,Unit Price,Batch Code,Force Allocate";
 
 function line(overrides: Partial<PickLine> = {}): PickLine {
   return { rid: 1, sku: "SKU-1", name: "Product", facility: "SL Mother Hub", bin: "A1", batch: "B1", exp: [2099, 1], rem: 12, qty: 10, ...overrides };

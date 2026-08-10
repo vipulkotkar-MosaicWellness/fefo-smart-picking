@@ -1,7 +1,7 @@
 import { unitPrice } from "./cogs";
 import type { PickLine } from "./types";
 
-const HEADER = "Gate Pass ID,Item Sku Code*,Qty,Inventory Type,Shelf Code,Unit Price,Uniware Batch Code,Force Allocate";
+const HEADER = "Gatepass Code*,Item Or Sku Code*,Qty,Inventory Type,Shelf Code,Unit Price,Batch Code,Force Allocate";
 
 function csvCell(v: string | number): string {
   const s = String(v);
@@ -24,8 +24,8 @@ function lineRow(gatePassNo: string, l: PickLine): string {
 
 /**
  * Build the Uniware-import-ready CSV for one facility picklist's active
- * lines: Gate Pass ID, Item Sku Code, Qty, Inventory Type, Shelf Code, Unit
- * Price, Uniware Batch Code, Force Allocate.
+ * lines: Gatepass Code, Item Or Sku Code, Qty, Inventory Type, Shelf Code,
+ * Unit Price, Batch Code, Force Allocate.
  */
 export function uniwareCsv(lines: PickLine[], gatePassNo: string): string {
   return HEADER + "\n" + lines.map((l) => lineRow(gatePassNo, l)).join("\n") + "\n";
