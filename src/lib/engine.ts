@@ -13,7 +13,7 @@ export function cutoffMonths(rule: ChannelRule, shelf: number): number {
 
 /** Bins holding physically set-aside not-found/exception stock — never real pickable inventory. */
 export function isExceptionBin(bin: string): boolean {
-  return bin.trim().toUpperCase().startsWith("CC-NTF");
+  return bin.trim().toUpperCase().includes("NTF");
 }
 
 /** Parse a bin code into [zone letter, position number] for path ordering. */

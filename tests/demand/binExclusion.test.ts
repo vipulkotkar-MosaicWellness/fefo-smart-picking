@@ -29,6 +29,12 @@ describe("isExceptionBin", () => {
     expect(isExceptionBin("cc-ntf-001")).toBe(true);
   });
 
+  it("flags any bin containing NTF anywhere, not just as a prefix", () => {
+    expect(isExceptionBin("SLM-NTF-A1")).toBe(true);
+    expect(isExceptionBin("A1-NTF")).toBe(true);
+    expect(isExceptionBin("NTF001")).toBe(true);
+  });
+
   it("does not flag an ordinary bin", () => {
     expect(isExceptionBin("A1")).toBe(false);
     expect(isExceptionBin("SLM-A1")).toBe(false);
