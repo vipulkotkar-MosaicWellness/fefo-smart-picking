@@ -38,7 +38,10 @@ export interface AllocateArgs {
   location: string;
   cutoff: number; // minimum remaining months (already computed from the channel rule)
   stock: StockRow[];
-  reservedFor: (rid: number) => number;
+  // Keyed by sku+facility+bin+batch identity (see holdKey), NOT by the stock
+  // row's rid — rid is reassigned on every resync and isn't safe to persist
+  // reservations against.
+  reservedFor: (key: string) => number;
   exclude?: number[];
   heldKeys?: Set<string>;
   today?: Date;
@@ -73,7 +76,7 @@ export function allocate(args: AllocateArgs): AllocateResult {
         !exclude.includes(b.rid) &&
         !(heldKeys?.has(holdKey(b.sku, b.location, b.bin, b.batch)) ?? false),
     )
-    .map((b) => ({ b, rem: monthsRemaining(b.exp, today), av: b.qty - reservedFor(b.rid) }))
+    .map((b) => ({ b, rem: monthsRemaining(b.exp, today), av: b.qty - reservedFor(holdKey(b.sku, b.location, b.bin, b.batch)) }))
     .filter((o) => o.rem >= cutoff && o.av > 0)
     .sort((x, y) => x.rem - y.rem);
 

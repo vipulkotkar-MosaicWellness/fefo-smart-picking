@@ -44,11 +44,21 @@ export function activeTasks(tasks: PickingTask[]): PickingTask[] {
   return tasks.filter((t) => !t.archived);
 }
 
-/** A line still reserves stock until it has actually been picked. Archived tasks never reserve. */
-export function reservedFor(tasks: PickingTask[], rid: number): number {
+/**
+ * A line still reserves stock until it has actually been picked. Archived
+ * tasks never reserve. Matched by sku+facility+bin+batch identity (the same
+ * key format as holdKey), NOT by the stock row's `rid` — that internal ID is
+ * reassigned on every stock resync (no stable ordering on the fetch, and the
+ * Apps Script does a full delete+reinsert hourly), so an open line's `rid`
+ * can silently point at an unrelated physical lot after the next sync.
+ */
+export function reservedFor(tasks: PickingTask[], key: string): number {
   let r = 0;
   for (const f of allFacilityLists(activeTasks(tasks))) {
-    for (const l of f.lines) if (l.rid === rid && l.picked == null) r += l.qty;
+    for (const l of f.lines) {
+      if (l.picked != null) continue;
+      if (holdKey(l.sku, l.facility, l.bin, l.batch) === key) r += l.qty;
+    }
   }
   return r;
 }
@@ -83,7 +93,7 @@ function waterfall(
   cutoff: number,
   stock: StockRow[],
   priority: string[],
-  reserved: (rid: number) => number,
+  reserved: (key: string) => number,
   exclude: number[],
   heldKeys: Set<string>,
 ): { byFacility: Record<string, PickLine[]>; short: number } {
@@ -150,7 +160,7 @@ export function computeChannelAllocations(
     byGroup.get(key)!.push(d);
   }
 
-  const reserved = (rid: number) => reservedFor(existingTasks, rid);
+  const reserved = (key: string) => reservedFor(existingTasks, key);
   const out: ChannelAllocation[] = [];
   for (const lines of byGroup.values()) {
     const channel = lines[0].channel;
@@ -648,7 +658,7 @@ export const useStore = create<AppState>()(
           completedFacility.lines.forEach((l) => { if (l.nf) nfBySku[l.sku] = (nfBySku[l.sku] ?? 0) + l.nf; });
           const r2: Record<string, PickLine[]> = {};
           const extraShort: Shortfall[] = [];
-          const reserved = (rid: number) => reservedFor(tasks, rid);
+          const reserved = (key: string) => reservedFor(tasks, key);
           const heldKeysForRound2 = activeHoldKeys(state.holds);
           for (const sku of Object.keys(nfBySku)) {
             const cutoff = cutoffMonths(rule, state.skus[sku].shelf);
