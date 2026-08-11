@@ -696,7 +696,7 @@ export const useStore = create<AppState>()(
         set({ tasks, stock, gpSeq, notice: `${facilityNo} updated.` });
 
         if (completedFacility) {
-          const requests = holdsToCreate(completedFacility.lines, completedFacility.facility, parentTask?.no ?? facilityNo, activeHoldKeys(get().holds));
+          const requests = holdsToCreate(completedFacility.lines, completedFacility.facility, parentTask?.no ?? facilityNo, activeHoldKeys(get().holds), stock);
           // Sequential, not Promise.all: each placeHold() re-fetches holds from
           // Supabase afterward, so awaiting one at a time keeps that re-fetch
           // authoritative instead of racing on fetch-completion order.

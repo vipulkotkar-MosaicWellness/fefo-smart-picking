@@ -20,8 +20,12 @@ combination goes **on hold**: excluded from all future allocation (fresh picklis
 and round-2 alternates alike) until an Admin or Super Admin explicitly releases it
 (Planner can view the hold list, not release). The hold is scoped to that exact
 combination only — a different SKU sitting on the same bin, or the same SKU in a
-different bin/batch, is unaffected. It also records the not-found quantity that
-triggered it — e.g. 100 expected, 25 picked → 75 held, not 25.
+different bin/batch, is unaffected. It also records the qty actually put on
+hold: the shelf's current stock level right after the picked amount is
+deducted — e.g. bin qty 100, pick qty 10, picked 5, not-found 5 → 95 held
+(100 − 5), not 5. The bin can hold far more than any single picklist asked
+for, so the hold covers everything left at that shelf, not just the
+shortfall.
 
 ## Why not key on the stock row's internal ID
 

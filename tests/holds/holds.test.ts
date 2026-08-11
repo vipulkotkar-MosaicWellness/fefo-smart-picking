@@ -55,40 +55,49 @@ describe("activeHoldKeys", () => {
 });
 
 describe("holdsToCreate", () => {
-  it("creates one hold request per not-found line, carrying the not-found qty", () => {
-    const lines = [{ sku: "SKU-1", bin: "A1", batch: "B1", nf: 4, nfReason: "Damaged stock" }];
-    const out = holdsToCreate(lines, "SL Mother Hub", "PT-001", new Set());
-    expect(out).toEqual([{ sku: "SKU-1", facility: "SL Mother Hub", bin: "A1", batch: "B1", qty: 4, reason: "Damaged stock", sourceTaskNo: "PT-001" }]);
+  // Worked example: bin qty 100, pick qty 10, picked 5, not-found 5 ->
+  // hold qty should be 95 (100 - 5 picked), NOT 5 (the not-found count).
+  // applyPicks() already deducts picked from stock before calling this, so
+  // the qty here is read straight off the (already-deducted) stock passed in.
+  it("uses the live stock level (post-pick-deduction), not the not-found count, as the hold qty", () => {
+    const lines = [{ sku: "SKU-1", bin: "A1", batch: "B1", nf: 5, nfReason: "Damaged stock" }];
+    const stock = [stockRow({ qty: 95 })]; // caller already subtracted the 5 picked from the original 100
+    const out = holdsToCreate(lines, "SL Mother Hub", "PT-001", new Set(), stock);
+    expect(out).toEqual([{ sku: "SKU-1", facility: "SL Mother Hub", bin: "A1", batch: "B1", qty: 95, reason: "Damaged stock", sourceTaskNo: "PT-001" }]);
   });
 
   it("skips a line with no not-found quantity", () => {
     const lines = [{ sku: "SKU-1", bin: "A1", batch: "B1", nf: 0 }];
-    expect(holdsToCreate(lines, "SL Mother Hub", "PT-001", new Set())).toEqual([]);
+    expect(holdsToCreate(lines, "SL Mother Hub", "PT-001", new Set(), [])).toEqual([]);
   });
 
   it("skips a combination that's already actively held", () => {
     const lines = [{ sku: "SKU-1", bin: "A1", batch: "B1", nf: 2 }];
     const existing = new Set([holdKey("SKU-1", "SL Mother Hub", "A1", "B1")]);
-    expect(holdsToCreate(lines, "SL Mother Hub", "PT-001", existing)).toEqual([]);
+    expect(holdsToCreate(lines, "SL Mother Hub", "PT-001", existing, [stockRow({ qty: 95 })])).toEqual([]);
   });
 
-  it("de-duplicates two not-found lines that share the same sku+bin+batch, summing their qty into one hold", () => {
+  it("de-duplicates two not-found lines that share the same sku+bin+batch into one hold, reading the shared stock level once", () => {
     const lines = [
       { sku: "SKU-1", bin: "A1", batch: "B1", nf: 2 },
       { sku: "SKU-1", bin: "A1", batch: "B1", nf: 3 },
     ];
-    const out = holdsToCreate(lines, "SL Mother Hub", "PT-001", new Set());
+    const stock = [stockRow({ qty: 95 })];
+    const out = holdsToCreate(lines, "SL Mother Hub", "PT-001", new Set(), stock);
     expect(out).toHaveLength(1);
-    expect(out[0].qty).toBe(5);
+    expect(out[0].qty).toBe(95);
   });
 
-  it("keeps two different skus on the same bin as two separate hold requests", () => {
+  it("keeps two different skus on the same bin as two separate hold requests, each with its own stock level", () => {
     const lines = [
       { sku: "SKU-1", bin: "A1", batch: "B1", nf: 2 },
       { sku: "SKU-2", bin: "A1", batch: "B9", nf: 5 },
     ];
-    const out = holdsToCreate(lines, "SL Mother Hub", "PT-001", new Set());
+    const stock = [stockRow({ sku: "SKU-1", batch: "B1", qty: 95 }), stockRow({ sku: "SKU-2", batch: "B9", qty: 40 })];
+    const out = holdsToCreate(lines, "SL Mother Hub", "PT-001", new Set(), stock);
     expect(out).toHaveLength(2);
+    expect(out.find((r) => r.sku === "SKU-1")?.qty).toBe(95);
+    expect(out.find((r) => r.sku === "SKU-2")?.qty).toBe(40);
   });
 });
 

@@ -26,7 +26,7 @@ export interface NewHoldRequest {
   facility: string;
   bin: string;
   batch: string;
-  qty: number; // total not-found quantity that triggered this hold
+  qty: number; // bin qty still on hold — the shelf's current qty AFTER the picked amount is deducted, not the not-found count
   reason?: string;
   sourceTaskNo: string;
 }
@@ -34,24 +34,30 @@ export interface NewHoldRequest {
 /**
  * Which not-found lines from a just-completed facility picklist need a new
  * hold — one per distinct SKU+Bin+Batch, skipping anything already actively
- * held so a repeat completion doesn't create duplicate rows. Two not-found
- * lines that share the same combination (e.g. split across a round-2 offer)
- * have their not-found qty summed into the one hold.
+ * held so a repeat completion doesn't create duplicate rows.
+ *
+ * The hold's qty is the bin's current stock level (via onHandQty), NOT the
+ * not-found count. Worked example: bin qty 100, pick qty 10, picked 5,
+ * not-found 5 -> hold qty is 95 (100 - 5 picked), because `stock` here is
+ * expected to already have the picked amount deducted (applyPicks() does
+ * this before calling holdsToCreate) — so reading it straight off gives the
+ * right number without double-subtracting.
  */
 export function holdsToCreate(
   lines: { sku: string; bin: string; batch: string; nf?: number; nfReason?: string }[],
   facility: string,
   sourceTaskNo: string,
   existingActiveKeys: Set<string>,
+  stock: StockRow[],
 ): NewHoldRequest[] {
-  const byKey = new Map<string, NewHoldRequest>();
+  const seen = new Set<string>();
+  const out: NewHoldRequest[] = [];
   for (const l of lines) {
     if (!l.nf || l.nf <= 0) continue;
     const key = holdKey(l.sku, facility, l.bin, l.batch);
-    if (existingActiveKeys.has(key)) continue;
-    const existing = byKey.get(key);
-    if (existing) existing.qty += l.nf;
-    else byKey.set(key, { sku: l.sku, facility, bin: l.bin, batch: l.batch, qty: l.nf, reason: l.nfReason, sourceTaskNo });
+    if (existingActiveKeys.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ sku: l.sku, facility, bin: l.bin, batch: l.batch, qty: onHandQty(stock, l.sku, facility, l.bin, l.batch), reason: l.nfReason, sourceTaskNo });
   }
-  return [...byKey.values()];
+  return out;
 }

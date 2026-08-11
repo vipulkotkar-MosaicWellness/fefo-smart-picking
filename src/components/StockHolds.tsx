@@ -36,8 +36,9 @@ export function StockHolds() {
     <Card title={`Stock holds (${active.length} active)`}>
       <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
         A SKU + Facility + Bin + Batch combination lands here automatically whenever it's marked not-found during
-        picking. The entire lot at that shelf is excluded from every future picklist — fresh or round-2 — not just
-        the not-found portion, until released below.
+        picking. "Qty on hold" is the shelf's stock level right after the picked amount was deducted (e.g. bin qty
+        100, picked 5 → 95 on hold) — the entire remaining lot is excluded from every future picklist, fresh or
+        round-2, until released below.
       </p>
       {active.length === 0 ? (
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds right now.</p>
@@ -50,8 +51,8 @@ export function StockHolds() {
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Facility</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Bin</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Batch</th>
-                <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Not-found qty</th>
-                <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Total on shelf (held)</th>
+                <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Qty on hold</th>
+                <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Current shelf qty</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Held since</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Held by</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Reason</th>
