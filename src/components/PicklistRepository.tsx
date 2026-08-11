@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { ageDays } from "../lib/ageing";
-import { useAuth } from "../lib/authStore";
 import { downloadCsv } from "../lib/format";
 import { groupPicklistFamilies, type PicklistFamily } from "../lib/picklistFamilies";
 import { activeTasks, useStore } from "../lib/store";
@@ -24,29 +23,17 @@ function FamilyRow({
   createdByName,
   selectedRound,
   onSelectRound,
-  canDiscard,
 }: {
   family: PicklistFamily;
   gatePassNo: string;
   createdByName?: string;
   selectedRound: number;
   onSelectRound: (round: number) => void;
-  canDiscard: boolean;
 }) {
   const active = family.rounds.find((r) => r.round === selectedRound) ?? family.rounds[family.rounds.length - 1];
   const hasAlternates = family.rounds.length > 1;
   const batches = [...new Set(active.lines.map((l) => l.batch))];
   const now = new Date();
-  const { discardFacilityPicklist, logAudit } = useStore();
-  const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
-
-  async function discard() {
-    if (!window.confirm(`Discard the ${roundLabel(active.round)} picklist ${active.no} (${gatePassNo}, ${active.facility})? Only this facility picklist is cancelled — other facilities on the same gate pass are untouched. Its reserved stock is freed, nothing is deleted, and it can be restored from Admin → Discarded picklists.`)) {
-      return;
-    }
-    await discardFacilityPicklist(family.taskNo, active.no);
-    logAudit(myName, `Discarded picklist ${active.no} (${gatePassNo}, ${active.facility})`);
-  }
 
   return (
     <div className="rounded-lg border border-slate-200 dark:border-slate-700">
@@ -55,11 +42,6 @@ function FamilyRow({
           <span className="text-sm font-semibold">{gatePassNo}</span>
           <span className="ml-2 text-[11px] text-slate-500 dark:text-slate-400">{family.taskNo} · {active.facility}</span>
         </div>
-        {canDiscard && active.status !== "completed" && (
-          <Button variant="sm" onClick={() => void discard()}>
-            Discard
-          </Button>
-        )}
         {hasAlternates && (
           <div className="flex gap-1 rounded-md border border-slate-300 bg-white p-0.5 dark:border-slate-600 dark:bg-slate-800">
             {family.rounds.map((r) => (
@@ -117,8 +99,6 @@ export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[]
   const storeTasks = useStore((s) => s.tasks);
   const tasks = tasksProp ?? activeTasks(storeTasks);
   const [selectedRounds, setSelectedRounds] = useState<Record<string, number>>({});
-  const role = useAuth((s) => s.profile?.role);
-  const canDiscard = role === "admin" || role === "super_admin";
 
   const taskByNo = new Map(tasks.map((t) => [t.no, t]));
   // Discarded facility picklists are a separate concept from archived tasks
@@ -169,7 +149,6 @@ export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[]
               createdByName={t?.createdByName}
               selectedRound={selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round}
               onSelectRound={(round) => setSelectedRounds((prev) => ({ ...prev, [fam.key]: round }))}
-              canDiscard={canDiscard}
             />
           );
         })}

@@ -9,8 +9,10 @@ import { Button, Tag } from "./Ui";
 
 /** The full picklist detail: assignment controls, share buttons, line table, complete button. */
 export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePassNo?: string }) {
-  const { pickers, assignAll, assignLine, uploadAssignments, applyPicks } = useStore();
+  const { pickers, assignAll, assignLine, uploadAssignments, applyPicks, discardFacilityPicklist, logAudit } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Supervisor");
+  const role = useAuth((s) => s.profile?.role);
+  const canDiscard = role === "admin" || role === "super_admin";
   const [nf, setNf] = useState<Record<number, number>>({});
   const [assignTo, setAssignTo] = useState("");
   const open = f.status === "open";
@@ -65,6 +67,13 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
     lines.forEach((l) => (results[l.rid] = nf[l.rid] ?? 0));
     void applyPicks(f.no, results, undefined, myName);
   }
+  async function discard() {
+    if (!window.confirm(`Discard picklist ${f.no}${gatePassNo ? ` (${gatePassNo})` : ""} at ${f.facility}? Its reserved stock is freed, nothing is deleted, and it can be restored from Admin → Discarded picklists.`)) {
+      return;
+    }
+    await discardFacilityPicklist(f.taskNo, f.no);
+    logAudit(myName, `Discarded picklist ${f.no}${gatePassNo ? ` (${gatePassNo})` : ""} at ${f.facility}`);
+  }
 
   return (
     <div>
@@ -79,6 +88,7 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
           <Button variant="sm" onClick={copy}>Copy</Button>
           <Button variant="sm" onClick={csv}>CSV</Button>
           <Button variant="sm" onClick={print}>Print</Button>
+          {open && canDiscard && <Button variant="sm" onClick={() => void discard()}>Discard</Button>}
           {open && <Button variant="green" onClick={complete}>Mark completed</Button>}
         </div>
       </div>
