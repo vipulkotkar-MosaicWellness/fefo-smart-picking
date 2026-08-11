@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminConfig } from "./components/AdminConfig";
 import { AdminUsers } from "./components/AdminUsers";
 import { ArchivedPicklists } from "./components/admin/ArchivedPicklists";
+import { DiscardedPicklists } from "./components/admin/DiscardedPicklists";
 import { InventoryUploadFallback } from "./components/admin/InventoryUploadFallback";
 import { PartnerDirectory } from "./components/admin/PartnerDirectory";
 import { AppShell } from "./components/AppShell";
@@ -18,7 +19,7 @@ import { Tag } from "./components/Ui";
 import { useAuth } from "./lib/authStore";
 import { getNavigation, type ViewId } from "./lib/navigation";
 import { isSupabaseConfigured } from "./lib/supabaseClient";
-import { allFacilityLists, useStore } from "./lib/store";
+import { activeFacilityLists, useStore } from "./lib/store";
 import { syncSourceLabel } from "./lib/syncSource";
 
 function initialsOf(name: string): string {
@@ -141,7 +142,7 @@ function Workspace() {
   const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
   const isAdminTier = role === "admin" || role === "super_admin";
 
-  const unassignedCount = allFacilityLists(tasks).filter(
+  const unassignedCount = activeFacilityLists(tasks).filter(
     (f) => f.status !== "completed" && !f.lines.some((l) => l.picker),
   ).length;
   const activeHoldsCount = useStore((s) => s.holds).filter((h) => !h.releasedAt).length;
@@ -217,6 +218,7 @@ function Workspace() {
           <AdminConfig />
           <InventoryUploadFallback />
           <ArchivedPicklists />
+          <DiscardedPicklists />
           <AdminUsers />
           <PartnerDirectory />
         </div>

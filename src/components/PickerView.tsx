@@ -3,7 +3,7 @@ import { useAuth } from "../lib/authStore";
 import { criticalPathSort } from "../lib/engine";
 import { monLabel } from "../lib/format";
 import { loadQueue } from "../lib/offlineQueue";
-import { allFacilityLists, useStore } from "../lib/store";
+import { activeFacilityLists, useStore } from "../lib/store";
 import type { FacilityPicklist, PickLine } from "../lib/types";
 import { Button, Tag } from "./Ui";
 
@@ -34,7 +34,7 @@ export function PickerView() {
   const myName = useAuth((s) => s.profile?.display_name ?? "");
 
   // facility picklists that have lines assigned to me and still to pick
-  const myLists = allFacilityLists(tasks)
+  const myLists = activeFacilityLists(tasks)
     .map((f) => ({ f, mine: f.lines.filter((l) => l.picker === myName && l.picked == null) }))
     .filter((x) => x.mine.length > 0);
 

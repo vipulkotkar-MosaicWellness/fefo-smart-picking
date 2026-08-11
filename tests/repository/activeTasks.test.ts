@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { holdKey } from "../../src/lib/holds";
-import { activeTasks, reservedFor } from "../../src/lib/store";
+import { activeFacilityLists, activeTasks, reservedFor } from "../../src/lib/store";
 import type { PickingTask } from "../../src/lib/types";
 
 function task(overrides: Partial<PickingTask> = {}): PickingTask {
@@ -64,5 +64,44 @@ describe("reservedFor — archived tasks never hold a reservation", () => {
     expect(reservedFor([active], unrelatedLotKey)).toBe(0);
     // The original lot's real identity still correctly shows 20 reserved.
     expect(reservedFor([active], KEY)).toBe(20);
+  });
+
+  it("does not reserve a discarded facility picklist's stock, even though its parent task is still active", () => {
+    const line = { rid: 1, sku: "SKU-1", name: "Product", facility: "SL Mother Hub", bin: "A1", batch: "B1", exp: [2099, 1] as [number, number], rem: 12, qty: 20 };
+    const withDiscardedFacility = task({
+      no: "TASK-MIXED",
+      facilities: [{ no: "TASK-MIXED-MH", taskNo: "TASK-MIXED", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line], discarded: true }],
+    });
+    expect(reservedFor([withDiscardedFacility], KEY)).toBe(0);
+  });
+});
+
+describe("activeFacilityLists — discarding is a separate concept from archiving", () => {
+  it("excludes a discarded facility picklist even when its parent task is active", () => {
+    const task1 = task({
+      no: "TASK-1",
+      facilities: [
+        { no: "TASK-1-MH", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [], discarded: true },
+        { no: "TASK-1-AMB", taskNo: "TASK-1", facility: "SL Ambient", status: "open", round: 1, bad: 0, lines: [] },
+      ],
+    });
+    expect(activeFacilityLists([task1]).map((f) => f.no)).toEqual(["TASK-1-AMB"]);
+  });
+
+  it("excludes every facility of an archived task, discarded or not", () => {
+    const task1 = task({
+      no: "TASK-ARCHIVED",
+      archived: true,
+      facilities: [{ no: "TASK-ARCHIVED-MH", taskNo: "TASK-ARCHIVED", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [] }],
+    });
+    expect(activeFacilityLists([task1])).toEqual([]);
+  });
+
+  it("keeps a facility picklist that's neither archived nor discarded", () => {
+    const task1 = task({
+      no: "TASK-1",
+      facilities: [{ no: "TASK-1-MH", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [] }],
+    });
+    expect(activeFacilityLists([task1]).map((f) => f.no)).toEqual(["TASK-1-MH"]);
   });
 });

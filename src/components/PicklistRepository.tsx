@@ -37,15 +37,15 @@ function FamilyRow({
   const hasAlternates = family.rounds.length > 1;
   const batches = [...new Set(active.lines.map((l) => l.batch))];
   const now = new Date();
-  const { archiveTask, logAudit } = useStore();
+  const { discardFacilityPicklist, logAudit } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
 
   async function discard() {
-    if (!window.confirm(`Discard picklist ${gatePassNo} (${family.taskNo})? It's removed from every active screen and report and its reserved stock is freed — nothing is deleted, and it can be brought back from Admin → Archived picklists.`)) {
+    if (!window.confirm(`Discard the ${roundLabel(active.round)} picklist ${active.no} (${gatePassNo}, ${active.facility})? Only this facility picklist is cancelled — other facilities on the same gate pass are untouched. Its reserved stock is freed, nothing is deleted, and it can be restored from Admin → Discarded picklists.`)) {
       return;
     }
-    await archiveTask(family.taskNo);
-    logAudit(myName, `Discarded picklist ${gatePassNo} (${family.taskNo})`);
+    await discardFacilityPicklist(family.taskNo, active.no);
+    logAudit(myName, `Discarded picklist ${active.no} (${gatePassNo}, ${active.facility})`);
   }
 
   return (
@@ -55,7 +55,7 @@ function FamilyRow({
           <span className="text-sm font-semibold">{gatePassNo}</span>
           <span className="ml-2 text-[11px] text-slate-500 dark:text-slate-400">{family.taskNo} · {active.facility}</span>
         </div>
-        {canDiscard && (
+        {canDiscard && active.status !== "completed" && (
           <Button variant="sm" onClick={() => void discard()}>
             Discard
           </Button>
@@ -121,7 +121,13 @@ export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[]
   const canDiscard = role === "admin" || role === "super_admin";
 
   const taskByNo = new Map(tasks.map((t) => [t.no, t]));
-  const families = groupPicklistFamilies(tasks);
+  // Discarded facility picklists are a separate concept from archived tasks
+  // (see FacilityPicklist.discarded) — drop them here so a discarded round
+  // disappears from the Repository the same way an archived task already does.
+  const tasksWithoutDiscarded = tasks
+    .map((t) => ({ ...t, facilities: t.facilities.filter((f) => !f.discarded) }))
+    .filter((t) => t.facilities.length > 0);
+  const families = groupPicklistFamilies(tasksWithoutDiscarded);
 
   if (families.length === 0) {
     return (

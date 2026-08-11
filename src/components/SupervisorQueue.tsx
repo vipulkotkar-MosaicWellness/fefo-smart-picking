@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ageingRangeFor, inAgeingRange, type AgeingPreset } from "../lib/ageing";
 import { primaryFacilityNo } from "../lib/format";
-import { activeTasks, allFacilityLists, useStore } from "../lib/store";
+import { activeFacilityLists, activeTasks, useStore } from "../lib/store";
 import { bucketSummary, pickerWorkload, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
 import type { FacilityPicklist } from "../lib/types";
 import { AgeingFilter } from "./AgeingFilter";
@@ -148,7 +148,7 @@ export function SupervisorQueue() {
   const tasks = activeTasks(useStore((s) => s.tasks));
   const facilityPriority = useStore((s) => s.facilityPriority);
   const pickers = useStore((s) => s.pickers);
-  const all = allFacilityLists(tasks); // already in task-creation order
+  const all = activeFacilityLists(tasks); // already in task-creation order
 
   const [facilityFilter, setFacilityFilter] = useState("");
   const [channelFilter, setChannelFilter] = useState("");

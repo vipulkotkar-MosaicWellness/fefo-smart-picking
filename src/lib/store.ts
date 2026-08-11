@@ -45,16 +45,29 @@ export function activeTasks(tasks: PickingTask[]): PickingTask[] {
 }
 
 /**
+ * Every facility picklist actually in play right now: parent task not
+ * archived, AND the facility picklist itself not discarded. Discarding is a
+ * separate, per-facility-picklist feature from archiving a whole task — see
+ * the comment on FacilityPicklist.discarded — but both need to disappear
+ * from the same operational surfaces (queue, picker's own list, reservation
+ * math), so this is the one place that combines them.
+ */
+export function activeFacilityLists(tasks: PickingTask[]): FacilityPicklist[] {
+  return allFacilityLists(activeTasks(tasks)).filter((f) => !f.discarded);
+}
+
+/**
  * A line still reserves stock until it has actually been picked. Archived
- * tasks never reserve. Matched by sku+facility+bin+batch identity (the same
- * key format as holdKey), NOT by the stock row's `rid` — that internal ID is
- * reassigned on every stock resync (no stable ordering on the fetch, and the
- * Apps Script does a full delete+reinsert hourly), so an open line's `rid`
- * can silently point at an unrelated physical lot after the next sync.
+ * tasks and discarded facility picklists never reserve. Matched by
+ * sku+facility+bin+batch identity (the same key format as holdKey), NOT by
+ * the stock row's `rid` — that internal ID is reassigned on every stock
+ * resync (no stable ordering on the fetch, and the Apps Script does a full
+ * delete+reinsert hourly), so an open line's `rid` can silently point at an
+ * unrelated physical lot after the next sync.
  */
 export function reservedFor(tasks: PickingTask[], key: string): number {
   let r = 0;
-  for (const f of allFacilityLists(activeTasks(tasks))) {
+  for (const f of activeFacilityLists(tasks)) {
     for (const l of f.lines) {
       if (l.picked != null) continue;
       if (holdKey(l.sku, l.facility, l.bin, l.batch) === key) r += l.qty;
@@ -291,6 +304,11 @@ export interface AppState {
   archiveAllActiveTasks: () => Promise<void>;
   unarchiveAllTasks: () => Promise<void>;
   archiveByCutoff: (cutoffDate: string, direction: "before" | "after") => Promise<number>;
+  // A separate feature from archive: cancels one specific facility picklist
+  // (only while still open) and frees its reserved stock, rather than
+  // hiding a whole gate pass regardless of pick status.
+  discardFacilityPicklist: (taskNo: string, facilityNo: string) => Promise<void>;
+  undiscardFacilityPicklist: (taskNo: string, facilityNo: string) => Promise<void>;
 }
 
 const initialStock = rowsFromTuples(REAL_STOCK);
@@ -337,7 +355,7 @@ export const useStore = create<AppState>()(
         set({ auditLog: [{ at: new Date().toISOString(), by, action }, ...get().auditLog].slice(0, 200) }),
 
       locations: () => [...new Set(get().stock.map((b) => b.location))],
-      anyOpen: () => allFacilityLists(activeTasks(get().tasks)).some((f) => f.lines.some((l) => l.picked == null)),
+      anyOpen: () => activeFacilityLists(get().tasks).some((f) => f.lines.some((l) => l.picked == null)),
       toggleFacility: (f) =>
         set({
           visibleFacilities: get().visibleFacilities.includes(f)
@@ -806,6 +824,32 @@ export const useStore = create<AppState>()(
           }
         }
         return archivedTasks.length;
+      },
+
+      // Cancels one facility picklist while it's still open — never a
+      // completed one, that's the whole point of "pending for picking
+      // only." Frees the stock it was reserving, same as archiving does,
+      // but leaves the rest of the gate pass (other facilities) untouched.
+      discardFacilityPicklist: async (taskNo, facilityNo) => {
+        const task = get().tasks.find((t) => t.no === taskNo);
+        if (!task) return;
+        const target = task.facilities.find((f) => f.no === facilityNo);
+        if (!target) return;
+        if (target.status === "completed") {
+          set({ notice: "✗ Can't discard a completed picklist." });
+          return;
+        }
+        const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, discarded: true } : f)) };
+        set({ tasks: mergeTask(get().tasks, updated) });
+        if (isSupabaseConfigured) await updateTaskData(updated);
+      },
+
+      undiscardFacilityPicklist: async (taskNo, facilityNo) => {
+        const task = get().tasks.find((t) => t.no === taskNo);
+        if (!task) return;
+        const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, discarded: false } : f)) };
+        set({ tasks: mergeTask(get().tasks, updated) });
+        if (isSupabaseConfigured) await updateTaskData(updated);
       },
     }),
     {

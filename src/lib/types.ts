@@ -59,6 +59,12 @@ export interface FacilityPicklist {
   pickedTotal?: number;
   lines: PickLine[];
   createdAt?: string; // when this specific round was generated — undefined on data from before this field existed, falls back to the parent task's createdAt
+  // Discarded is a DIFFERENT feature from the task-level `archived` flag on
+  // PickingTask: discarding cancels one specific facility picklist (only
+  // while it's still open, never once completed) and frees its reserved
+  // stock; archiving hides a whole gate pass regardless of pick status.
+  // Never conflate the two — separate flags, separate admin screens.
+  discarded?: boolean;
 }
 
 export type Role = "super_admin" | "admin" | "planner" | "picker";
