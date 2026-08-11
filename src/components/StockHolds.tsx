@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../lib/authStore";
+import { onHandQty } from "../lib/holds";
 import { useStore } from "../lib/store";
 import type { Hold } from "../lib/types";
 import { Button, Card, Tag } from "./Ui";
@@ -10,6 +11,7 @@ function timeLabel(iso: string): string {
 
 export function StockHolds() {
   const holds = useStore((s) => s.holds);
+  const stock = useStore((s) => s.stock);
   const releaseHold = useStore((s) => s.releaseHold);
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
   const role = useAuth((s) => s.profile?.role);
@@ -34,7 +36,8 @@ export function StockHolds() {
     <Card title={`Stock holds (${active.length} active)`}>
       <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
         A SKU + Facility + Bin + Batch combination lands here automatically whenever it's marked not-found during
-        picking. It stays excluded from every future picklist — fresh or round-2 — until released below.
+        picking. The entire lot at that shelf is excluded from every future picklist — fresh or round-2 — not just
+        the not-found portion, until released below.
       </p>
       {active.length === 0 ? (
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds right now.</p>
@@ -48,6 +51,7 @@ export function StockHolds() {
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Bin</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Batch</th>
                 <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Not-found qty</th>
+                <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Total on shelf (held)</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Held since</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Held by</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Reason</th>
@@ -63,6 +67,9 @@ export function StockHolds() {
                   <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">{h.bin}</td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.batch}</td>
                   <td className="border-b border-slate-100 p-1.5 text-right font-semibold dark:border-slate-700/60">{h.qty}</td>
+                  <td className="border-b border-slate-100 p-1.5 text-right font-semibold text-rose-600 dark:border-slate-700/60 dark:text-rose-400">
+                    {onHandQty(stock, h.sku, h.facility, h.bin, h.batch)}
+                  </td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{timeLabel(h.heldAt)}</td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.heldBy}</td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">

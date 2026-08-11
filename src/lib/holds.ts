@@ -1,4 +1,4 @@
-import type { Hold } from "./types";
+import type { Hold, StockRow } from "./types";
 
 /** A stock lot's real-world identity — stable across stock re-syncs, unlike its internal rid. */
 export function holdKey(sku: string, facility: string, bin: string, batch: string): string {
@@ -8,6 +8,17 @@ export function holdKey(sku: string, facility: string, bin: string, batch: strin
 /** Keys for every hold not yet released — what allocate() checks against. */
 export function activeHoldKeys(holds: Hold[]): Set<string> {
   return new Set(holds.filter((h) => !h.releasedAt).map((h) => holdKey(h.sku, h.facility, h.bin, h.batch)));
+}
+
+/**
+ * Current on-hand qty for the exact SKU+Facility+Bin+Batch a hold refers to
+ * — so a hold shows both "10 not found" AND "842 on the shelf entirely
+ * blocked by that", not just the shortfall in isolation.
+ */
+export function onHandQty(stock: StockRow[], sku: string, facility: string, bin: string, batch: string): number {
+  return stock
+    .filter((b) => b.sku === sku && b.location === facility && b.bin === bin && b.batch === batch)
+    .reduce((sum, b) => sum + b.qty, 0);
 }
 
 export interface NewHoldRequest {

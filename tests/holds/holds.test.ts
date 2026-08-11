@@ -1,6 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { activeHoldKeys, holdKey, holdsToCreate } from "../../src/lib/holds";
-import type { Hold } from "../../src/lib/types";
+import { activeHoldKeys, holdKey, holdsToCreate, onHandQty } from "../../src/lib/holds";
+import type { Hold, StockRow } from "../../src/lib/types";
+
+function stockRow(overrides: Partial<StockRow> = {}): StockRow {
+  return {
+    rid: 1,
+    location: "SL Mother Hub",
+    bin: "A1",
+    sku: "SKU-1",
+    name: "Product 1",
+    batch: "B1",
+    exp: [2099, 1],
+    qty: 10,
+    shelf: 24,
+    type: "Good",
+    active: "Active",
+    ...overrides,
+  };
+}
 
 function hold(overrides: Partial<Hold> = {}): Hold {
   return {
@@ -72,5 +89,27 @@ describe("holdsToCreate", () => {
     ];
     const out = holdsToCreate(lines, "SL Mother Hub", "PT-001", new Set());
     expect(out).toHaveLength(2);
+  });
+});
+
+describe("onHandQty", () => {
+  it("returns the current qty for the exact sku+facility+bin+batch", () => {
+    const stock = [stockRow({ qty: 842 })];
+    expect(onHandQty(stock, "SKU-1", "SL Mother Hub", "A1", "B1")).toBe(842);
+  });
+
+  it("returns 0 when nothing on the live stock sheet matches anymore", () => {
+    const stock = [stockRow({ qty: 842 })];
+    expect(onHandQty(stock, "SKU-1", "SL Mother Hub", "A1", "B2")).toBe(0);
+  });
+
+  it("does not count a different sku on the same bin+batch", () => {
+    const stock = [stockRow({ sku: "SKU-2", qty: 50 })];
+    expect(onHandQty(stock, "SKU-1", "SL Mother Hub", "A1", "B1")).toBe(0);
+  });
+
+  it("sums quantity across multiple rows that share the same identity", () => {
+    const stock = [stockRow({ rid: 1, qty: 5 }), stockRow({ rid: 2, qty: 7 })];
+    expect(onHandQty(stock, "SKU-1", "SL Mother Hub", "A1", "B1")).toBe(12);
   });
 });
