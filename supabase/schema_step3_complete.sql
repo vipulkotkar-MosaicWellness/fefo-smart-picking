@@ -135,10 +135,12 @@ create trigger tasks_touch before update on tasks
   for each row execute function touch_tasks_updated_at();
 
 -- "is any picklist still being picked?" — drives the inventory-sync freeze.
--- Must exclude archived tasks: archiving only sets data->>'archived', it never
--- flips a facility's status or marks its lines picked, so an archived task with
--- unpicked lines would otherwise freeze the feed forever even though the app
--- itself (activeTasks()) already ignores archived tasks entirely.
+-- Must exclude archived tasks AND discarded facility picklists: archiving
+-- only sets data->>'archived' and discarding only sets a facility's own
+-- data->'facilities'[]->>'discarded' — neither ever flips a facility's
+-- status or marks its lines picked, so either one, left unaccounted for,
+-- would freeze the feed forever even though the app itself
+-- (activeFacilityLists()) already ignores both entirely.
 create or replace view feed_frozen as
 select exists (
   select 1 from tasks t,
@@ -147,6 +149,7 @@ select exists (
   where (f->>'status') = 'open'
     and (l->'picked') is null
     and coalesce((t.data->>'archived')::boolean, false) = false
+    and coalesce((f->>'discarded')::boolean, false) = false
 ) as frozen;
 
 -- ============ enable Realtime so every logged-in user's screen updates live ============
