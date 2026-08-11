@@ -709,6 +709,10 @@ export const useStore = create<AppState>()(
         if (isSupabaseConfigured && finalTask) {
           try {
             await updateTaskData(finalTask);
+            // The feed may have just unfrozen (this was the last open line) —
+            // pull in whatever stock the automated sync has already received,
+            // instead of waiting for someone to notice and click "Sync now".
+            if (!get().anyOpen()) void get().loadFromSupabase();
           } catch {
             // Offline or a transient failure — the pick is already applied
             // locally above; queue the sync so it isn't silently lost.
@@ -755,6 +759,7 @@ export const useStore = create<AppState>()(
         const archived = { ...updated, archived: true };
         set({ tasks: mergeTask(get().tasks, archived) });
         if (isSupabaseConfigured) await updateTaskData(archived);
+        if (!get().anyOpen()) void get().loadFromSupabase();
       },
 
       unarchiveTask: async (taskNo) => {
@@ -785,6 +790,7 @@ export const useStore = create<AppState>()(
             }
           }
         }
+        if (!get().anyOpen()) void get().loadFromSupabase();
       },
 
       unarchiveAllTasks: async () => {
@@ -823,6 +829,7 @@ export const useStore = create<AppState>()(
             }
           }
         }
+        if (!get().anyOpen()) void get().loadFromSupabase();
         return archivedTasks.length;
       },
 
@@ -842,6 +849,7 @@ export const useStore = create<AppState>()(
         const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, discarded: true } : f)) };
         set({ tasks: mergeTask(get().tasks, updated) });
         if (isSupabaseConfigured) await updateTaskData(updated);
+        if (!get().anyOpen()) void get().loadFromSupabase();
       },
 
       undiscardFacilityPicklist: async (taskNo, facilityNo) => {
