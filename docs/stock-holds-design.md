@@ -17,9 +17,11 @@ missing, miscounted stock).
 
 Whenever a line is marked not-found, that exact **SKU + Facility + Bin + Batch**
 combination goes **on hold**: excluded from all future allocation (fresh picklists
-and round-2 alternates alike) until an Admin, Super Admin, or Planner explicitly
-releases it. The hold is scoped to that exact combination only — a different SKU
-sitting on the same bin, or the same SKU in a different bin/batch, is unaffected.
+and round-2 alternates alike) until an Admin or Super Admin explicitly releases it
+(Planner can view the hold list, not release). The hold is scoped to that exact
+combination only — a different SKU sitting on the same bin, or the same SKU in a
+different bin/batch, is unaffected. It also records the not-found quantity that
+triggered it — e.g. 100 expected, 25 picked → 75 held, not 25.
 
 ## Why not key on the stock row's internal ID
 
@@ -45,6 +47,7 @@ create table stock_holds (
   facility text not null,
   bin text not null,
   batch text not null,
+  qty integer not null default 0, -- not-found qty that triggered the hold
   held_at timestamptz not null default now(),
   held_by text not null,
   reason text,
@@ -64,12 +67,12 @@ create policy "assigned roles create holds" on stock_holds
   for insert to authenticated
   with check (current_role_name() in ('planner', 'admin', 'super_admin', 'picker'));
 
--- Only Admin/Super Admin/Planner may release a hold (matches the requirement
--- that holds stay in effect until a supervisor-tier person clears them).
-create policy "planner admin release holds" on stock_holds
+-- Only Admin/Super Admin may release a hold (Planner can see the list, but
+-- not clear it — release is an Admin-tier action).
+create policy "admin release holds" on stock_holds
   for update to authenticated
-  using (current_role_name() in ('planner', 'admin', 'super_admin'))
-  with check (current_role_name() in ('planner', 'admin', 'super_admin'));
+  using (current_role_name() in ('admin', 'super_admin'))
+  with check (current_role_name() in ('admin', 'super_admin'));
 ```
 
 This reuses the `current_role_name()` helper function already defined in
@@ -118,8 +121,10 @@ far less often than picklists).
 
 New "Stock Holds" screen, visible to **Admin, Super Admin, and Planner** (not
 Picker) — added as a nav item in the existing "shared" section (alongside
-Inventory), since both the Admin and the Supervisor/Planner need equal access.
-Shows every active hold: SKU, product name, Facility, Bin, Batch, held-since,
+Inventory). Planner can see the list for operational visibility; only Admin
+and Super Admin see the "Release" button (matching the RLS policy).
+Shows every active hold: SKU, product name, Facility, Bin, Batch, not-found
+qty, held-since,
 held-by, reason, source picklist — with a "Release hold" button per row. A small
 badge count (mirroring the existing unassigned-picklist badge pattern) makes the
 count visible without opening the tab.

@@ -12,6 +12,8 @@ export function StockHolds() {
   const holds = useStore((s) => s.holds);
   const releaseHold = useStore((s) => s.releaseHold);
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
+  const role = useAuth((s) => s.profile?.role);
+  const canRelease = role === "admin" || role === "super_admin";
   const [releasingId, setReleasingId] = useState<number | null>(null);
 
   const active = holds
@@ -45,6 +47,7 @@ export function StockHolds() {
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Facility</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Bin</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Batch</th>
+                <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Not-found qty</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Held since</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Held by</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Reason</th>
@@ -59,6 +62,7 @@ export function StockHolds() {
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.facility}</td>
                   <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">{h.bin}</td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.batch}</td>
+                  <td className="border-b border-slate-100 p-1.5 text-right font-semibold dark:border-slate-700/60">{h.qty}</td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{timeLabel(h.heldAt)}</td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.heldBy}</td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
@@ -66,9 +70,15 @@ export function StockHolds() {
                   </td>
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.sourceTaskNo ?? "—"}</td>
                   <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
-                    <Button variant="sm" onClick={() => void release(h)} disabled={releasingId === h.id}>
-                      {releasingId === h.id ? "Releasing…" : "Release"}
-                    </Button>
+                    {canRelease ? (
+                      <Button variant="sm" onClick={() => void release(h)} disabled={releasingId === h.id}>
+                        {releasingId === h.id ? "Releasing…" : "Release"}
+                      </Button>
+                    ) : (
+                      <span className="text-[10px] text-slate-400" title="Only Admin and Super Admin can release a hold">
+                        Admin only
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

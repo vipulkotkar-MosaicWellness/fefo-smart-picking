@@ -273,7 +273,7 @@ export interface AppState {
   renamePicker: (oldName: string, newName: string) => Promise<void>;
   removePicker: (name: string) => void;
   loadHolds: () => Promise<void>;
-  placeHold: (h: { sku: string; facility: string; bin: string; batch: string; heldBy: string; reason?: string; sourceTaskNo?: string }) => Promise<void>;
+  placeHold: (h: { sku: string; facility: string; bin: string; batch: string; qty: number; heldBy: string; reason?: string; sourceTaskNo?: string }) => Promise<void>;
   releaseHold: (id: number, releasedBy: string) => Promise<void>;
   setDemand: (d: DemandLine[]) => void;
   removeDemand: (i: number) => void;

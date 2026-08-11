@@ -7,6 +7,7 @@ interface HoldRow {
   facility: string;
   bin: string;
   batch: string;
+  qty: number;
   held_at: string;
   held_by: string;
   reason: string | null;
@@ -22,6 +23,7 @@ function fromRow(r: HoldRow): Hold {
     facility: r.facility,
     bin: r.bin,
     batch: r.batch,
+    qty: r.qty,
     heldAt: r.held_at,
     heldBy: r.held_by,
     reason: r.reason ?? undefined,
@@ -44,6 +46,7 @@ export interface NewHold {
   facility: string;
   bin: string;
   batch: string;
+  qty: number;
   heldBy: string;
   reason?: string;
   sourceTaskNo?: string;
@@ -56,6 +59,7 @@ export async function insertHold(h: NewHold): Promise<void> {
     facility: h.facility,
     bin: h.bin,
     batch: h.batch,
+    qty: h.qty,
     held_by: h.heldBy,
     reason: h.reason ?? null,
     source_task_no: h.sourceTaskNo ?? null,

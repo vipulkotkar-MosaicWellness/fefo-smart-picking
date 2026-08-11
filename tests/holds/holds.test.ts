@@ -38,10 +38,10 @@ describe("activeHoldKeys", () => {
 });
 
 describe("holdsToCreate", () => {
-  it("creates one hold request per not-found line", () => {
+  it("creates one hold request per not-found line, carrying the not-found qty", () => {
     const lines = [{ sku: "SKU-1", bin: "A1", batch: "B1", nf: 4, nfReason: "Damaged stock" }];
     const out = holdsToCreate(lines, "SL Mother Hub", "PT-001", new Set());
-    expect(out).toEqual([{ sku: "SKU-1", facility: "SL Mother Hub", bin: "A1", batch: "B1", reason: "Damaged stock", sourceTaskNo: "PT-001" }]);
+    expect(out).toEqual([{ sku: "SKU-1", facility: "SL Mother Hub", bin: "A1", batch: "B1", qty: 4, reason: "Damaged stock", sourceTaskNo: "PT-001" }]);
   });
 
   it("skips a line with no not-found quantity", () => {
@@ -55,13 +55,14 @@ describe("holdsToCreate", () => {
     expect(holdsToCreate(lines, "SL Mother Hub", "PT-001", existing)).toEqual([]);
   });
 
-  it("de-duplicates two not-found lines that share the same sku+bin+batch", () => {
+  it("de-duplicates two not-found lines that share the same sku+bin+batch, summing their qty into one hold", () => {
     const lines = [
       { sku: "SKU-1", bin: "A1", batch: "B1", nf: 2 },
       { sku: "SKU-1", bin: "A1", batch: "B1", nf: 3 },
     ];
     const out = holdsToCreate(lines, "SL Mother Hub", "PT-001", new Set());
     expect(out).toHaveLength(1);
+    expect(out[0].qty).toBe(5);
   });
 
   it("keeps two different skus on the same bin as two separate hold requests", () => {

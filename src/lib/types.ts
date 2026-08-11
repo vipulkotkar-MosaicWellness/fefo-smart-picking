@@ -95,6 +95,7 @@ export interface Hold {
   facility: string;
   bin: string;
   batch: string;
+  qty: number; // not-found quantity that triggered the hold
   heldAt: string;
   heldBy: string;
   reason?: string;
