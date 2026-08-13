@@ -66,7 +66,16 @@ function HeaderActions({ role, displayName, onSignOut }: { role: string; display
 
 function OperationsToolbar() {
   const { locations, visibleFacilities, toggleFacility, anyOpen, tasks, lastSync, lastSyncSource, lastSyncBy, syncStock, syncing, notice } = useStore();
-  const openNos = tasks.filter((t) => t.facilities.some((f) => f.lines.some((l) => l.picked == null))).map((t) => t.no).join(", ");
+  // Must mirror anyOpen()'s own filtering exactly (activeFacilityLists, and
+  // skip anything WMS-blocked) — otherwise this list shows archived,
+  // discarded, or already-WMS-blocked tasks as if they were still holding
+  // the freeze, when none of them actually are.
+  const openTaskNos = new Set(
+    activeFacilityLists(tasks)
+      .filter((f) => !f.wmsBlocked && f.lines.some((l) => l.picked == null))
+      .map((f) => f.taskNo),
+  );
+  const openNos = [...openTaskNos].join(", ");
   const syncLabel = new Date(lastSync).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
   const source = syncSourceLabel(lastSyncSource, lastSyncBy);
 

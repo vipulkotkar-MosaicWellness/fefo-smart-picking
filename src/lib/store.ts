@@ -29,6 +29,13 @@ import type {
 /** Seed names shown until an Admin adds/renames pickers for this warehouse. */
 export const PICKERS_DEFAULT = ["Ravi", "Sunil", "Amit"];
 
+// Optional: the deployed Apps Script Web App /exec URL (with ?token=... already
+// appended) that lets "Sync now" run the ingest on demand instead of only
+// re-reading whatever Supabase already has. See apps-script/ShelfwiseIngest.gs
+// doGet(). Sync now still works without this set — it just can't force a fresh
+// pull, only re-read the last thing the hourly trigger actually wrote.
+const INGEST_TRIGGER_URL = (import.meta.env.VITE_INGEST_TRIGGER_URL as string | undefined) || "";
+
 export function allFacilityLists(tasks: PickingTask[]): FacilityPicklist[] {
   return tasks.flatMap((t) => t.facilities);
 }
@@ -314,7 +321,7 @@ export interface AppState {
   locations: () => string[];
   anyOpen: () => boolean;
   toggleFacility: (f: string) => void;
-  syncStock: () => void;
+  syncStock: () => Promise<void>;
   loadFromSupabase: () => Promise<void>;
   loadStock: (tuples: StockTuple[]) => void;
   uploadStockFallback: (rows: ShelfwiseStockRow[], uploadedBy: string) => Promise<boolean>;
@@ -503,10 +510,36 @@ export const useStore = create<AppState>()(
       },
 
       // Pull the latest stock. Live from Supabase when configured, else the snapshot.
-      syncStock: () => {
-        if (get().anyOpen()) return set({ notice: "⚠ Feed frozen — complete open picking before syncing." });
+      //
+      // Re-reading Supabase alone can't produce anything newer than whatever
+      // the hourly Apps Script trigger last actually wrote — on a busy day it
+      // may not get a single clear (unfrozen) hour all day, so "Sync now"
+      // could otherwise sit showing stale data no matter how many times it's
+      // clicked. When INGEST_TRIGGER_URL is configured, this calls the same
+      // ingest() the hourly trigger runs, on demand, right now — then reads
+      // back whatever Supabase ends up with either way.
+      syncStock: async () => {
+        if (get().anyOpen()) {
+          set({ notice: "⚠ Feed frozen — complete open picking before syncing." });
+          return;
+        }
         if (isSupabaseConfigured) {
-          void get().loadFromSupabase();
+          if (INGEST_TRIGGER_URL) {
+            set({ syncing: true, notice: "Requesting a fresh pull from the inventory feed…" });
+            try {
+              // no-cors: Apps Script Web App responses aren't reliably
+              // readable cross-origin. We can't read the result, but the
+              // ingest still runs server-side; loadFromSupabase() right
+              // after reads back whatever it actually did (synced, frozen,
+              // or no new email — all handled the same way today already).
+              await fetch(INGEST_TRIGGER_URL, { method: "GET", mode: "no-cors" });
+            } catch {
+              // Network hiccup reaching the trigger — still worth reading
+              // whatever's currently in Supabase rather than giving up.
+            }
+            await new Promise((resolve) => setTimeout(resolve, 4000));
+          }
+          await get().loadFromSupabase();
           return;
         }
         const stock = rowsFromTuples(REAL_STOCK);
