@@ -110,60 +110,73 @@ describe("stampAssignment", () => {
     expect(f.wmsBlockedAt).toBe(wmsBlockedAt);
   });
 
-  it("restarts the clock and clears the revoke once the picklist is reassigned after a revoke", () => {
+  it("keeps assignedAt as the first-ever assignment time, even when reassigned after a revoke", () => {
     const staleAssignedAt = new Date(Date.now() - 30 * 60_000).toISOString();
     const f = stampAssignment(
       facility({ assignedAt: staleAssignedAt, wmsRevokedAt: new Date().toISOString(), wmsRevokedBy: "Admin" }),
     );
-    expect(f.assignedAt).not.toBe(staleAssignedAt);
+    // assignedAt is a pure historical record now — it no longer drives the
+    // WMS-block clock (that's keyed off creation), so reassignment doesn't
+    // need to touch it.
+    expect(f.assignedAt).toBe(staleAssignedAt);
     expect(f.wmsRevokedAt).toBeUndefined();
     expect(f.wmsRevokedBy).toBeUndefined();
     expect(f.wmsBlocked).toBe(false);
   });
 });
 
-describe("dueForWmsBlock", () => {
+describe("dueForWmsBlock — keyed off creation, not assignment", () => {
   const line = { rid: 1, sku: "SKU-1", name: "Product", facility: "SL Mother Hub", bin: "A1", batch: "B1", exp: [2099, 1] as [number, number], rem: 12, qty: 20 };
+  const staleCreatedAt = new Date(Date.now() - WMS_BLOCK_DELAY_MS - 1000).toISOString();
+  const freshCreatedAt = new Date(Date.now() - 60_000).toISOString();
 
-  it("flags an assigned, unblocked facility once 15 minutes have passed", () => {
-    const assignedAt = new Date(Date.now() - WMS_BLOCK_DELAY_MS - 1000).toISOString();
+  it("flags an unblocked facility once 15 minutes have passed since creation, even with no picker assigned", () => {
     const t = task({
-      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line], assignedAt }],
+      createdAt: staleCreatedAt,
+      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line] }],
     });
     expect(dueForWmsBlock([t]).map((f) => f.no)).toEqual(["F-1"]);
   });
 
-  it("does not flag a facility assigned less than 15 minutes ago", () => {
-    const assignedAt = new Date(Date.now() - 60_000).toISOString();
+  it("does not flag a facility created less than 15 minutes ago", () => {
     const t = task({
-      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line], assignedAt }],
+      createdAt: freshCreatedAt,
+      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line] }],
+    });
+    expect(dueForWmsBlock([t])).toEqual([]);
+  });
+
+  it("uses the facility's own createdAt over the parent task's when both are set (round-2 alternates)", () => {
+    const t = task({
+      createdAt: staleCreatedAt,
+      facilities: [{ no: "F-1-R2", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 2, bad: 0, lines: [line], createdAt: freshCreatedAt }],
     });
     expect(dueForWmsBlock([t])).toEqual([]);
   });
 
   it("does not re-flag a facility already blocked", () => {
-    const assignedAt = new Date(Date.now() - WMS_BLOCK_DELAY_MS - 1000).toISOString();
     const t = task({
-      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line], assignedAt, wmsBlocked: true }],
+      createdAt: staleCreatedAt,
+      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line], wmsBlocked: true }],
     });
     expect(dueForWmsBlock([t])).toEqual([]);
   });
 
   it("does not flag a facility whose block was revoked, even past 15 minutes", () => {
-    const assignedAt = new Date(Date.now() - WMS_BLOCK_DELAY_MS - 1000).toISOString();
     const t = task({
+      createdAt: staleCreatedAt,
       facilities: [{
         no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line],
-        assignedAt, wmsRevokedAt: new Date().toISOString(), wmsRevokedBy: "Admin",
+        wmsRevokedAt: new Date().toISOString(), wmsRevokedBy: "Admin",
       }],
     });
     expect(dueForWmsBlock([t])).toEqual([]);
   });
 
   it("does not flag a completed facility", () => {
-    const assignedAt = new Date(Date.now() - WMS_BLOCK_DELAY_MS - 1000).toISOString();
     const t = task({
-      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "completed", round: 1, bad: 0, lines: [line], assignedAt }],
+      createdAt: staleCreatedAt,
+      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "completed", round: 1, bad: 0, lines: [line] }],
     });
     expect(dueForWmsBlock([t])).toEqual([]);
   });

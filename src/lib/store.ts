@@ -87,42 +87,50 @@ export function facilityDone(f: FacilityPicklist): boolean {
   return f.lines.every((l) => l.picked != null);
 }
 
-/** How long after a picker is assigned the WMS block ("Gatepass Generated") auto-fires. */
+/**
+ * How long after a picklist is CREATED the WMS block ("Gatepass Generated")
+ * auto-fires — regardless of whether a picker has been assigned to it yet.
+ * (Earlier version keyed this off picker assignment instead; changed once
+ * Creation Pending and Picking Pending were merged into one bucket, since
+ * there's no longer a meaningfully distinct "not yet assigned" state to key
+ * off — see dueForWmsBlock.)
+ */
 export const WMS_BLOCK_DELAY_MS = 15 * 60 * 1000;
 
 /**
  * Every assignment action (assignAll/assignLine/uploadAssignments) calls this
- * on the facility it touches. The assignedAt clock starts on the FIRST
- * assignment only — a later incremental assignment (a few more lines, a
- * follow-up CSV upload) must not push the 15-minute WMS-block window out
- * indefinitely. It only resets if the facility is currently in a
- * WMS-revoked state: that's the one case where a fresh assignment is
- * meant to restart the clock, since "stays revoked until picker
- * reassigned" is the whole point of the Admin's revoke action.
+ * on the facility it touches. assignedAt is stamped once, on the FIRST
+ * assignment only — purely for the time-motion record (Created → Assigned →
+ * Gatepass Generated → Completed); it no longer drives the WMS-block clock,
+ * which is keyed off creation instead (see WMS_BLOCK_DELAY_MS). It still
+ * clears an existing revoke on reassignment, so "stays revoked until picker
+ * reassigned" continues to hold — a reassignment after a revoke re-arms the
+ * block, which (since creation was necessarily already 15+ minutes ago by
+ * then) fires again on the very next sweep rather than after a fresh wait.
  */
 export function stampAssignment(f: FacilityPicklist): FacilityPicklist {
-  if (!f.assignedAt) return { ...f, assignedAt: new Date().toISOString() };
   if (f.wmsRevokedAt) {
-    return { ...f, assignedAt: new Date().toISOString(), wmsBlocked: false, wmsBlockedAt: undefined, wmsRevokedAt: undefined, wmsRevokedBy: undefined };
+    return { ...f, wmsBlocked: false, wmsBlockedAt: undefined, wmsRevokedAt: undefined, wmsRevokedBy: undefined, assignedAt: f.assignedAt ?? new Date().toISOString() };
   }
+  if (!f.assignedAt) return { ...f, assignedAt: new Date().toISOString() };
   return f;
 }
 
 /**
- * Facilities whose picker-assignment clock has run past WMS_BLOCK_DELAY_MS
- * and haven't already been blocked or revoked — what checkWmsAutoBlock()
- * sweeps every minute. Completed/discarded/archived picklists are excluded
- * via activeFacilityLists since there's nothing left to block.
+ * Facilities whose CREATION clock has run past WMS_BLOCK_DELAY_MS and
+ * haven't already been blocked or revoked — what checkWmsAutoBlock() sweeps
+ * every minute. Fires whether or not a picker is assigned yet. Completed/
+ * discarded/archived picklists are excluded via activeFacilityLists since
+ * there's nothing left to block.
  */
 export function dueForWmsBlock(tasks: PickingTask[], now = Date.now()): FacilityPicklist[] {
-  return activeFacilityLists(tasks).filter(
-    (f) =>
-      f.status !== "completed" &&
-      f.assignedAt &&
-      !f.wmsBlocked &&
-      !f.wmsRevokedAt &&
-      now - new Date(f.assignedAt).getTime() >= WMS_BLOCK_DELAY_MS,
-  );
+  const createdAtByTask = new Map(tasks.map((t) => [t.no, t.createdAt] as const));
+  return activeFacilityLists(tasks).filter((f) => {
+    if (f.status === "completed" || f.wmsBlocked || f.wmsRevokedAt) return false;
+    const created = f.createdAt ?? createdAtByTask.get(f.taskNo);
+    if (!created) return false;
+    return now - new Date(created).getTime() >= WMS_BLOCK_DELAY_MS;
+  });
 }
 
 export function taskIsComplete(t: PickingTask): boolean {

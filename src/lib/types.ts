@@ -67,19 +67,22 @@ export interface FacilityPicklist {
   discarded?: boolean;
 
   // Time-motion timestamps — one per real workflow stage, nothing invented.
-  assignedAt?: string; // most recent moment a picker was put on any line here — resets on every reassignment
+  assignedAt?: string; // first-ever moment a picker was put on any line here — a historical record only, does not drive the WMS-block clock
   completedAt?: string; // when every line finished (status flipped to "completed")
 
   // WMS inventory block ("Gatepass Generated" on screen) — a DIFFERENT thing
   // from `gp` above. `gp` is the final gate pass number, stamped only once
   // picking fully completes. wmsBlocked fires much earlier: 15 minutes after
-  // a picker is assigned, signaling the stock is now reserved in WMS, before
-  // anyone has physically picked it. It never blocks picking itself — see
-  // anyOpen() in store.ts, which is the only thing it changes (lets the
-  // hourly inventory sync resume once WMS — not our own picking — is what's
-  // holding the stock). Auto-set by a client-side timer (see
-  // WMS_BLOCK_DELAY_MS in store.ts); Admin/Super Admin can revoke it, which
-  // stays revoked until the picklist is reassigned to a picker again.
+  // the picklist is CREATED (whether or not a picker has been assigned yet),
+  // signaling the stock is now reserved in WMS, before anyone has physically
+  // picked it. It never blocks picking itself — see anyOpen() in store.ts,
+  // which is the only thing it changes (lets the hourly inventory sync
+  // resume once WMS — not our own picking — is what's holding the stock).
+  // Auto-set by a client-side timer (see WMS_BLOCK_DELAY_MS and
+  // dueForWmsBlock in store.ts); Admin/Super Admin can revoke it, which
+  // stays revoked until the picklist is reassigned to a picker — since
+  // creation time never changes, a reassignment after a revoke re-arms it
+  // and it fires again on the very next sweep rather than a fresh 15-min wait.
   wmsBlocked?: boolean;
   wmsBlockedAt?: string;
   wmsRevokedAt?: string;
