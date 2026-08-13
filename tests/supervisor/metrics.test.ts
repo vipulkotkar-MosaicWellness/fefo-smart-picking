@@ -49,11 +49,11 @@ describe("queueMetrics", () => {
 });
 
 describe("queueBucket", () => {
-  it("puts an unassigned open picklist in creation", () => {
-    expect(queueBucket(facility({ status: "open", lines: [line({ picker: undefined })] }))).toBe("creation");
+  it("puts an unassigned open picklist in picking (creation and picking are one merged bucket)", () => {
+    expect(queueBucket(facility({ status: "open", lines: [line({ picker: undefined })] }))).toBe("picking");
   });
 
-  it("puts an assigned open picklist in picking", () => {
+  it("puts an assigned open picklist in picking too", () => {
     expect(queueBucket(facility({ status: "open", lines: [line({ picker: "Ravi" })] }))).toBe("picking");
   });
 

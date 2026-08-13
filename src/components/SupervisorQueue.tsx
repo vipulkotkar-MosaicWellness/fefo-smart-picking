@@ -172,7 +172,6 @@ export function SupervisorQueue() {
     return true;
   });
 
-  const creation = filtered.filter((f) => queueBucket(f) === "creation");
   const picking = filtered.filter((f) => queueBucket(f) === "picking");
   const blocked = filtered.filter((f) => queueBucket(f) === "blocked");
   const exceptions = filtered.filter((f) => queueBucket(f) === "exception");
@@ -195,9 +194,8 @@ export function SupervisorQueue() {
 
   return (
     <Card title="Picking queue">
-      <div className="mb-4 grid grid-cols-2 gap-2.5 md:grid-cols-4">
+      <div className="mb-4 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
         <Metric label="Open picklists" value={String(metrics.openCount)} />
-        <Metric label="Awaiting assignment" value={String(metrics.unassignedCount)} warn={metrics.unassignedCount > 0} />
         <Metric label="Stock exceptions" value={String(metrics.exceptionCount)} warn={metrics.exceptionCount > 0} />
         <Metric label="Fill rate" value={metrics.fillRatePct == null ? "—" : `${metrics.fillRatePct}%`} />
       </div>
@@ -238,8 +236,7 @@ export function SupervisorQueue() {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
         <div className="space-y-5">
-          <Bucket title="Picklist creation pending" tone="warn" items={creation} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing awaiting picker assignment." />
-          <Bucket title="Picking pending" tone="info" items={picking} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing currently being picked." />
+          <Bucket title="Picking Pending" tone="warn" items={picking} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing pending right now." />
           <Bucket title="Gatepass generated — inventory blocked (WMS)" tone="info" items={blocked} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing blocked in WMS right now." />
           <Bucket title="Not found — needs an alternate" tone="bad" items={exceptions} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing with a shortfall right now." />
           <Bucket title="Picking completed" tone="ok" items={done} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing completed yet." />

@@ -26,13 +26,21 @@ export function queueMetrics(facilities: FacilityPicklist[]): QueueMetrics {
   };
 }
 
-export type QueueBucket = "creation" | "picking" | "blocked" | "exception" | "done";
+export type QueueBucket = "picking" | "blocked" | "exception" | "done";
 
-/** Which of the five Picking Supervisor queue buckets a picklist belongs in. */
+/**
+ * Which of the four Picking Supervisor queue buckets a picklist belongs in.
+ * "picking" covers everything still open and not yet WMS-blocked, whether or
+ * not a picker has been assigned yet — creation-pending and picking-pending
+ * used to be shown as two separate buckets, but both are the same underlying
+ * "not done yet" state from a supervisor's point of view, so they're merged
+ * into one "Picking Pending" bucket. Use pickerWorkload/the unassignedCount
+ * metric if you need to know how many still need a picker.
+ */
 export function queueBucket(f: FacilityPicklist): QueueBucket {
   if (f.status === "completed") return f.bad > 0 ? "exception" : "done";
   if (f.wmsBlocked) return "blocked";
-  return f.lines.some((l) => l.picker) ? "picking" : "creation";
+  return "picking";
 }
 
 export interface BucketSummary {
