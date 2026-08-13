@@ -65,6 +65,25 @@ export interface FacilityPicklist {
   // stock; archiving hides a whole gate pass regardless of pick status.
   // Never conflate the two — separate flags, separate admin screens.
   discarded?: boolean;
+
+  // Time-motion timestamps — one per real workflow stage, nothing invented.
+  assignedAt?: string; // most recent moment a picker was put on any line here — resets on every reassignment
+  completedAt?: string; // when every line finished (status flipped to "completed")
+
+  // WMS inventory block ("Gatepass Generated" on screen) — a DIFFERENT thing
+  // from `gp` above. `gp` is the final gate pass number, stamped only once
+  // picking fully completes. wmsBlocked fires much earlier: 15 minutes after
+  // a picker is assigned, signaling the stock is now reserved in WMS, before
+  // anyone has physically picked it. It never blocks picking itself — see
+  // anyOpen() in store.ts, which is the only thing it changes (lets the
+  // hourly inventory sync resume once WMS — not our own picking — is what's
+  // holding the stock). Auto-set by a client-side timer (see
+  // WMS_BLOCK_DELAY_MS in store.ts); Admin/Super Admin can revoke it, which
+  // stays revoked until the picklist is reassigned to a picker again.
+  wmsBlocked?: boolean;
+  wmsBlockedAt?: string;
+  wmsRevokedAt?: string;
+  wmsRevokedBy?: string;
 }
 
 export type Role = "super_admin" | "admin" | "planner" | "picker";

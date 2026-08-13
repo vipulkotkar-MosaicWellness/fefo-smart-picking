@@ -26,11 +26,12 @@ export function queueMetrics(facilities: FacilityPicklist[]): QueueMetrics {
   };
 }
 
-export type QueueBucket = "creation" | "picking" | "exception" | "done";
+export type QueueBucket = "creation" | "picking" | "blocked" | "exception" | "done";
 
-/** Which of the four Picking Supervisor queue buckets a picklist belongs in. */
+/** Which of the five Picking Supervisor queue buckets a picklist belongs in. */
 export function queueBucket(f: FacilityPicklist): QueueBucket {
   if (f.status === "completed") return f.bad > 0 ? "exception" : "done";
+  if (f.wmsBlocked) return "blocked";
   return f.lines.some((l) => l.picker) ? "picking" : "creation";
 }
 

@@ -174,6 +174,7 @@ export function SupervisorQueue() {
 
   const creation = filtered.filter((f) => queueBucket(f) === "creation");
   const picking = filtered.filter((f) => queueBucket(f) === "picking");
+  const blocked = filtered.filter((f) => queueBucket(f) === "blocked");
   const exceptions = filtered.filter((f) => queueBucket(f) === "exception");
   const done = filtered.filter((f) => queueBucket(f) === "done");
 
@@ -239,6 +240,7 @@ export function SupervisorQueue() {
         <div className="space-y-5">
           <Bucket title="Picklist creation pending" tone="warn" items={creation} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing awaiting picker assignment." />
           <Bucket title="Picking pending" tone="info" items={picking} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing currently being picked." />
+          <Bucket title="Gatepass generated — inventory blocked (WMS)" tone="info" items={blocked} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing blocked in WMS right now." />
           <Bucket title="Not found — needs an alternate" tone="bad" items={exceptions} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing with a shortfall right now." />
           <Bucket title="Picking completed" tone="ok" items={done} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing completed yet." />
         </div>

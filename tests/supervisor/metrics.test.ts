@@ -57,6 +57,10 @@ describe("queueBucket", () => {
     expect(queueBucket(facility({ status: "open", lines: [line({ picker: "Ravi" })] }))).toBe("picking");
   });
 
+  it("puts a WMS-blocked open picklist in blocked, even though a picker is still assigned", () => {
+    expect(queueBucket(facility({ status: "open", lines: [line({ picker: "Ravi" })], wmsBlocked: true }))).toBe("blocked");
+  });
+
   it("puts a fully completed picklist (no shortfall) in done", () => {
     expect(queueBucket(facility({ status: "completed", bad: 0 }))).toBe("done");
   });

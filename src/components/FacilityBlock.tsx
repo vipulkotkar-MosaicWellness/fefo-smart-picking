@@ -7,9 +7,13 @@ import { uniwareCsv } from "../lib/uniwareExport";
 import type { FacilityPicklist } from "../lib/types";
 import { Button, Tag } from "./Ui";
 
+function timeLabel(iso?: string): string | undefined {
+  return iso ? new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : undefined;
+}
+
 /** The full picklist detail: assignment controls, share buttons, line table, complete button. */
 export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePassNo?: string }) {
-  const { pickers, assignAll, assignLine, uploadAssignments, applyPicks, discardFacilityPicklist, logAudit } = useStore();
+  const { pickers, assignAll, assignLine, uploadAssignments, applyPicks, discardFacilityPicklist, revokeWmsBlock, logAudit } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Supervisor");
   const role = useAuth((s) => s.profile?.role);
   const canDiscard = role === "admin" || role === "super_admin";
@@ -74,6 +78,13 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
     await discardFacilityPicklist(f.taskNo, f.no);
     logAudit(myName, `Discarded picklist ${f.no}${gatePassNo ? ` (${gatePassNo})` : ""} at ${f.facility}`);
   }
+  async function revokeWms() {
+    if (!window.confirm(`Revoke the WMS block on ${f.no}${gatePassNo ? ` (${gatePassNo})` : ""} at ${f.facility}? It will not auto-fire again until this picklist is reassigned to a picker.`)) {
+      return;
+    }
+    await revokeWmsBlock(f.taskNo, f.no, myName);
+    logAudit(myName, `Revoked WMS block on picklist ${f.no}${gatePassNo ? ` (${gatePassNo})` : ""} at ${f.facility}`);
+  }
 
   return (
     <div>
@@ -82,15 +93,25 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
           {gatePassNo && <><b>Gate Pass {gatePassNo}</b> · </>}
           <span className="text-xs text-slate-500 dark:text-slate-400">{f.taskNo} · {f.no}</span>{" "}
           {f.round > 1 && <Tag tone="info">Round {f.round}</Tag>}
+          {f.wmsBlocked && <Tag tone="info">Gatepass generated — WMS blocked</Tag>}
           {f.bad ? <span className="ml-1 text-xs text-rose-600 dark:text-rose-400">· {f.bad} not found</span> : null}
         </div>
         <div className="flex flex-wrap gap-1.5">
           <Button variant="sm" onClick={copy}>Copy</Button>
           <Button variant="sm" onClick={csv}>CSV</Button>
           <Button variant="sm" onClick={print}>Print</Button>
-          {open && canDiscard && <Button variant="sm" onClick={() => void discard()}>Discard</Button>}
+          {open && canDiscard && !f.wmsBlocked && <Button variant="sm" onClick={() => void discard()}>Discard</Button>}
+          {f.wmsBlocked && canDiscard && <Button variant="sm" onClick={() => void revokeWms()}>Revoke WMS block</Button>}
           {open && <Button variant="green" onClick={complete}>Mark completed</Button>}
         </div>
+      </div>
+
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-400 dark:text-slate-500">
+        {timeLabel(f.createdAt) && <span>Created {timeLabel(f.createdAt)}</span>}
+        {timeLabel(f.assignedAt) && <span>Assigned {timeLabel(f.assignedAt)}</span>}
+        {timeLabel(f.wmsBlockedAt) && <span>Gatepass generated {timeLabel(f.wmsBlockedAt)}</span>}
+        {timeLabel(f.wmsRevokedAt) && <span>WMS block revoked {timeLabel(f.wmsRevokedAt)} by {f.wmsRevokedBy}</span>}
+        {timeLabel(f.completedAt) && <span>Completed {timeLabel(f.completedAt)}</span>}
       </div>
 
       {open && (

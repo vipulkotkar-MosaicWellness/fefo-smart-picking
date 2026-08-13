@@ -80,6 +80,44 @@ export function facilityDone(f: FacilityPicklist): boolean {
   return f.lines.every((l) => l.picked != null);
 }
 
+/** How long after a picker is assigned the WMS block ("Gatepass Generated") auto-fires. */
+export const WMS_BLOCK_DELAY_MS = 15 * 60 * 1000;
+
+/**
+ * Every assignment action (assignAll/assignLine/uploadAssignments) calls this
+ * on the facility it touches. The assignedAt clock starts on the FIRST
+ * assignment only — a later incremental assignment (a few more lines, a
+ * follow-up CSV upload) must not push the 15-minute WMS-block window out
+ * indefinitely. It only resets if the facility is currently in a
+ * WMS-revoked state: that's the one case where a fresh assignment is
+ * meant to restart the clock, since "stays revoked until picker
+ * reassigned" is the whole point of the Admin's revoke action.
+ */
+export function stampAssignment(f: FacilityPicklist): FacilityPicklist {
+  if (!f.assignedAt) return { ...f, assignedAt: new Date().toISOString() };
+  if (f.wmsRevokedAt) {
+    return { ...f, assignedAt: new Date().toISOString(), wmsBlocked: false, wmsBlockedAt: undefined, wmsRevokedAt: undefined, wmsRevokedBy: undefined };
+  }
+  return f;
+}
+
+/**
+ * Facilities whose picker-assignment clock has run past WMS_BLOCK_DELAY_MS
+ * and haven't already been blocked or revoked — what checkWmsAutoBlock()
+ * sweeps every minute. Completed/discarded/archived picklists are excluded
+ * via activeFacilityLists since there's nothing left to block.
+ */
+export function dueForWmsBlock(tasks: PickingTask[], now = Date.now()): FacilityPicklist[] {
+  return activeFacilityLists(tasks).filter(
+    (f) =>
+      f.status !== "completed" &&
+      f.assignedAt &&
+      !f.wmsBlocked &&
+      !f.wmsRevokedAt &&
+      now - new Date(f.assignedAt).getTime() >= WMS_BLOCK_DELAY_MS,
+  );
+}
+
 export function taskIsComplete(t: PickingTask): boolean {
   return t.facilities.length > 0 && t.facilities.every(facilityDone);
 }
@@ -309,6 +347,13 @@ export interface AppState {
   // hiding a whole gate pass regardless of pick status.
   discardFacilityPicklist: (taskNo: string, facilityNo: string) => Promise<void>;
   undiscardFacilityPicklist: (taskNo: string, facilityNo: string) => Promise<void>;
+  // Admin/Super Admin only — reverses an auto-fired WMS block. Stays revoked
+  // until the picklist is reassigned to a picker (see stampAssignment).
+  revokeWmsBlock: (taskNo: string, facilityNo: string, revokedBy: string) => Promise<void>;
+  // Sweeps every open, assigned, not-yet-blocked facility and fires the WMS
+  // block on any whose 15-minute clock has run out. Client-side only — see
+  // WMS_BLOCK_DELAY_MS; called on an interval from App.tsx.
+  checkWmsAutoBlock: () => Promise<void>;
 }
 
 const initialStock = rowsFromTuples(REAL_STOCK);
@@ -355,7 +400,11 @@ export const useStore = create<AppState>()(
         set({ auditLog: [{ at: new Date().toISOString(), by, action }, ...get().auditLog].slice(0, 200) }),
 
       locations: () => [...new Set(get().stock.map((b) => b.location))],
-      anyOpen: () => activeFacilityLists(get().tasks).some((f) => f.lines.some((l) => l.picked == null)),
+      // Once WMS has blocked the stock (wmsBlocked), that reservation no
+      // longer depends on our own picklist state, so it stops holding up the
+      // hourly sync — even if physical picking on the rest of the lines
+      // hasn't finished yet. See FacilityPicklist.wmsBlocked in types.ts.
+      anyOpen: () => activeFacilityLists(get().tasks).some((f) => !f.wmsBlocked && f.lines.some((l) => l.picked == null)),
       toggleFacility: (f) =>
         set({
           visibleFacilities: get().visibleFacilities.includes(f)
@@ -582,7 +631,12 @@ export const useStore = create<AppState>()(
         let changed: PickingTask | undefined;
         const tasks = get().tasks.map((t) => {
           if (!t.facilities.some((f) => f.no === facilityNo)) return t;
-          const next = { ...t, facilities: t.facilities.map((f) => (f.no === facilityNo ? { ...f, lines: f.lines.map((l) => ({ ...l, picker })) } : f)) };
+          const next = {
+            ...t,
+            facilities: t.facilities.map((f) =>
+              f.no === facilityNo ? { ...stampAssignment(f), lines: f.lines.map((l) => ({ ...l, picker })) } : f,
+            ),
+          };
           changed = next;
           return next;
         });
@@ -597,7 +651,9 @@ export const useStore = create<AppState>()(
           const next = {
             ...t,
             facilities: t.facilities.map((f) =>
-              f.no === facilityNo ? { ...f, lines: f.lines.map((l) => (l.rid === rid ? { ...l, picker } : l)) } : f,
+              f.no === facilityNo
+                ? { ...stampAssignment(f), lines: f.lines.map((l) => (l.rid === rid ? { ...l, picker } : l)) }
+                : f,
             ),
           };
           changed = next;
@@ -622,7 +678,9 @@ export const useStore = create<AppState>()(
           const next = {
             ...t,
             facilities: t.facilities.map((f) =>
-              f.no === facilityNo ? { ...f, lines: f.lines.map((l) => (map[l.bin] ? { ...l, picker: map[l.bin] } : l)) } : f,
+              f.no === facilityNo
+                ? { ...stampAssignment(f), lines: f.lines.map((l) => (map[l.bin] ? { ...l, picker: map[l.bin] } : l)) }
+                : f,
             ),
           };
           changed = next;
@@ -660,7 +718,14 @@ export const useStore = create<AppState>()(
             const picked = f.lines.reduce((s, l) => s + (l.picked ?? 0), 0);
             const bad = f.lines.reduce((s, l) => s + (l.nf ?? 0), 0);
             gpSeq += 1;
-            const finished: FacilityPicklist = { ...f, status: "completed", pickedTotal: picked, bad, gp: "GP-" + String(100000 + gpSeq * 137).slice(0, 6) };
+            const finished: FacilityPicklist = {
+              ...f,
+              status: "completed",
+              pickedTotal: picked,
+              bad,
+              gp: "GP-" + String(100000 + gpSeq * 137).slice(0, 6),
+              completedAt: new Date().toISOString(),
+            };
             completedFacility = finished;
             parentTask = t;
             return finished;
@@ -846,6 +911,14 @@ export const useStore = create<AppState>()(
           set({ notice: "✗ Can't discard a completed picklist." });
           return;
         }
+        // WMS already owns this reservation externally — discarding would
+        // free it in our own system while WMS still holds it, a real
+        // inventory mismatch between the two. Admin must revoke the WMS
+        // block first, which is its own explicit, audited action.
+        if (target.wmsBlocked) {
+          set({ notice: "✗ Can't discard — inventory is blocked in WMS. Revoke the WMS block first." });
+          return;
+        }
         const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, discarded: true } : f)) };
         set({ tasks: mergeTask(get().tasks, updated) });
         if (isSupabaseConfigured) await updateTaskData(updated);
@@ -858,6 +931,40 @@ export const useStore = create<AppState>()(
         const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, discarded: false } : f)) };
         set({ tasks: mergeTask(get().tasks, updated) });
         if (isSupabaseConfigured) await updateTaskData(updated);
+      },
+
+      revokeWmsBlock: async (taskNo, facilityNo, revokedBy) => {
+        const task = get().tasks.find((t) => t.no === taskNo);
+        if (!task) return;
+        const target = task.facilities.find((f) => f.no === facilityNo);
+        if (!target || !target.wmsBlocked) return;
+        const updated = {
+          ...task,
+          facilities: task.facilities.map((f) =>
+            f.no === facilityNo ? { ...f, wmsBlocked: false, wmsRevokedAt: new Date().toISOString(), wmsRevokedBy: revokedBy } : f,
+          ),
+        };
+        set({ tasks: mergeTask(get().tasks, updated) });
+        if (isSupabaseConfigured) await updateTaskData(updated);
+      },
+
+      checkWmsAutoBlock: async () => {
+        const due = dueForWmsBlock(get().tasks);
+        if (due.length === 0) return;
+        const dueKeys = new Set(due.map((f) => f.no));
+        const now = new Date().toISOString();
+        const touchedTasks: PickingTask[] = [];
+        let tasks = get().tasks.map((t) => {
+          if (!t.facilities.some((f) => dueKeys.has(f.no))) return t;
+          const next = { ...t, facilities: t.facilities.map((f) => (dueKeys.has(f.no) ? { ...f, wmsBlocked: true, wmsBlockedAt: now } : f)) };
+          touchedTasks.push(next);
+          return next;
+        });
+        set({ tasks });
+        if (isSupabaseConfigured) {
+          for (const t of touchedTasks) await updateTaskData(t);
+        }
+        if (!get().anyOpen()) void get().loadFromSupabase();
       },
     }),
     {
