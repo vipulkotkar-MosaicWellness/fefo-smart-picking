@@ -23,6 +23,7 @@ export function AdminConfig() {
   const [newBucket, setNewBucket] = useState<ChannelBucket>(BUCKET_LABELS[0]);
   const [newRuleType, setNewRuleType] = useState<"fixed" | "pct">("fixed");
   const [newRuleVal, setNewRuleVal] = useState(6);
+  const [newMinBinQty, setNewMinBinQty] = useState("");
   const [newPickerName, setNewPickerName] = useState("");
   const [editingPicker, setEditingPicker] = useState<string | null>(null);
   const [editPickerName, setEditPickerName] = useState("");
@@ -68,6 +69,13 @@ export function AdminConfig() {
     logAudit(myName, `Set ${channel} tolerance to ${rule.type === "fixed" ? `${rule.val} fixed months` : `${Math.round(rule.val * 100)}% of shelf life`}`);
   }
 
+  function setMinBinQty(channel: string, raw: string) {
+    const n = raw.trim() === "" ? undefined : Math.max(0, Number(raw));
+    const r = channelRules[channel];
+    updateChannelRule(channel, { ...r, minBinQty: n });
+    logAudit(myName, n ? `Set ${channel} min bin qty to ${n}` : `Cleared ${channel} min bin qty (no floor)`);
+  }
+
   function submitNewChannel() {
     const name = newName.trim();
     if (!name) return;
@@ -75,12 +83,14 @@ export function AdminConfig() {
       alert(`"${name}" already exists — edit it in the table below instead.`);
       return;
     }
-    const rule = { type: newRuleType, val: newRuleType === "pct" ? newRuleVal / 100 : newRuleVal };
+    const minBinQty = newMinBinQty.trim() === "" ? undefined : Math.max(0, Number(newMinBinQty));
+    const rule = { type: newRuleType, val: newRuleType === "pct" ? newRuleVal / 100 : newRuleVal, minBinQty };
     addChannel(name, newBucket, rule);
-    logAudit(myName, `Added channel ${name} (${newBucket}) with tolerance ${newRuleType === "fixed" ? `${newRuleVal} fixed months` : `${newRuleVal}% of shelf life`}`);
+    logAudit(myName, `Added channel ${name} (${newBucket}) with tolerance ${newRuleType === "fixed" ? `${newRuleVal} fixed months` : `${newRuleVal}% of shelf life`}${minBinQty ? `, min bin qty ${minBinQty}` : ""}`);
     setNewName("");
     setNewRuleType("fixed");
     setNewRuleVal(6);
+    setNewMinBinQty("");
   }
 
   function move(i: number, dir: -1 | 1) {
@@ -144,6 +154,17 @@ export function AdminConfig() {
               className="mt-0.5 w-16 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-800"
             />
           </label>
+          <label className="text-[11px]">
+            <span className="block text-slate-500 dark:text-slate-400">Min bin qty (optional)</span>
+            <input
+              type="number"
+              min={0}
+              value={newMinBinQty}
+              onChange={(e) => setNewMinBinQty(e.target.value)}
+              placeholder="none"
+              className="mt-0.5 w-20 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-800"
+            />
+          </label>
           <Button variant="sm" onClick={submitNewChannel}>Add channel</Button>
         </div>
 
@@ -154,6 +175,7 @@ export function AdminConfig() {
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Channel</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Rule</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Value</th>
+                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Min bin qty</th>
               </tr>
             </thead>
             <tbody>
@@ -201,6 +223,17 @@ export function AdminConfig() {
                           %
                         </span>
                       )}
+                    </td>
+                    <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.minBinQty ?? ""}
+                        onChange={(e) => setMinBinQty(c, e.target.value)}
+                        placeholder="none"
+                        title="Only offer a bin+batch to this channel if its available qty is at least this much. Blank = no floor."
+                        className="w-16 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-900"
+                      />
                     </td>
                   </tr>
                 );

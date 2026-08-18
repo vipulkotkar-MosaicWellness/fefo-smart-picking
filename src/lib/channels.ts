@@ -6,7 +6,8 @@ export type ChannelBucket = "Replenishment" | "B2B Ecom" | "B2B Offline";
 // fixed = minimum months of remaining shelf life the channel accepts.
 // pct   = minimum remaining shelf life as a fraction of total shelf life.
 export const CHANNEL_BUCKETS: Record<string, ChannelBucket> = {
-  "Internal Stock Transfer - Warehouse": "Replenishment",
+  "Internal Stock Transfer - Warehouse - 3PL": "Replenishment",
+  "Internal Stock Transfer - Warehouse - Local": "Replenishment",
   "Internal Stock Transfer - Dark Stores": "Replenishment",
   Amazon: "B2B Ecom",
   Flipkart: "B2B Ecom",
@@ -28,7 +29,13 @@ export const CHANNEL_BUCKETS: Record<string, ChannelBucket> = {
 };
 
 export const CHANNELS: Record<string, ChannelRule> = {
-  "Internal Stock Transfer - Warehouse": { type: "pct", val: 0.65 },
+  // 3PL dispatches only in full case-packs — 30% shelf life remaining, and
+  // a bin+batch with fewer than 20 units available is skipped (logged to
+  // the Bin Skip Report) rather than offered as a loose/broken-bin pick.
+  "Internal Stock Transfer - Warehouse - 3PL": { type: "pct", val: 0.3, minBinQty: 20 },
+  // Local has no case-pack constraint and no shelf-life floor — plain FEFO:
+  // earliest-expiring in-date batch, any quantity, as long as it's available.
+  "Internal Stock Transfer - Warehouse - Local": { type: "fixed", val: 0 },
   "Internal Stock Transfer - Dark Stores": { type: "pct", val: 0.65 },
   Amazon: { type: "fixed", val: 6 },
   Flipkart: { type: "fixed", val: 6 },

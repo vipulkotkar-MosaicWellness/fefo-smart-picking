@@ -15,6 +15,7 @@ import { fetchStock, fetchSyncState, replaceStock } from "./supabaseStock";
 import type { SyncSource } from "./syncSource";
 import { fetchAllTasks, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
+  BinSkip,
   ChannelRule,
   DemandLine,
   FacilityPicklist,
@@ -162,18 +163,21 @@ function waterfall(
   reserved: (key: string) => number,
   exclude: number[],
   heldKeys: Set<string>,
-): { byFacility: Record<string, PickLine[]>; short: number } {
+  minQty?: number,
+): { byFacility: Record<string, PickLine[]>; short: number; skipped: BinSkip[] } {
   const byFacility: Record<string, PickLine[]> = {};
+  const skipped: BinSkip[] = [];
   let remain = need;
   for (const facility of priority) {
     if (remain <= 0) break;
-    const r = allocate({ sku, need: remain, location: facility, cutoff, stock, reservedFor: reserved, exclude, heldKeys });
+    const r = allocate({ sku, need: remain, location: facility, cutoff, stock, reservedFor: reserved, exclude, heldKeys, minQty });
+    skipped.push(...r.skipped);
     if (r.lines.length) {
       (byFacility[facility] ??= []).push(...r.lines);
       remain = r.short;
     }
   }
-  return { byFacility, short: remain };
+  return { byFacility, short: remain, skipped };
 }
 
 /**
@@ -196,6 +200,7 @@ export interface ChannelAllocation {
   gatePassNo: string;
   byFacility: Record<string, PickLine[]>;
   shortfall: Shortfall[];
+  skipped: BinSkip[];
 }
 
 function gatePassGroupKey(d: DemandLine): string {
@@ -235,13 +240,15 @@ export function computeChannelAllocations(
     if (!rule) continue;
     const byFacility: Record<string, PickLine[]> = {};
     const shortfall: Shortfall[] = [];
+    const skipped: BinSkip[] = [];
     for (const d of lines) {
       const cutoff = cutoffMonths(rule, skus[d.sku].shelf);
-      const w = waterfall(d.sku, d.qty, cutoff, stock, facilityPriority, reserved, [], heldKeys);
+      const w = waterfall(d.sku, d.qty, cutoff, stock, facilityPriority, reserved, [], heldKeys, rule.minBinQty);
       for (const f of Object.keys(w.byFacility)) (byFacility[f] ??= []).push(...w.byFacility[f]);
       if (w.short > 0) shortfall.push({ sku: d.sku, name: skus[d.sku].name, qty: w.short });
+      skipped.push(...w.skipped);
     }
-    out.push({ channel, gatePassNo, byFacility, shortfall });
+    out.push({ channel, gatePassNo, byFacility, shortfall, skipped });
   }
   return out;
 }
@@ -635,7 +642,7 @@ export const useStore = create<AppState>()(
         }
         const newTasks: PickingTask[] = [];
 
-        for (const { channel, gatePassNo, byFacility, shortfall } of allocations) {
+        for (const { channel, gatePassNo, byFacility, shortfall, skipped } of allocations) {
           const prefix = taskNumberPrefix(channel, get().channelBuckets);
           const seq = isSupabaseConfigured ? await nextSequence(prefix) : newTasks.length + 1;
           const no = `${prefix}${String(seq).padStart(3, "0")}`;
@@ -646,6 +653,7 @@ export const useStore = create<AppState>()(
             demand: JSON.parse(JSON.stringify(demandByGroup.get(`${channel}::${gatePassNo}`))),
             facilities: buildFacilityLists(no, 1, byFacility, facilityPriority),
             shortfall,
+            binSkips: skipped.length ? skipped : undefined,
             createdAt: new Date().toISOString(),
             createdByName: createdByName ?? undefined,
           });
@@ -782,20 +790,26 @@ export const useStore = create<AppState>()(
           completedFacility.lines.forEach((l) => { if (l.nf) nfBySku[l.sku] = (nfBySku[l.sku] ?? 0) + l.nf; });
           const r2: Record<string, PickLine[]> = {};
           const extraShort: Shortfall[] = [];
+          const extraSkipped: BinSkip[] = [];
           const reserved = (key: string) => reservedFor(tasks, key);
           const heldKeysForRound2 = activeHoldKeys(state.holds);
           for (const sku of Object.keys(nfBySku)) {
             const cutoff = cutoffMonths(rule, state.skus[sku].shelf);
-            const w = waterfall(sku, nfBySku[sku], cutoff, stock, state.facilityPriority, reserved, [...usedRids], heldKeysForRound2);
+            const w = waterfall(sku, nfBySku[sku], cutoff, stock, state.facilityPriority, reserved, [...usedRids], heldKeysForRound2, rule.minBinQty);
             for (const f of Object.keys(w.byFacility)) {
               (r2[f] ??= []).push(...w.byFacility[f]);
               w.byFacility[f].forEach((l) => usedRids.add(l.rid));
             }
             if (w.short > 0) extraShort.push({ sku, name: state.skus[sku].name, qty: w.short });
+            extraSkipped.push(...w.skipped);
           }
           const r2Lists = buildFacilityLists(task.no, 2, r2, state.facilityPriority, "-R2");
-          if (r2Lists.length || extraShort.length) {
-            tasks = tasks.map((t) => (t.no === task.no ? { ...t, facilities: [...t.facilities, ...r2Lists], shortfall: [...t.shortfall, ...extraShort] } : t));
+          if (r2Lists.length || extraShort.length || extraSkipped.length) {
+            tasks = tasks.map((t) =>
+              t.no === task.no
+                ? { ...t, facilities: [...t.facilities, ...r2Lists], shortfall: [...t.shortfall, ...extraShort], binSkips: [...(t.binSkips ?? []), ...extraSkipped] }
+                : t,
+            );
           }
         }
 

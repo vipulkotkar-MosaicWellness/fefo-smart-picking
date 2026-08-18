@@ -109,11 +109,35 @@ export interface PickingTask {
   createdAt: string;
   createdByName?: string; // display name of the planner who generated it
   archived?: boolean; // moved out of every operational view/report and out of FEFO reservation, without deleting the record
+  // Bin+batch lots that were otherwise FEFO-eligible (right SKU, right shelf
+  // life) but skipped for THIS task's channel because their available qty
+  // fell under that channel's minBinQty floor (see ChannelRule). Recorded at
+  // generate() time and appended to again if a round-2 not-found re-offer
+  // also skips lots — never mutated afterward, purely a record for the Bin
+  // Skip Report so Inventory can act on stock the engine passed over.
+  binSkips?: BinSkip[];
 }
 
 export interface ChannelRule {
   type: "fixed" | "pct";
   val: number; // fixed = months; pct = fraction of total shelf life
+  // Minimum available qty a bin+batch must have to be offered to this
+  // channel at all — e.g. Internal Stock Transfer - Warehouse - 3PL only
+  // wants full case-pack quantities, not loose/broken-bin remainders.
+  // undefined (or 0) means no floor — every FEFO-eligible lot is offered
+  // regardless of quantity, same as every other channel today.
+  minBinQty?: number;
+}
+
+/** A bin+batch lot skipped for a channel's minBinQty floor — see PickingTask.binSkips. */
+export interface BinSkip {
+  sku: string;
+  name: string;
+  facility: string;
+  bin: string;
+  batch: string;
+  qtyAvailable: number;
+  threshold: number;
 }
 
 /** A SKU+Facility+Bin+Batch combination excluded from allocation until released. */

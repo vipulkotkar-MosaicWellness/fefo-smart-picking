@@ -1,4 +1,4 @@
-import type { ChannelRule, Expiry, PickLine, StockRow } from "./types";
+import type { BinSkip, ChannelRule, Expiry, PickLine, StockRow } from "./types";
 import { holdKey } from "./holds";
 
 /** Remaining shelf life in whole months from `today` to expiry. */
@@ -45,12 +45,17 @@ export interface AllocateArgs {
   exclude?: number[];
   heldKeys?: Set<string>;
   today?: Date;
+  // Minimum available qty a bin+batch must have to be offered at all — see
+  // ChannelRule.minBinQty. Lots that clear the shelf-life cutoff but fall
+  // under this floor are reported in `skipped` instead of being allocated.
+  minQty?: number;
 }
 
 export interface AllocateResult {
   lines: PickLine[];
   short: number;
   any: boolean;
+  skipped: BinSkip[];
 }
 
 /**
@@ -60,12 +65,12 @@ export interface AllocateResult {
  * currently available (un-reserved) qty.
  */
 export function allocate(args: AllocateArgs): AllocateResult {
-  const { sku, need, location, cutoff, stock, reservedFor } = args;
+  const { sku, need, location, cutoff, stock, reservedFor, minQty } = args;
   const exclude = args.exclude ?? [];
   const heldKeys = args.heldKeys;
   const today = args.today ?? new Date();
 
-  const eligible = stock
+  const withinShelfLife = stock
     .filter(
       (b) =>
         b.sku === sku &&
@@ -79,6 +84,13 @@ export function allocate(args: AllocateArgs): AllocateResult {
     .map((b) => ({ b, rem: monthsRemaining(b.exp, today), av: b.qty - reservedFor(holdKey(b.sku, b.location, b.bin, b.batch)) }))
     .filter((o) => o.rem >= cutoff && o.av > 0)
     .sort((x, y) => x.rem - y.rem);
+
+  const eligible = minQty ? withinShelfLife.filter((o) => o.av >= minQty) : withinShelfLife;
+  const skipped: BinSkip[] = minQty
+    ? withinShelfLife
+        .filter((o) => o.av < minQty)
+        .map((o) => ({ sku, name: o.b.name, facility: o.b.location, bin: o.b.bin, batch: o.b.batch, qtyAvailable: o.av, threshold: minQty }))
+    : [];
 
   let remain = need;
   const lines: PickLine[] = [];
@@ -98,5 +110,5 @@ export function allocate(args: AllocateArgs): AllocateResult {
     });
     remain -= take;
   }
-  return { lines, short: remain, any: eligible.length > 0 };
+  return { lines, short: remain, any: eligible.length > 0, skipped };
 }

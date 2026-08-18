@@ -32,6 +32,29 @@ function demandLine(overrides: Partial<DemandLine> = {}): DemandLine {
   return { channel: "TestChannel", sku: "TEST-SKU", qty: 20, gatePassNo: "GP-1001", ...overrides };
 }
 
+describe("computeChannelAllocations — channel minBinQty floor", () => {
+  const minQtyChannelRules = { TestChannel: { type: "fixed" as const, val: 0, minBinQty: 20 } };
+
+  it("skips a bin under the channel's floor and reports it, falling back to shortfall if nothing else qualifies", () => {
+    const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Mother Hub", qty: 12 })];
+    const demand: DemandLine[] = [demandLine({ qty: 5 })];
+    const [result] = computeChannelAllocations(demand, minQtyChannelRules, skus, stock, facilityPriority, []);
+    expect(Object.keys(result.byFacility)).toEqual([]);
+    expect(result.shortfall).toEqual([{ sku: "TEST-SKU", name: "Test Product", qty: 5 }]);
+    expect(result.skipped).toEqual([
+      { sku: "TEST-SKU", name: "Test Product", facility: "SL Mother Hub", bin: "A1", batch: "B1", qtyAvailable: 12, threshold: 20 },
+    ]);
+  });
+
+  it("does not skip anything for a channel with no minBinQty set", () => {
+    const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Mother Hub", qty: 12 })];
+    const demand: DemandLine[] = [demandLine({ qty: 5 })];
+    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, []);
+    expect(Object.keys(result.byFacility)).toEqual(["SL Mother Hub"]);
+    expect(result.skipped).toEqual([]);
+  });
+});
+
 describe("computeChannelAllocations (pure — no Supabase, no side effects)", () => {
   it("allocates within a single facility when its stock covers demand", () => {
     const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Mother Hub", qty: 50 })];
