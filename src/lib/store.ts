@@ -1041,6 +1041,22 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "fefo-smart-picking-v7",
+      // Default merge() replaces a top-level persisted key outright, so a
+      // browser that already had channelRules/channelBuckets cached from
+      // before a new built-in channel shipped would never see it — the old
+      // cached object wins wholesale. Deep-merge just these two so new
+      // built-in channels always appear, while anything the user actually
+      // customized (their own rule edits, their own Admin-added channels)
+      // is preserved and still wins over the code defaults.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<AppState>;
+        return {
+          ...current,
+          ...p,
+          channelRules: { ...current.channelRules, ...p.channelRules },
+          channelBuckets: { ...current.channelBuckets, ...p.channelBuckets },
+        };
+      },
       // Stock and tasks are not persisted locally when Supabase is configured —
       // they come live from the shared database instead. Local mode (no
       // Supabase keys) keeps everything in browser storage as before.
