@@ -306,6 +306,13 @@ export interface AppState {
   skus: Record<string, SkuInfo>;
   channelRules: Record<string, ChannelRule>;
   channelBuckets: Record<string, ChannelBucket>; // Admin-added channels only — built-in ones live in CHANNEL_BUCKETS
+  // Names removed via deleteChannel() — including built-in ones. Tracked
+  // separately (not just absence from channelRules) because the persist
+  // merge() re-adds any built-in CHANNELS default that's missing from a
+  // browser's cached state, so a plain removal would silently reappear on
+  // the next load; this list is checked after that merge to keep a deletion
+  // actually stuck.
+  deletedChannels: string[];
   facilityPriority: string[];
   pickers: string[];
   holds: Hold[];
@@ -358,6 +365,11 @@ export interface AppState {
   flushOfflineQueue: () => Promise<void>;
   updateChannelRule: (channel: string, rule: ChannelRule) => void;
   addChannel: (name: string, bucket: ChannelBucket, rule: ChannelRule) => void;
+  // Super Admin only (enforced in the UI, same pattern as removePicker) —
+  // removes a channel from the dispatch-tolerance list, built-in or custom.
+  // Existing tasks already created under that channel keep their data; this
+  // only stops it being offered for new demand going forward.
+  deleteChannel: (name: string) => void;
   setFacilityPriority: (p: string[]) => void;
   archiveTask: (taskNo: string) => Promise<void>;
   unarchiveTask: (taskNo: string) => Promise<void>;
@@ -391,6 +403,7 @@ export const useStore = create<AppState>()(
       skus: skusFromStock(initialStock),
       channelRules: { ...CHANNELS },
       channelBuckets: {},
+      deletedChannels: [],
       facilityPriority: [...FACILITY_PRIORITY],
       pickers: [...PICKERS_DEFAULT],
       holds: [],
@@ -874,7 +887,17 @@ export const useStore = create<AppState>()(
         set({
           channelRules: { ...get().channelRules, [name]: rule },
           channelBuckets: { ...get().channelBuckets, [name]: bucket },
+          deletedChannels: get().deletedChannels.filter((c) => c !== name), // re-adding after a delete un-deletes it
         }),
+      deleteChannel: (name) => {
+        const { [name]: _removedRule, ...channelRules } = get().channelRules;
+        const { [name]: _removedBucket, ...channelBuckets } = get().channelBuckets;
+        set({
+          channelRules,
+          channelBuckets,
+          deletedChannels: get().deletedChannels.includes(name) ? get().deletedChannels : [...get().deletedChannels, name],
+        });
+      },
       setFacilityPriority: (p) => set({ facilityPriority: p }),
 
       archiveTask: async (taskNo) => {
@@ -1050,12 +1073,22 @@ export const useStore = create<AppState>()(
       // is preserved and still wins over the code defaults.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<AppState>;
-        return {
+        const deletedChannels = p.deletedChannels ?? [];
+        const merged = {
           ...current,
           ...p,
           channelRules: { ...current.channelRules, ...p.channelRules },
           channelBuckets: { ...current.channelBuckets, ...p.channelBuckets },
+          deletedChannels,
         };
+        // Re-applied after the merge above, since that merge would otherwise
+        // resurrect a deleted built-in channel from `current`'s CHANNELS
+        // defaults — see deletedChannels' definition on AppState.
+        for (const name of deletedChannels) {
+          delete merged.channelRules[name];
+          delete merged.channelBuckets[name];
+        }
+        return merged;
       },
       // Stock and tasks are not persisted locally when Supabase is configured —
       // they come live from the shared database instead. Local mode (no
@@ -1065,6 +1098,7 @@ export const useStore = create<AppState>()(
         gpSeq: s.gpSeq,
         channelRules: s.channelRules,
         channelBuckets: s.channelBuckets,
+        deletedChannels: s.deletedChannels,
         facilityPriority: s.facilityPriority,
         pickers: s.pickers,
         visibleFacilities: s.visibleFacilities,

@@ -9,6 +9,7 @@ export function AdminConfig() {
     channelRules,
     updateChannelRule,
     addChannel,
+    deleteChannel,
     facilityPriority,
     setFacilityPriority,
     pickers,
@@ -18,6 +19,7 @@ export function AdminConfig() {
     logAudit,
   } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
+  const isSuperAdmin = useAuth((s) => s.profile?.role === "super_admin");
 
   const [newName, setNewName] = useState("");
   const [newBucket, setNewBucket] = useState<ChannelBucket>(BUCKET_LABELS[0]);
@@ -93,6 +95,12 @@ export function AdminConfig() {
     setNewMinBinQty("");
   }
 
+  function removeChannel(name: string) {
+    if (!window.confirm(`Delete channel "${name}"? Already-created picklists keep their history — this only stops it being offered for new demand going forward. This can't be undone from here (an Admin would need to re-add it).`)) return;
+    deleteChannel(name);
+    logAudit(myName, `Deleted channel ${name}`);
+  }
+
   function move(i: number, dir: -1 | 1) {
     const p = [...facilityPriority];
     const j = i + dir;
@@ -108,6 +116,7 @@ export function AdminConfig() {
         <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
           Edit the shelf-life rule per channel. <b>Fixed</b> = months remaining; <b>% of shelf</b> = fraction of
           total shelf life remaining. Applies to the next picking task.
+          {isSuperAdmin && " Super Admin can delete a channel — existing picklists keep their history, it just stops being offered for new demand."}
         </p>
 
         <div className="mb-3 flex flex-wrap items-end gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-900">
@@ -176,6 +185,7 @@ export function AdminConfig() {
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Rule</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Value</th>
                 <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Min bin qty</th>
+                {isSuperAdmin && <th className="border-b border-slate-200 p-1.5 dark:border-slate-700"></th>}
               </tr>
             </thead>
             <tbody>
@@ -235,6 +245,11 @@ export function AdminConfig() {
                         className="w-16 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-900"
                       />
                     </td>
+                    {isSuperAdmin && (
+                      <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
+                        <Button variant="sm" onClick={() => removeChannel(c)}>Delete</Button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
