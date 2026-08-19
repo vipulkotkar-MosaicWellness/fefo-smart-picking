@@ -4,7 +4,7 @@ import { bucketCode, channelCode, CHANNELS, type ChannelBucket } from "./channel
 import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_PRIORITY, facilityCode } from "./facilities";
 import { matchesCutoff } from "./dateRanges";
-import { activeHoldKeys, holdKey, holdsToCreate } from "./holds";
+import { activeHoldKeys, dueForHoldAutoRelease, holdKey, holdsToCreate } from "./holds";
 import { fetchHolds, insertHold, releaseHoldRow } from "./holdsSupabase";
 import { dequeue as dequeuePick, enqueue as enqueuePick, loadQueue as loadPickQueue } from "./offlineQueue";
 import { rowsFromTuples, type StockTuple } from "./sampleData";
@@ -376,6 +376,10 @@ export interface AppState {
   // block on any whose 15-minute clock has run out. Client-side only — see
   // WMS_BLOCK_DELAY_MS; called on an interval from App.tsx.
   checkWmsAutoBlock: () => Promise<void>;
+  // Sweeps active holds and genuinely releases (releasedBy: "System (shelf
+  // emptied)") any whose lot has hit 0 current qty — see
+  // dueForHoldAutoRelease. Called on the same interval as checkWmsAutoBlock.
+  checkHoldAutoRelease: () => Promise<void>;
 }
 
 const initialStock = rowsFromTuples(REAL_STOCK);
@@ -1020,6 +1024,19 @@ export const useStore = create<AppState>()(
           for (const t of touchedTasks) await updateTaskData(t);
         }
         if (!get().anyOpen()) void get().loadFromSupabase();
+      },
+
+      checkHoldAutoRelease: async () => {
+        const due = dueForHoldAutoRelease(get().holds, get().stock);
+        if (due.length === 0 || !isSupabaseConfigured) return;
+        for (const h of due) {
+          try {
+            await releaseHoldRow(h.id, "System (shelf emptied)");
+          } catch {
+            // Transient failure — leave it active, next sweep will retry.
+          }
+        }
+        await get().loadHolds();
       },
     }),
     {

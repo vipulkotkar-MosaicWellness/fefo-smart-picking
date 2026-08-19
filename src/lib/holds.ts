@@ -5,11 +5,6 @@ export function holdKey(sku: string, facility: string, bin: string, batch: strin
   return `${sku}::${facility}::${bin}::${batch}`;
 }
 
-/** Keys for every hold not yet released — what allocate() checks against. */
-export function activeHoldKeys(holds: Hold[]): Set<string> {
-  return new Set(holds.filter((h) => !h.releasedAt).map((h) => holdKey(h.sku, h.facility, h.bin, h.batch)));
-}
-
 /**
  * Current on-hand qty for the exact SKU+Facility+Bin+Batch a hold refers to
  * — so a hold shows both "10 not found" AND "842 on the shelf entirely
@@ -19,6 +14,28 @@ export function onHandQty(stock: StockRow[], sku: string, facility: string, bin:
   return stock
     .filter((b) => b.sku === sku && b.location === facility && b.bin === bin && b.batch === batch)
     .reduce((sum, b) => sum + b.qty, 0);
+}
+
+/**
+ * Keys for every hold not yet released — what allocate() checks against.
+ * A hold whose lot has emptied out (0 current qty) gets actually released
+ * (with an audit trail) by the auto-release sweep in store.ts rather than
+ * being silently excluded here — see dueForHoldAutoRelease.
+ */
+export function activeHoldKeys(holds: Hold[]): Set<string> {
+  return new Set(holds.filter((h) => !h.releasedAt).map((h) => holdKey(h.sku, h.facility, h.bin, h.batch)));
+}
+
+/**
+ * Active holds whose lot currently has zero stock — nothing left there to
+ * block, so keeping them listed adds no value. checkHoldAutoRelease() sweeps
+ * this every minute and genuinely releases each one (releasedBy: "System"),
+ * so it shows up in the release history / CSV export like any other release,
+ * instead of just quietly disappearing. If the same lot resyncs with stock
+ * and goes not-found again later, holdsToCreate() places a fresh hold then.
+ */
+export function dueForHoldAutoRelease(holds: Hold[], stock: StockRow[]): Hold[] {
+  return holds.filter((h) => !h.releasedAt && onHandQty(stock, h.sku, h.facility, h.bin, h.batch) <= 0);
 }
 
 export interface NewHoldRequest {

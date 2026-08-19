@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeHoldKeys, holdKey, holdsToCreate, onHandQty } from "../../src/lib/holds";
+import { activeHoldKeys, dueForHoldAutoRelease, holdKey, holdsToCreate, onHandQty } from "../../src/lib/holds";
 import type { Hold, StockRow } from "../../src/lib/types";
 
 function stockRow(overrides: Partial<StockRow> = {}): StockRow {
@@ -51,6 +51,28 @@ describe("activeHoldKeys", () => {
   it("excludes a hold that has been released", () => {
     const keys = activeHoldKeys([hold({ releasedAt: "2026-08-09T10:00:00.000Z", releasedBy: "Admin" })]);
     expect(keys.size).toBe(0);
+  });
+});
+
+describe("dueForHoldAutoRelease", () => {
+  it("flags an active hold whose lot currently has zero stock", () => {
+    const stock: StockRow[] = [stockRow({ qty: 0 })];
+    expect(dueForHoldAutoRelease([hold()], stock).map((h) => h.id)).toEqual([1]);
+  });
+
+  it("flags an active hold whose lot is entirely absent from the latest stock sync", () => {
+    expect(dueForHoldAutoRelease([hold()], []).map((h) => h.id)).toEqual([1]);
+  });
+
+  it("does not flag a hold whose lot still has stock", () => {
+    const stock: StockRow[] = [stockRow({ qty: 4 })];
+    expect(dueForHoldAutoRelease([hold()], stock)).toEqual([]);
+  });
+
+  it("does not re-flag a hold that's already been released", () => {
+    const stock: StockRow[] = [stockRow({ qty: 0 })];
+    const released = hold({ releasedAt: "2026-08-09T10:00:00.000Z", releasedBy: "Admin" });
+    expect(dueForHoldAutoRelease([released], stock)).toEqual([]);
   });
 });
 

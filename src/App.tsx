@@ -146,7 +146,7 @@ function OperationsToolbar() {
 }
 
 function Workspace() {
-  const { loadFromSupabase, loadTasks, startTasksRealtime, loadHolds, tasks, flushOfflineQueue, checkWmsAutoBlock } = useStore();
+  const { loadFromSupabase, loadTasks, startTasksRealtime, loadHolds, tasks, flushOfflineQueue, checkWmsAutoBlock, checkHoldAutoRelease } = useStore();
   const { profile, signOut } = useAuth();
   const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
   const isAdminTier = role === "admin" || role === "super_admin";
@@ -175,10 +175,15 @@ function Workspace() {
     // Client-side only — see WMS_BLOCK_DELAY_MS in store.ts.
     void checkWmsAutoBlock();
     const wmsTimer = window.setInterval(() => void checkWmsAutoBlock(), 60_000);
+    // Sweeps for stock holds whose lot has emptied out — see
+    // dueForHoldAutoRelease in lib/holds.ts.
+    void checkHoldAutoRelease();
+    const holdTimer = window.setInterval(() => void checkHoldAutoRelease(), 60_000);
     return () => {
       stop();
       window.removeEventListener("online", onOnline);
       window.clearInterval(wmsTimer);
+      window.clearInterval(holdTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
