@@ -3,22 +3,42 @@ import { useAuth } from "../lib/authStore";
 import { downloadCsv } from "../lib/format";
 import { onHandQty } from "../lib/holds";
 import { useStore } from "../lib/store";
-import type { Hold } from "../lib/types";
+import type { Hold, StockRow } from "../lib/types";
 import { Button, Card, Tag } from "./Ui";
 
 function timeLabel(iso?: string): string {
   return iso ? new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
 }
 
-function releasedCsv(released: Hold[]): string {
-  const header = "SKU,Facility,Bin,Batch,Qty on hold,Held since,Held by,Reason,Source picklist,Released at,Released by";
+function csvFrom(header: string, rows: string[][]): string {
   const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  const rows = released.map((h) =>
-    [h.sku, h.facility, h.bin, h.batch, h.qty, timeLabel(h.heldAt), h.heldBy, h.reason ?? "", h.sourceTaskNo ?? "", timeLabel(h.releasedAt), h.releasedBy ?? ""]
-      .map((v) => cell(String(v)))
-      .join(","),
+  return header + "\n" + rows.map((r) => r.map((v) => cell(String(v))).join(",")).join("\n") + "\n";
+}
+
+/** Holds still pending release, with their live current shelf qty. */
+function activeCsv(active: Hold[], stock: StockRow[]): string {
+  return csvFrom(
+    "SKU,Facility,Bin,Batch,Qty on hold,Current shelf qty,Held since,Held by,Reason,Source picklist",
+    active.map((h) => [
+      h.sku,
+      h.facility,
+      h.bin,
+      h.batch,
+      String(h.qty),
+      String(onHandQty(stock, h.sku, h.facility, h.bin, h.batch)),
+      timeLabel(h.heldAt),
+      h.heldBy,
+      h.reason ?? "",
+      h.sourceTaskNo ?? "",
+    ]),
   );
-  return header + "\n" + rows.join("\n") + "\n";
+}
+
+function releasedCsv(released: Hold[]): string {
+  return csvFrom(
+    "SKU,Facility,Bin,Batch,Qty on hold,Held since,Held by,Reason,Source picklist,Released at,Released by",
+    released.map((h) => [h.sku, h.facility, h.bin, h.batch, String(h.qty), timeLabel(h.heldAt), h.heldBy, h.reason ?? "", h.sourceTaskNo ?? "", timeLabel(h.releasedAt), h.releasedBy ?? ""]),
+  );
 }
 
 export function StockHolds() {
@@ -62,6 +82,11 @@ export function StockHolds() {
         history below rather than just disappearing. If that same lot gets restocked and goes not-found again later,
         a fresh hold is created then.
       </p>
+      <div className="mb-2 flex items-center justify-end">
+        <Button variant="sm" onClick={() => downloadCsv(activeCsv(active, stock), "stock_holds_pending_release.csv")} disabled={active.length === 0}>
+          Export CSV
+        </Button>
+      </div>
       {active.length === 0 ? (
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds right now.</p>
       ) : (
