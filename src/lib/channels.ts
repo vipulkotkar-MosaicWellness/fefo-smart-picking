@@ -13,6 +13,7 @@ export const CHANNEL_BUCKETS: Record<string, ChannelBucket> = {
   "STN - BW": "Replenishment",
   "STN - LJ": "Replenishment",
   "STN - MP": "Replenishment",
+  "STN - Lucknow": "Replenishment",
   Amazon: "B2B Ecom",
   Flipkart: "B2B Ecom",
   "FK Hub": "B2B Ecom",
@@ -41,15 +42,17 @@ export const CHANNELS: Record<string, ChannelRule> = {
   // earliest-expiring in-date batch, any quantity, as long as it's available.
   "Internal Stock Transfer - Warehouse - Local": { type: "fixed", val: 0 },
   "Internal Stock Transfer - Dark Stores": { type: "pct", val: 0.65 },
-  // Regional internal stock transfer nodes — same treatment as ...Warehouse -
-  // 3PL: plain FEFO (no shelf-life floor) but only full case-pack quantities
-  // (≥20 units/bin); anything under that is skipped and logged to the Bin
-  // Skip Report. Formerly "Internal Stock Transfer - NCR" / "STN - BLR" /
-  // "STN - Hyderabad" / "STN - Ahmedabad" respectively, renamed 19 Aug 2026.
-  "STN - MM": { type: "fixed", val: 0, minBinQty: 20 },
-  "STN - BW": { type: "fixed", val: 0, minBinQty: 20 },
-  "STN - LJ": { type: "fixed", val: 0, minBinQty: 20 },
-  "STN - MP": { type: "fixed", val: 0, minBinQty: 20 },
+  // Regional internal stock transfer nodes — same rule as their prior
+  // per-browser Admin config: 30% of shelf life remaining, and only full
+  // case-pack quantities (≥20 units/bin); anything under that is skipped
+  // and logged to the Bin Skip Report. Formerly "Internal Stock Transfer -
+  // NCR" / "STN - BLR" / "STN - Hyderabad" / "STN - Ahmedabad" respectively,
+  // renamed 19 Aug 2026.
+  "STN - MM": { type: "pct", val: 0.3, minBinQty: 20 },
+  "STN - BW": { type: "pct", val: 0.3, minBinQty: 20 },
+  "STN - LJ": { type: "pct", val: 0.3, minBinQty: 20 },
+  "STN - MP": { type: "pct", val: 0.3, minBinQty: 20 },
+  "STN - Lucknow": { type: "pct", val: 0.3, minBinQty: 20 },
   Amazon: { type: "fixed", val: 6 },
   Flipkart: { type: "fixed", val: 6 },
   "FK Hub": { type: "fixed", val: 6 },
