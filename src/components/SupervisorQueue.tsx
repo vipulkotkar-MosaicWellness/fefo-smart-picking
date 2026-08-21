@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { ageingRangeFor, inAgeingRange, type AgeingPreset } from "../lib/ageing";
 import { primaryFacilityNo } from "../lib/format";
 import { activeTasks, effectiveGatePassNo, supervisorVisibleFacilityLists, useStore } from "../lib/store";
-import { bucketSummary, pickerWorkload, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
-import type { FacilityPicklist } from "../lib/types";
+import { bucketSummary, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
+import type { FacilityPicklist, PickingTask } from "../lib/types";
 import { AgeingFilter } from "./AgeingFilter";
 import { PartnerMark } from "./partners/PartnerMark";
 import { Card, Tag } from "./Ui";
@@ -114,22 +114,93 @@ function Bucket({
   );
 }
 
+// SKU's product name is prefixed with its brand code — "BB", "BW", "MM",
+// "LJ", or occasionally the full brand name ("BeBodywise ...") — there's no
+// separate brand field in the data model, so this is the only signal for it.
+function brandOf(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? name;
+}
+
+interface ShortfallRow {
+  taskNo: string;
+  gatePassNo?: string;
+  channel: string;
+  sku: string;
+  name: string;
+  qty: number;
+}
+
+function shortfallRows(tasks: PickingTask[]): ShortfallRow[] {
+  const rows: ShortfallRow[] = [];
+  for (const t of tasks) {
+    for (const s of t.shortfall) rows.push({ taskNo: t.no, gatePassNo: t.gatePassNo, channel: t.channel, sku: s.sku, name: s.name, qty: s.qty });
+  }
+  return rows.sort((a, b) => b.qty - a.qty);
+}
+
 function ShortfallAlert() {
   const tasks = activeTasks(useStore((s) => s.tasks));
-  const withShortfall = tasks.filter((t) => t.shortfall.length > 0);
-  if (withShortfall.length === 0) return null;
+  const rows = useMemo(() => shortfallRows(tasks), [tasks]);
+  const [channelFilter, setChannelFilter] = useState("");
+  const [brandFilter, setBrandFilter] = useState("");
+  if (rows.length === 0) return null;
+
+  const channelOptions = [...new Set(rows.map((r) => r.channel))].sort();
+  const brandOptions = [...new Set(rows.map((r) => brandOf(r.name)))].sort();
+  const filtered = rows.filter((r) => (!channelFilter || r.channel === channelFilter) && (!brandFilter || brandOf(r.name) === brandFilter));
 
   return (
-    <div className="mb-4 rounded-lg border border-rose-300 bg-rose-50 p-3 dark:border-rose-800 dark:bg-rose-950/40">
-      <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">
-        Not available in any facility
-      </h3>
-      {withShortfall.map((t) => (
-        <p key={t.no} className="text-[11px] text-rose-800 dark:text-rose-200">
-          <b>Gate Pass {t.gatePassNo}</b> ({t.channel}): {t.shortfall.map((s) => `${s.name} — ${s.qty} short`).join(", ")}
-        </p>
-      ))}
-    </div>
+    <details className="mb-4 rounded-lg border border-rose-300 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/40 [&_summary::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-lg p-3">
+        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">
+          ⚠ Critical: stock not available in any facility
+        </span>
+        <Tag tone="bad">
+          {rows.length} exception{rows.length === 1 ? "" : "s"}
+        </Tag>
+      </summary>
+      <div className="border-t border-rose-200 p-3 dark:border-rose-800">
+        <div className="mb-2 flex flex-wrap gap-2">
+          <select
+            value={channelFilter}
+            onChange={(e) => setChannelFilter(e.target.value)}
+            className="rounded-lg border border-rose-300 bg-white p-1.5 text-xs dark:border-rose-700 dark:bg-slate-900"
+          >
+            <option value="">All channels</option>
+            {channelOptions.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          <select
+            value={brandFilter}
+            onChange={(e) => setBrandFilter(e.target.value)}
+            className="rounded-lg border border-rose-300 bg-white p-1.5 text-xs dark:border-rose-700 dark:bg-slate-900"
+          >
+            <option value="">All brands</option>
+            {brandOptions.map((b) => (
+              <option key={b} value={b}>{b}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          {filtered.length === 0 ? (
+            <p className="text-[11px] text-rose-700 dark:text-rose-300">No exceptions match this filter.</p>
+          ) : (
+            filtered.map((r, i) => (
+              <div
+                key={`${r.taskNo}-${r.sku}-${i}`}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-rose-200 bg-white px-2.5 py-1.5 text-[11px] dark:border-rose-800 dark:bg-slate-900"
+              >
+                <span className="text-rose-900 dark:text-rose-100">
+                  <b>Gate Pass {r.gatePassNo ?? "—"}</b> ({r.channel}): {r.name}
+                </span>
+                <Tag tone="bad">{r.qty} short</Tag>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -178,16 +249,15 @@ export function SupervisorQueue() {
   const done = filtered.filter((f) => queueBucket(f) === "done");
 
   const metrics = useMemo(() => queueMetrics(all), [all]);
-  const workload = useMemo(() => pickerWorkload(all, pickers), [all, pickers]);
   const channelOptions = useMemo(() => [...new Set(tasks.map((t) => t.channel))].sort(), [tasks]);
 
   if (all.length === 0) {
     return (
       <Card title="Picking queue">
-        <ShortfallAlert />
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">
           No picklists yet — waiting on the Planner to raise demand.
         </p>
+        <ShortfallAlert />
       </Card>
     );
   }
@@ -199,8 +269,6 @@ export function SupervisorQueue() {
         <Metric label="Stock exceptions" value={String(metrics.exceptionCount)} warn={metrics.exceptionCount > 0} />
         <Metric label="Fill rate" value={metrics.fillRatePct == null ? "—" : `${metrics.fillRatePct}%`} />
       </div>
-
-      <ShortfallAlert />
 
       <div className="mb-3 flex flex-wrap gap-2">
         <select value={facilityFilter} onChange={(e) => setFacilityFilter(e.target.value)} className="rounded-lg border border-slate-300 p-1.5 text-xs dark:border-slate-600 dark:bg-slate-900">
@@ -234,25 +302,15 @@ export function SupervisorQueue() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
-        <div className="space-y-5">
-          <Bucket title="Picking Pending" tone="warn" items={picking} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing pending right now." />
-          <Bucket title="Gatepass generated — inventory blocked (WMS)" tone="info" items={blocked} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing blocked in WMS right now." />
-          <Bucket title="Not found — needs an alternate" tone="bad" items={exceptions} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing with a shortfall right now." />
-          <Bucket title="Picking completed" tone="ok" items={done} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing completed yet." />
-        </div>
+      <div className="space-y-5">
+        <Bucket title="Picking Pending" tone="warn" items={picking} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing pending right now." />
+        <Bucket title="Gatepass generated — inventory blocked (WMS)" tone="info" items={blocked} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing blocked in WMS right now." />
+        <Bucket title="Not found — needs an alternate" tone="bad" items={exceptions} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing with a shortfall right now." />
+        <Bucket title="Picking completed" tone="ok" items={done} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing completed yet." />
+      </div>
 
-        <div className="rounded-xl border border-[var(--fefo-line)] p-3 dark:border-slate-700">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">Picker workload</h3>
-          <div className="space-y-2">
-            {workload.map((w) => (
-              <div key={w.picker} className="flex items-center justify-between text-xs">
-                <span>{w.picker}</span>
-                <Tag tone={w.activeLines === 0 ? "ok" : "info"}>{w.activeLines === 0 ? "Available" : `${w.activeLines} active`}</Tag>
-              </div>
-            ))}
-          </div>
-        </div>
+      <div className="mt-5">
+        <ShortfallAlert />
       </div>
     </Card>
   );
