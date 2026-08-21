@@ -1,13 +1,14 @@
 import { taskIsComplete, useStore } from "../lib/store";
+import type { PickingTask } from "../lib/types";
 import { Card, Tag } from "./Ui";
 
-export function PerformancePanel() {
-  const { tasks, skus } = useStore();
+export function FillRateReport({ tasks }: { tasks: PickingTask[] }) {
+  const skus = useStore((s) => s.skus);
   const done = tasks.filter(taskIsComplete);
 
   if (done.length === 0)
     return (
-      <Card title="Sold / performance (completed tasks)">
+      <Card title="Fill rate">
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">
           Complete a task's facility picklists to see demand vs sold (fill rate).
         </p>
@@ -41,7 +42,7 @@ export function PerformancePanel() {
   const fill = td ? Math.round((ts / td) * 100) : 0;
 
   return (
-    <Card title="Sold / performance (completed tasks)">
+    <Card title="Fill rate">
       <p className="mb-1 text-[11px] text-slate-500 dark:text-slate-400">
         Completed tasks: {done.length} · overall fill rate <b>{fill}%</b>
       </p>

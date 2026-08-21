@@ -10,15 +10,18 @@ afterEach(() => {
   useStore.setState(initialState, true);
 });
 
+function csvFile(content: string) {
+  return new File([content], "demand.csv", { type: "text/csv" });
+}
+
 describe("DemandPanel wizard", () => {
-  it("moves from Import to Validate on parse, and surfaces an unknown channel without crashing", async () => {
+  it("moves from Import to Validate on upload, and surfaces an unknown channel without crashing", async () => {
     const user = userEvent.setup();
     render(<DemandPanel />);
 
-    await user.type(screen.getByPlaceholderText(/Blinkit, MWMMHRP/), "Nowhere, MWMMHRP.0001.AAAA.B0_N, 10, GP-1001");
-    await user.click(screen.getByRole("button", { name: "Parse" }));
+    await user.upload(screen.getByLabelText(/Upload \.csv/i), csvFile("Nowhere, MWMMHRP.0001.AAAA.B0_N, 10, GP-1001"));
 
-    expect(screen.getByText("Unknown channel(s)")).toBeVisible();
+    expect(await screen.findByText("Unknown channel(s)")).toBeVisible();
     expect(screen.getByText((_, el) => el?.textContent === "Unknown channel(s) — Nowhere")).toBeVisible();
     // Nothing valid was parsed, so moving on to allocation should be blocked.
     expect(screen.getByRole("button", { name: "Review allocation" })).toBeDisabled();
@@ -29,10 +32,9 @@ describe("DemandPanel wizard", () => {
     render(<DemandPanel />);
 
     const [sku] = Object.keys(useStore.getState().skus);
-    await user.type(screen.getByPlaceholderText(/Blinkit, MWMMHRP/), `Blinkit, ${sku}, 5, GP-1001`);
-    await user.click(screen.getByRole("button", { name: "Parse" }));
+    await user.upload(screen.getByLabelText(/Upload \.csv/i), csvFile(`Blinkit, ${sku}, 5, GP-1001`));
 
-    expect(screen.getByRole("button", { name: "Review allocation" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Review allocation" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Review allocation" }));
 
     // Step 3 shows a real facility allocation, not a placeholder.

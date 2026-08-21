@@ -6,9 +6,6 @@ import { activeTasks, computeChannelAllocations, useStore } from "../lib/store";
 import { PartnerMark } from "./partners/PartnerMark";
 import { Button, Card, Tag } from "./Ui";
 
-const SAMPLE_DEMAND =
-  "Blinkit, MWMMHRP.0001.AAAA.B0_N, 120, GP-100234\nAmazon, MWMMHRP.0004.AAAA.B0_N, 80, GP-100235\nMyntra, MWMMPRK.2026.AAAA.B0_N, 60, GP-100236";
-
 const TEMPLATE =
   "Channel,SKU Code,Qty,Gate Pass Number\nBlinkit,MWMMHRP.0001.AAAA.B0_N,50,GP-100234\nAmazon,MWMMHRP.0004.AAAA.B0_N,30,GP-100235\n";
 
@@ -66,7 +63,6 @@ export function DemandPanel() {
   const displayName = useAuth((s) => s.profile?.display_name ?? null);
   const [step, setStep] = useState<Step>(1);
   const [furthest, setFurthest] = useState<Step>(1);
-  const [text, setText] = useState("");
   const [issues, setIssues] = useState<ValidationIssues | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -86,12 +82,9 @@ export function DemandPanel() {
     const f = e.target.files?.[0];
     if (!f) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      const content = String(reader.result);
-      setText(content);
-      runParse(content);
-    };
+    reader.onload = () => runParse(String(reader.result));
     reader.readAsText(f);
+    e.target.value = "";
   }
 
   const allocations = useMemo(() => {
@@ -115,7 +108,6 @@ export function DemandPanel() {
       await generate(userId, displayName);
       setStep(1);
       setFurthest(1);
-      setText("");
       setIssues(null);
     } finally {
       setBusy(false);
@@ -125,7 +117,6 @@ export function DemandPanel() {
   function reset() {
     setDemand([]);
     setIssues(null);
-    setText("");
     goTo(1);
   }
 
@@ -133,24 +124,21 @@ export function DemandPanel() {
     <Card title="Create picking demand">
       <WizardSteps step={step} furthest={furthest} onJump={goTo} />
 
+      <details className="mb-3 rounded-lg border border-[var(--fefo-line)] bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-800">
+        <summary className="cursor-pointer font-semibold text-[var(--fefo-muted)] dark:text-slate-400">
+          Supported channels ({Object.keys(channelRules).length})
+        </summary>
+        <p className="mt-1.5 text-[11px] text-[var(--fefo-text)] dark:text-slate-300">{Object.keys(channelRules).join(", ")}</p>
+      </details>
+
       {step === 1 && (
         <div>
-          <label className="block text-[11px] font-semibold text-[var(--fefo-muted)] dark:text-slate-400">
-            Paste demand rows <span className="font-normal">(Channel, SKU Code, Qty, Gate Pass Number)</span> — gate
-            pass is optional. Rows sharing one still group as before; rows left blank, per channel per upload, become
-            one order that's allocated by FEFO across facilities — each facility it lands on then needs its own gate
-            pass, added afterward under "Gate pass allocation pending" below.
-          </label>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder={"Blinkit, MWMMHRP.0001.AAAA.B0_N, 50, GP-100234\nAmazon, MWMMHRP.0004.AAAA.B0_N, 30, GP-100235"}
-            className="mt-1 min-h-24 w-full rounded-lg border border-slate-300 bg-white p-2 font-mono text-xs dark:border-slate-600 dark:bg-slate-900"
-          />
+          <p className="text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">
+            Upload a CSV — Channel, SKU Code, Qty, Gate Pass Number. Gate pass is optional: rows left blank become one
+            order per channel, allocated by FEFO across facilities, with each facility's gate pass added afterward
+            under "Gate pass allocation pending".
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            <Button variant="sm" onClick={() => setText(SAMPLE_DEMAND)}>
-              Load sample
-            </Button>
             <Button variant="sm" onClick={() => downloadCsv(TEMPLATE, "demand_template.csv")}>
               Template
             </Button>
@@ -158,13 +146,7 @@ export function DemandPanel() {
               Upload .csv
               <input type="file" accept=".csv" className="hidden" onChange={onFile} />
             </label>
-            <Button variant="sm" onClick={() => runParse(text)} disabled={!text.trim()}>
-              Parse
-            </Button>
           </div>
-          <p className="mt-2 text-[10px] text-[var(--fefo-muted)] dark:text-slate-400">
-            Valid channels: {Object.keys(channelRules).join(", ")}
-          </p>
         </div>
       )}
 

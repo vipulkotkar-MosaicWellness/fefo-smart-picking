@@ -11,7 +11,7 @@ import { AuthGate, PendingApproval, SetNewPassword } from "./components/AuthGate
 import { DemandPanel } from "./components/DemandPanel";
 import { GatePassPending } from "./components/GatePassPending";
 import { InventoryPanel } from "./components/InventoryPanel";
-import { PerformancePanel } from "./components/PerformancePanel";
+import { PerformanceSummaryTiles } from "./components/PerformanceSummaryTiles";
 import { PickerView } from "./components/PickerView";
 import { Reports } from "./components/Reports";
 import { StockHolds } from "./components/StockHolds";
@@ -224,7 +224,7 @@ function Workspace() {
         <div className="space-y-4">
           <DemandPanel />
           <GatePassPending />
-          <PerformancePanel />
+          <PerformanceSummaryTiles tasks={tasks} onViewReport={() => setActiveView("reports")} />
         </div>
       )}
       {activeView === "supervisor" && (
