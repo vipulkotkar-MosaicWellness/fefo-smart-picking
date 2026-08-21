@@ -906,7 +906,18 @@ export const useStore = create<AppState>()(
             if (w.short > 0) extraShort.push({ sku, name: state.skus[sku].name, qty: w.short });
             extraSkipped.push(...w.skipped);
           }
-          const r2Lists = buildFacilityLists(task.no, 2, r2, state.facilityPriority, "-R2");
+          // Round-2 (not-found re-offer) picklists aren't a new order — they
+          // reuse whatever gate pass that facility already has on this task
+          // from round 1, so they never land in "Gate Pass Allocation
+          // Pending" for stock that was already cleared to pick. A facility
+          // round 2 lands on that round 1 never used still correctly falls
+          // through to pending, since it has no round-1 entry to inherit from.
+          const gatePassByFacility: Record<string, string | undefined> = {};
+          task.facilities.forEach((f) => {
+            const gp = effectiveGatePassNo(f, task);
+            if (gp) gatePassByFacility[f.facility] = gp;
+          });
+          const r2Lists = buildFacilityLists(task.no, 2, r2, state.facilityPriority, "-R2", gatePassByFacility);
           if (r2Lists.length || extraShort.length || extraSkipped.length) {
             tasks = tasks.map((t) =>
               t.no === task.no
