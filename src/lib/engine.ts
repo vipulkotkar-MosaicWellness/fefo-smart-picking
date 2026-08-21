@@ -35,7 +35,11 @@ export function criticalPathSort<T extends { bin: string }>(lines: T[]): T[] {
 export interface AllocateArgs {
   sku: string;
   need: number;
-  location: string;
+  // Omit to allocate purely by FEFO across every facility at once — the
+  // default now that facility priority no longer drives allocation (see
+  // store.ts). Pass a specific facility only when you deliberately want to
+  // restrict the search to one location.
+  location?: string;
   cutoff: number; // minimum remaining months (already computed from the channel rule)
   stock: StockRow[];
   // Keyed by sku+facility+bin+batch identity (see holdKey), NOT by the stock
@@ -59,10 +63,14 @@ export interface AllocateResult {
 }
 
 /**
- * Allocate demand for one SKU at one facility: keep Good + Active stock,
- * excluding not-found exception bins (CC-NTF*), keep only batches meeting
- * the channel shelf-life cutoff, sort FEFO, and fill across bins using
- * currently available (un-reserved) qty.
+ * Allocate demand for one SKU: keep Good + Active stock, excluding
+ * not-found exception bins (CC-NTF*), keep only batches meeting the channel
+ * shelf-life cutoff, sort FEFO, and fill across bins using currently
+ * available (un-reserved) qty. When `location` is omitted, every facility is
+ * pooled together and sorted purely by expiry — the earliest-expiring
+ * eligible lot wins regardless of which facility it happens to sit in, so a
+ * single SKU's demand can legitimately split across facilities purely
+ * because that's where the earliest stock physically is.
  */
 export function allocate(args: AllocateArgs): AllocateResult {
   const { sku, need, location, cutoff, stock, reservedFor, minQty } = args;
@@ -74,7 +82,7 @@ export function allocate(args: AllocateArgs): AllocateResult {
     .filter(
       (b) =>
         b.sku === sku &&
-        b.location === location &&
+        (location === undefined || b.location === location) &&
         b.type === "Good" &&
         b.active === "Active" &&
         !isExceptionBin(b.bin) &&

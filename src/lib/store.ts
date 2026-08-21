@@ -153,31 +153,29 @@ function taskNumberPrefix(channel: string, customBuckets: Record<string, Channel
   return `${bucketCode(channel, customBuckets)}-${channelCode(channel)}-${todayYmd()}-`;
 }
 
-/** Fill one SKU's need across facilities in priority order (FEFO + tolerance). */
-function waterfall(
+/**
+ * Fill one SKU's need with pure FEFO across every facility at once — no
+ * facility-priority ordering. `allocate()` pools all eligible stock and
+ * sorts purely by expiry when `location` is omitted, so a SKU's demand can
+ * split across facilities purely because that's where the earliest stock
+ * actually is, never because one facility is ranked ahead of another. The
+ * resulting lines already carry their own `.facility`, grouped here only for
+ * buildFacilityLists' sake.
+ */
+function allocateAcrossFacilities(
   sku: string,
   need: number,
   cutoff: number,
   stock: StockRow[],
-  priority: string[],
   reserved: (key: string) => number,
   exclude: number[],
   heldKeys: Set<string>,
   minQty?: number,
 ): { byFacility: Record<string, PickLine[]>; short: number; skipped: BinSkip[] } {
+  const r = allocate({ sku, need, cutoff, stock, reservedFor: reserved, exclude, heldKeys, minQty });
   const byFacility: Record<string, PickLine[]> = {};
-  const skipped: BinSkip[] = [];
-  let remain = need;
-  for (const facility of priority) {
-    if (remain <= 0) break;
-    const r = allocate({ sku, need: remain, location: facility, cutoff, stock, reservedFor: reserved, exclude, heldKeys, minQty });
-    skipped.push(...r.skipped);
-    if (r.lines.length) {
-      (byFacility[facility] ??= []).push(...r.lines);
-      remain = r.short;
-    }
-  }
-  return { byFacility, short: remain, skipped };
+  for (const line of r.lines) (byFacility[line.facility] ??= []).push(line);
+  return { byFacility, short: r.short, skipped: r.skipped };
 }
 
 /**
@@ -208,10 +206,13 @@ function gatePassGroupKey(d: DemandLine): string {
 }
 
 /**
- * Pure FEFO waterfall allocation for a demand list, grouped by (channel,
- * gate pass) — a gate pass is one dispatch document and may carry several
- * SKUs, so every SKU under the same gate pass number becomes one picklist.
- * No Supabase, no store mutation, no numbering. `generate()` uses this to
+ * Pure FEFO allocation for a demand list, grouped by (channel, gate pass) —
+ * a gate pass is one dispatch document and may carry several SKUs, so every
+ * SKU under the same gate pass number becomes one picklist. Allocation
+ * itself pools stock across every facility and fills strictly by
+ * expiry — no facility-priority ordering; a SKU's demand can split across
+ * facilities purely because that's where the earliest stock is. No
+ * Supabase, no store mutation, no numbering. `generate()` uses this to
  * build real tasks; the Demand Planner's "review allocation" step calls the
  * same function to preview, so preview and generate can never disagree.
  */
@@ -220,7 +221,6 @@ export function computeChannelAllocations(
   channelRules: Record<string, ChannelRule>,
   skus: Record<string, SkuInfo>,
   stock: StockRow[],
-  facilityPriority: string[],
   existingTasks: PickingTask[],
   heldKeys: Set<string> = new Set(),
 ): ChannelAllocation[] {
@@ -243,7 +243,7 @@ export function computeChannelAllocations(
     const skipped: BinSkip[] = [];
     for (const d of lines) {
       const cutoff = cutoffMonths(rule, skus[d.sku].shelf);
-      const w = waterfall(d.sku, d.qty, cutoff, stock, facilityPriority, reserved, [], heldKeys, rule.minBinQty);
+      const w = allocateAcrossFacilities(d.sku, d.qty, cutoff, stock, reserved, [], heldKeys, rule.minBinQty);
       for (const f of Object.keys(w.byFacility)) (byFacility[f] ??= []).push(...w.byFacility[f]);
       if (w.short > 0) shortfall.push({ sku: d.sku, name: skus[d.sku].name, qty: w.short });
       skipped.push(...w.skipped);
@@ -650,7 +650,7 @@ export const useStore = create<AppState>()(
           return;
         }
 
-        const allocations = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, activeTasks(tasks), activeHoldKeys(get().holds));
+        const allocations = computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(get().holds));
         const demandByGroup = new Map<string, DemandLine[]>();
         for (const d of demand) {
           const key = `${d.channel}::${d.gatePassNo}`;
@@ -812,7 +812,7 @@ export const useStore = create<AppState>()(
           const heldKeysForRound2 = activeHoldKeys(state.holds);
           for (const sku of Object.keys(nfBySku)) {
             const cutoff = cutoffMonths(rule, state.skus[sku].shelf);
-            const w = waterfall(sku, nfBySku[sku], cutoff, stock, state.facilityPriority, reserved, [...usedRids], heldKeysForRound2, rule.minBinQty);
+            const w = allocateAcrossFacilities(sku, nfBySku[sku], cutoff, stock, reserved, [...usedRids], heldKeysForRound2, rule.minBinQty);
             for (const f of Object.keys(w.byFacility)) {
               (r2[f] ??= []).push(...w.byFacility[f]);
               w.byFacility[f].forEach((l) => usedRids.add(l.rid));

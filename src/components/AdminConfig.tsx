@@ -259,9 +259,10 @@ export function AdminConfig() {
       </Card>
 
       <div className="space-y-4">
-        <Card title="Facility priority (waterfall order)">
+        <Card title="Facility display order">
           <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
-            Demand fills from top to bottom.
+            Display order only — allocation is pure FEFO across all facilities and no longer follows this list.
+            This just controls the order facilities are listed in on the queue and picklist screens.
           </p>
           <div className="space-y-1.5">
             {facilityPriority.map((f, i) => (

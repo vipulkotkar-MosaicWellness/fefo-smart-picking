@@ -97,9 +97,9 @@ export function DemandPanel() {
 
   const allocations = useMemo(() => {
     if (demand.length === 0) return [];
-    return computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, activeTasks(tasks));
+    return computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [demand, channelRules, skus, stock, facilityPriority]);
+  }, [demand, channelRules, skus, stock]);
 
   const totalUnits = demand.reduce((s, d) => s + d.qty, 0);
   const facilitiesUsed = new Set(allocations.flatMap((a) => Object.keys(a.byFacility))).size;
@@ -238,7 +238,7 @@ export function DemandPanel() {
         <div>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-[var(--fefo-muted)] dark:text-slate-400">
-              FEFO allocation preview across facilities, in priority order.
+              FEFO allocation preview — pooled across all facilities, earliest-expiring eligible stock first.
             </p>
             {totalShortfall > 0 && <Tag tone="warn">{totalShortfall} unit(s) short</Tag>}
           </div>

@@ -4,12 +4,11 @@ import { activeHoldKeys, holdKey } from "../../src/lib/holds";
 import type { DemandLine, SkuInfo, StockRow } from "../../src/lib/types";
 
 // Cutoff 0 + far-future expiry means every batch below always qualifies,
-// regardless of what "today" is when the test runs — isolates the waterfall
-// and reservation logic from shelf-life filtering, which engine.ts already
-// covers on its own.
+// regardless of what "today" is when the test runs — isolates the
+// allocation and reservation logic from shelf-life filtering, which
+// engine.ts already covers on its own.
 const channelRules = { TestChannel: { type: "fixed" as const, val: 0 } };
 const skus: Record<string, SkuInfo> = { "TEST-SKU": { name: "Test Product", shelf: 24 } };
-const facilityPriority = ["SL Mother Hub", "SL Ambient"];
 
 function stockRow(overrides: Partial<StockRow>): StockRow {
   return {
@@ -38,7 +37,7 @@ describe("computeChannelAllocations — channel minBinQty floor", () => {
   it("skips a bin under the channel's floor and reports it, falling back to shortfall if nothing else qualifies", () => {
     const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Mother Hub", qty: 12 })];
     const demand: DemandLine[] = [demandLine({ qty: 5 })];
-    const [result] = computeChannelAllocations(demand, minQtyChannelRules, skus, stock, facilityPriority, []);
+    const [result] = computeChannelAllocations(demand, minQtyChannelRules, skus, stock, []);
     expect(Object.keys(result.byFacility)).toEqual([]);
     expect(result.shortfall).toEqual([{ sku: "TEST-SKU", name: "Test Product", qty: 5 }]);
     expect(result.skipped).toEqual([
@@ -49,7 +48,7 @@ describe("computeChannelAllocations — channel minBinQty floor", () => {
   it("does not skip anything for a channel with no minBinQty set", () => {
     const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Mother Hub", qty: 12 })];
     const demand: DemandLine[] = [demandLine({ qty: 5 })];
-    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, []);
+    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, []);
     expect(Object.keys(result.byFacility)).toEqual(["SL Mother Hub"]);
     expect(result.skipped).toEqual([]);
   });
@@ -59,28 +58,58 @@ describe("computeChannelAllocations (pure — no Supabase, no side effects)", ()
   it("allocates within a single facility when its stock covers demand", () => {
     const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Mother Hub", qty: 50 })];
     const demand: DemandLine[] = [demandLine({ qty: 20 })];
-    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, []);
+    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, []);
     expect(result.channel).toBe("TestChannel");
     expect(result.gatePassNo).toBe("GP-1001");
     expect(Object.keys(result.byFacility)).toEqual(["SL Mother Hub"]);
     expect(result.shortfall).toEqual([]);
   });
 
-  it("waterfalls into the next facility once the first can't fully cover demand", () => {
+  it("spills into a second facility once the first can't fully cover demand", () => {
     const stock: StockRow[] = [
       stockRow({ rid: 1, location: "SL Mother Hub", qty: 15 }),
       stockRow({ rid: 2, location: "SL Ambient", qty: 50 }),
     ];
     const demand: DemandLine[] = [demandLine({ qty: 30 })];
-    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, []);
-    expect(Object.keys(result.byFacility)).toEqual(["SL Mother Hub", "SL Ambient"]);
+    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, []);
+    expect(Object.keys(result.byFacility).sort()).toEqual(["SL Ambient", "SL Mother Hub"]);
     expect(result.shortfall).toEqual([]);
+  });
+
+  it("picks the earliest-expiring lot regardless of facility — no facility-priority ordering", () => {
+    // Mother Hub's lot expires later; Ambient's (checked second in the old
+    // priority order) expires sooner. Pure FEFO must prefer Ambient's lot
+    // even though it isn't "first" in any facility list.
+    const stock: StockRow[] = [
+      stockRow({ rid: 1, location: "SL Mother Hub", batch: "LATE", exp: [2099, 12], qty: 20 }),
+      stockRow({ rid: 2, location: "SL Ambient", batch: "EARLY", exp: [2099, 1], qty: 20 }),
+    ];
+    const demand: DemandLine[] = [demandLine({ qty: 10 })];
+    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, []);
+    expect(Object.keys(result.byFacility)).toEqual(["SL Ambient"]);
+    expect(result.byFacility["SL Ambient"][0].batch).toBe("EARLY");
+  });
+
+  it("splits a single SKU's demand across facilities purely by expiry order, not facility order", () => {
+    const stock: StockRow[] = [
+      stockRow({ rid: 1, location: "SL Mother Hub", batch: "LATE", exp: [2099, 12], qty: 20 }),
+      stockRow({ rid: 2, location: "SL RX", batch: "MID", exp: [2099, 6], qty: 5 }),
+      stockRow({ rid: 3, location: "SL Ambient", batch: "EARLY", exp: [2099, 1], qty: 5 }),
+    ];
+    const demand: DemandLine[] = [demandLine({ qty: 10 })];
+    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, []);
+    // Earliest (Ambient) and next-earliest (RX) fully cover the 10 units
+    // needed — Mother Hub's later-expiring, otherwise-untouched lot is
+    // never drawn from at all.
+    expect(Object.keys(result.byFacility).sort()).toEqual(["SL Ambient", "SL RX"]);
+    expect(result.byFacility["SL Ambient"][0].qty).toBe(5);
+    expect(result.byFacility["SL RX"][0].qty).toBe(5);
   });
 
   it("reports a shortage when no facility can cover the remaining need", () => {
     const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Mother Hub", qty: 5 })];
     const demand: DemandLine[] = [demandLine({ qty: 30 })];
-    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, []);
+    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, []);
     expect(result.shortfall).toEqual([{ sku: "TEST-SKU", name: "Test Product", qty: 25 }]);
   });
 
@@ -90,7 +119,7 @@ describe("computeChannelAllocations (pure — no Supabase, no side effects)", ()
       stockRow({ rid: 2, location: "SL Ambient", qty: 50 }),
     ];
     const demand: DemandLine[] = [demandLine({ qty: 15 })];
-    const [first] = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, []);
+    const [first] = computeChannelAllocations(demand, channelRules, skus, stock, []);
 
     const reservingTask = {
       no: "TEST-001",
@@ -113,16 +142,16 @@ describe("computeChannelAllocations (pure — no Supabase, no side effects)", ()
     };
 
     // The first request already reserved all 15 units at Mother Hub, so an
-    // identical second request must waterfall entirely into Ambient instead
-    // of double-allocating the same (still-unpicked) batch.
-    const [second] = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, [reservingTask]);
+    // identical second request must fall entirely to Ambient instead of
+    // double-allocating the same (still-unpicked) batch.
+    const [second] = computeChannelAllocations(demand, channelRules, skus, stock, [reservingTask]);
     expect(Object.keys(second.byFacility)).toEqual(["SL Ambient"]);
   });
 
   it("skips a channel with no configured tolerance rule instead of throwing", () => {
     const stock: StockRow[] = [stockRow({ rid: 1 })];
     const demand: DemandLine[] = [demandLine({ channel: "Not A Real Channel", qty: 5 })];
-    const result = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, []);
+    const result = computeChannelAllocations(demand, channelRules, skus, stock, []);
     expect(result).toEqual([]);
   });
 
@@ -132,7 +161,7 @@ describe("computeChannelAllocations (pure — no Supabase, no side effects)", ()
       demandLine({ sku: "TEST-SKU", qty: 5, gatePassNo: "GP-1001" }),
       demandLine({ sku: "TEST-SKU", qty: 7, gatePassNo: "GP-1002" }),
     ];
-    const result = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, []);
+    const result = computeChannelAllocations(demand, channelRules, skus, stock, []);
     expect(result).toHaveLength(2);
     expect(result.map((r) => r.gatePassNo).sort()).toEqual(["GP-1001", "GP-1002"]);
     const gp1 = result.find((r) => r.gatePassNo === "GP-1001")!;
@@ -151,12 +180,12 @@ describe("computeChannelAllocations (pure — no Supabase, no side effects)", ()
       demandLine({ sku: "TEST-SKU", qty: 4, gatePassNo: "GP-1001" }),
       demandLine({ sku: "TEST-SKU-2", qty: 6, gatePassNo: "GP-1001" }),
     ];
-    const result = computeChannelAllocations(demand, channelRules, skus2, stock, facilityPriority, []);
+    const result = computeChannelAllocations(demand, channelRules, skus2, stock, []);
     expect(result).toHaveLength(1);
     expect(result[0].byFacility["SL Mother Hub"].map((l) => l.sku).sort()).toEqual(["TEST-SKU", "TEST-SKU-2"]);
   });
 
-  it("skips a held batch and waterfalls into an unheld one for the same sku+bin", () => {
+  it("skips a held batch and allocates from an unheld one for the same sku+bin", () => {
     const stock: StockRow[] = [
       stockRow({ rid: 1, location: "SL Mother Hub", batch: "B1", qty: 20 }),
       stockRow({ rid: 2, location: "SL Mother Hub", batch: "B2", qty: 20 }),
@@ -165,7 +194,7 @@ describe("computeChannelAllocations (pure — no Supabase, no side effects)", ()
     const heldKeys = activeHoldKeys([
       { id: 1, sku: "TEST-SKU", facility: "SL Mother Hub", bin: "A1", batch: "B1", heldAt: "2026-08-08T00:00:00.000Z", heldBy: "Admin" },
     ]);
-    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, facilityPriority, [], heldKeys);
+    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, [], heldKeys);
     const lines = result.byFacility["SL Mother Hub"];
     expect(lines.every((l) => l.batch === "B2")).toBe(true);
   });
