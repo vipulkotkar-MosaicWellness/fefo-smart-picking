@@ -128,12 +128,13 @@ interface ShortfallRow {
   sku: string;
   name: string;
   qty: number;
+  createdAt: string;
 }
 
 function shortfallRows(tasks: PickingTask[]): ShortfallRow[] {
   const rows: ShortfallRow[] = [];
   for (const t of tasks) {
-    for (const s of t.shortfall) rows.push({ taskNo: t.no, gatePassNo: t.gatePassNo, channel: t.channel, sku: s.sku, name: s.name, qty: s.qty });
+    for (const s of t.shortfall) rows.push({ taskNo: t.no, gatePassNo: t.gatePassNo, channel: t.channel, sku: s.sku, name: s.name, qty: s.qty, createdAt: t.createdAt });
   }
   return rows.sort((a, b) => b.qty - a.qty);
 }
@@ -143,11 +144,20 @@ function ShortfallAlert() {
   const rows = useMemo(() => shortfallRows(tasks), [tasks]);
   const [channelFilter, setChannelFilter] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
+  const [ageingPreset, setAgeingPreset] = useState<AgeingPreset>("last30");
+  const [ageingFrom, setAgeingFrom] = useState("");
+  const [ageingTo, setAgeingTo] = useState("");
   if (rows.length === 0) return null;
 
+  const ageingRange = ageingRangeFor(ageingPreset, new Date(), { from: ageingFrom, to: ageingTo });
   const channelOptions = [...new Set(rows.map((r) => r.channel))].sort();
   const brandOptions = [...new Set(rows.map((r) => brandOf(r.name)))].sort();
-  const filtered = rows.filter((r) => (!channelFilter || r.channel === channelFilter) && (!brandFilter || brandOf(r.name) === brandFilter));
+  const filtered = rows.filter(
+    (r) =>
+      (!channelFilter || r.channel === channelFilter) &&
+      (!brandFilter || brandOf(r.name) === brandFilter) &&
+      inAgeingRange(r.createdAt, ageingRange),
+  );
 
   return (
     <details className="mb-4 rounded-lg border border-rose-300 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/40 [&_summary::-webkit-details-marker]:hidden">
@@ -156,7 +166,7 @@ function ShortfallAlert() {
           ⚠ Critical: stock not available in any facility
         </span>
         <Tag tone="bad">
-          {rows.length} exception{rows.length === 1 ? "" : "s"}
+          {filtered.length} exception{filtered.length === 1 ? "" : "s"}
         </Tag>
       </summary>
       <div className="border-t border-rose-200 p-3 dark:border-rose-800">
@@ -181,6 +191,16 @@ function ShortfallAlert() {
               <option key={b} value={b}>{b}</option>
             ))}
           </select>
+        </div>
+        <div className="mb-2">
+          <AgeingFilter
+            preset={ageingPreset}
+            onPresetChange={setAgeingPreset}
+            from={ageingFrom}
+            to={ageingTo}
+            onFromChange={setAgeingFrom}
+            onToChange={setAgeingTo}
+          />
         </div>
         <div className="space-y-1.5">
           {filtered.length === 0 ? (
