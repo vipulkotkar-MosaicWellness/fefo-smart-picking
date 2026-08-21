@@ -451,7 +451,6 @@ export interface AppState {
   // Existing tasks already created under that channel keep their data; this
   // only stops it being offered for new demand going forward.
   deleteChannel: (name: string) => void;
-  setFacilityPriority: (p: string[]) => void;
   archiveTask: (taskNo: string) => Promise<void>;
   unarchiveTask: (taskNo: string) => Promise<void>;
   archiveAllActiveTasks: () => Promise<void>;
@@ -985,8 +984,6 @@ export const useStore = create<AppState>()(
           deletedChannels: get().deletedChannels.includes(name) ? get().deletedChannels : [...get().deletedChannels, name],
         });
       },
-      setFacilityPriority: (p) => set({ facilityPriority: p }),
-
       archiveTask: async (taskNo) => {
         const updated = get().tasks.find((t) => t.no === taskNo);
         if (!updated) return;

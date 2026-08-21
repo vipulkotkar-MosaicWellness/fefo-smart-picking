@@ -10,8 +10,6 @@ export function AdminConfig() {
     updateChannelRule,
     addChannel,
     deleteChannel,
-    facilityPriority,
-    setFacilityPriority,
     pickers,
     addPicker,
     renamePicker,
@@ -99,15 +97,6 @@ export function AdminConfig() {
     if (!window.confirm(`Delete channel "${name}"? Already-created picklists keep their history — this only stops it being offered for new demand going forward. This can't be undone from here (an Admin would need to re-add it).`)) return;
     deleteChannel(name);
     logAudit(myName, `Deleted channel ${name}`);
-  }
-
-  function move(i: number, dir: -1 | 1) {
-    const p = [...facilityPriority];
-    const j = i + dir;
-    if (j < 0 || j >= p.length) return;
-    [p[i], p[j]] = [p[j], p[i]];
-    setFacilityPriority(p);
-    logAudit(myName, `Reordered facility waterfall: ${p.join(" → ")}`);
   }
 
   return (
@@ -259,29 +248,6 @@ export function AdminConfig() {
       </Card>
 
       <div className="space-y-4">
-        <Card title="Facility display order">
-          <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
-            Display order only — allocation is pure FEFO across all facilities and no longer follows this list.
-            This just controls the order facilities are listed in on the queue and picklist screens.
-          </p>
-          <div className="space-y-1.5">
-            {facilityPriority.map((f, i) => (
-              <div
-                key={f}
-                className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-              >
-                <span>
-                  <b>{i + 1}.</b> {f}
-                </span>
-                <span className="flex gap-1">
-                  <Button variant="sm" onClick={() => move(i, -1)}>↑</Button>
-                  <Button variant="sm" onClick={() => move(i, 1)}>↓</Button>
-                </span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
         <Card title="Pickers">
           <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
             Names available in the "Assign to" dropdown, the picker workload panel, and printed picklists. Renaming
