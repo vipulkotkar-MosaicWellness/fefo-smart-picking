@@ -6,18 +6,33 @@ const knownChannels = { Blinkit: { type: "fixed" as const, val: 6 } };
 
 describe("parseDemandCsv", () => {
   it("parses valid rows, including the gate pass number", () => {
-    const { demand, badSku, badChannel, badQty, badGatePass } = parseDemandCsv("Blinkit, SKU-1, 20, GP-1001", knownSkus, knownChannels);
+    const { demand, badSku, badChannel, badQty } = parseDemandCsv("Blinkit, SKU-1, 20, GP-1001", knownSkus, knownChannels);
     expect(demand).toEqual([{ channel: "Blinkit", sku: "SKU-1", qty: 20, gatePassNo: "GP-1001" }]);
     expect(badSku).toEqual([]);
     expect(badChannel).toEqual([]);
     expect(badQty).toEqual([]);
-    expect(badGatePass).toEqual([]);
+  });
+
+  it("parses a row with no gate pass number at all — it's optional now", () => {
+    const { demand } = parseDemandCsv("Blinkit, SKU-1, 20", knownSkus, knownChannels);
+    expect(demand).toEqual([{ channel: "Blinkit", sku: "SKU-1", qty: 20, gatePassNo: undefined }]);
+  });
+
+  it("parses a row with a trailing comma but a blank gate pass the same way as no 4th column", () => {
+    const { demand } = parseDemandCsv("Blinkit, SKU-1, 20, ", knownSkus, knownChannels);
+    expect(demand).toEqual([{ channel: "Blinkit", sku: "SKU-1", qty: 20, gatePassNo: undefined }]);
   });
 
   it("merges duplicate channel+SKU+gate-pass rows by summing quantity, and reports the merge", () => {
     const { demand, duplicatesMerged } = parseDemandCsv("Blinkit, SKU-1, 20, GP-1001\nBlinkit, SKU-1, 5, GP-1001", knownSkus, knownChannels);
     expect(demand).toEqual([{ channel: "Blinkit", sku: "SKU-1", qty: 25, gatePassNo: "GP-1001" }]);
     expect(duplicatesMerged).toEqual(["Blinkit / SKU-1 / GP-1001"]);
+  });
+
+  it("merges two blank-gate-pass rows for the same channel+SKU too — they're the same pending order", () => {
+    const { demand, duplicatesMerged } = parseDemandCsv("Blinkit, SKU-1, 20\nBlinkit, SKU-1, 5", knownSkus, knownChannels);
+    expect(demand).toEqual([{ channel: "Blinkit", sku: "SKU-1", qty: 25, gatePassNo: undefined }]);
+    expect(duplicatesMerged).toEqual(["Blinkit / SKU-1 / __PENDING__"]);
   });
 
   it("keeps the same channel+SKU as two separate rows when the gate pass differs", () => {
@@ -27,6 +42,14 @@ describe("parseDemandCsv", () => {
       { channel: "Blinkit", sku: "SKU-1", qty: 5, gatePassNo: "GP-1002" },
     ]);
     expect(duplicatesMerged).toEqual([]);
+  });
+
+  it("keeps a blank-gate-pass row separate from one with an explicit gate pass, same channel+SKU", () => {
+    const { demand } = parseDemandCsv("Blinkit, SKU-1, 20, GP-1001\nBlinkit, SKU-1, 5", knownSkus, knownChannels);
+    expect(demand).toEqual([
+      { channel: "Blinkit", sku: "SKU-1", qty: 20, gatePassNo: "GP-1001" },
+      { channel: "Blinkit", sku: "SKU-1", qty: 5, gatePassNo: undefined },
+    ]);
   });
 
   it("reports an unknown channel instead of parsing the row", () => {
@@ -45,11 +68,5 @@ describe("parseDemandCsv", () => {
     const { demand, badQty } = parseDemandCsv("Blinkit, SKU-1, 0, GP-1001\nBlinkit, SKU-1, abc, GP-1001", knownSkus, knownChannels);
     expect(demand).toEqual([]);
     expect(badQty).toEqual(["Blinkit / SKU-1", "Blinkit / SKU-1"]);
-  });
-
-  it("reports a missing gate pass number instead of silently dropping the row", () => {
-    const { demand, badGatePass } = parseDemandCsv("Blinkit, SKU-1, 20, ", knownSkus, knownChannels);
-    expect(demand).toEqual([]);
-    expect(badGatePass).toEqual(["Blinkit / SKU-1"]);
   });
 });

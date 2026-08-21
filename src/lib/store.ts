@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { bucketCode, channelCode, CHANNELS, type ChannelBucket } from "./channels";
 import { allocate, cutoffMonths } from "./engine";
-import { FACILITY_PRIORITY, facilityCode } from "./facilities";
+import { FACILITY_GATE_PASS_PREFIX, FACILITY_PRIORITY, facilityCode, gatePassMatchesFacility } from "./facilities";
 import { matchesCutoff } from "./dateRanges";
 import { activeHoldKeys, dueForHoldAutoRelease, holdKey, holdsToCreate } from "./holds";
 import { fetchHolds, insertHold, releaseHoldRow } from "./holdsSupabase";
@@ -62,6 +62,40 @@ export function activeTasks(tasks: PickingTask[]): PickingTask[] {
  */
 export function activeFacilityLists(tasks: PickingTask[]): FacilityPicklist[] {
   return allFacilityLists(activeTasks(tasks)).filter((f) => !f.discarded);
+}
+
+/**
+ * The gate pass number that actually applies to this facility picklist —
+ * its own (set per-facility, the normal case going forward) falling back to
+ * the parent task's legacy single gatePassNo, for data created before gate
+ * passes moved to being per-facility. Always read gate pass through this,
+ * never `f.gatePassNo` directly, so old and new data display identically.
+ */
+export function effectiveGatePassNo(f: FacilityPicklist, task: PickingTask | undefined): string | undefined {
+  return f.gatePassNo ?? task?.gatePassNo;
+}
+
+/** A facility picklist generated but held back from Picking until a matching gate pass is supplied. */
+export function gatePassPending(f: FacilityPicklist, task: PickingTask | undefined): boolean {
+  return !effectiveGatePassNo(f, task);
+}
+
+/**
+ * Every facility picklist that's actually reached the Picking Supervisor —
+ * activeFacilityLists() minus anything still "Gate Pass Allocation Pending".
+ * A pending facility is fully allocated (stock reserved, so it still counts
+ * for reservedFor()/activeFacilityLists() itself) but deliberately invisible
+ * here until someone supplies its gate pass — see setFacilityGatePass.
+ */
+export function supervisorVisibleFacilityLists(tasks: PickingTask[]): FacilityPicklist[] {
+  const taskByNo = new Map(tasks.map((t) => [t.no, t] as const));
+  return activeFacilityLists(tasks).filter((f) => !gatePassPending(f, taskByNo.get(f.taskNo)));
+}
+
+/** Facility picklists still awaiting a gate pass number — the Demand Planner's pending queue. */
+export function pendingGatePassFacilityLists(tasks: PickingTask[]): FacilityPicklist[] {
+  const taskByNo = new Map(tasks.map((t) => [t.no, t] as const));
+  return activeFacilityLists(tasks).filter((f) => f.status !== "completed" && gatePassPending(f, taskByNo.get(f.taskNo)));
 }
 
 /**
@@ -195,26 +229,70 @@ export function resolvePickLine(line: PickLine, results: Record<number, number>,
 
 export interface ChannelAllocation {
   channel: string;
-  gatePassNo: string;
+  demand: DemandLine[]; // this group's original demand rows — generate() persists these onto the created task
   byFacility: Record<string, PickLine[]>;
   shortfall: Shortfall[];
   skipped: BinSkip[];
+  // Resolved per facility actually used — a facility key present in
+  // byFacility but absent (undefined) here is "Gate Pass Allocation
+  // Pending": generated and fully allocated, but held back from the Picking
+  // Supervisor queue until someone supplies a matching gate pass. Reconciled
+  // strictly by prefix (see gatePassMatchesFacility) — a gate pass supplied
+  // for one facility is NEVER applied to a different one, even if that's
+  // the only facility this order actually allocated to.
+  gatePassByFacility: Record<string, string | undefined>;
+  // Gate pass numbers the Planner supplied that matched no facility this
+  // order actually used — surfaced so it's obvious the number wasn't
+  // silently dropped, e.g. "you gave a Mother Hub gate pass but this order
+  // only allocated to Ambient."
+  unusedGatePasses: string[];
 }
 
-function gatePassGroupKey(d: DemandLine): string {
-  return `${d.channel}::${d.gatePassNo}`;
+const GATE_PASS_PENDING = "__PENDING__";
+
+export function gatePassGroupKey(d: DemandLine): string {
+  return `${d.channel}::${d.gatePassNo?.trim() || GATE_PASS_PENDING}`;
+}
+
+/**
+ * Matches each facility actually allocated to (a key in byFacility) against
+ * whichever of the group's originally-supplied gate pass numbers has a
+ * matching prefix — see FACILITY_GATE_PASS_PREFIX. A facility with no
+ * matching candidate is left unresolved (pending); a supplied gate pass
+ * that matches no allocated facility is reported back as unused rather than
+ * silently discarded.
+ */
+function reconcileGatePasses(
+  facilitiesUsed: string[],
+  providedGatePasses: string[],
+): { gatePassByFacility: Record<string, string | undefined>; unusedGatePasses: string[] } {
+  const gatePassByFacility: Record<string, string | undefined> = {};
+  const used = new Set<string>();
+  for (const facility of facilitiesUsed) {
+    const match = providedGatePasses.find((gp) => !used.has(gp) && gatePassMatchesFacility(gp, facility));
+    if (match) {
+      gatePassByFacility[facility] = match;
+      used.add(match);
+    } else {
+      gatePassByFacility[facility] = undefined;
+    }
+  }
+  return { gatePassByFacility, unusedGatePasses: providedGatePasses.filter((gp) => !used.has(gp)) };
 }
 
 /**
  * Pure FEFO allocation for a demand list, grouped by (channel, gate pass) —
- * a gate pass is one dispatch document and may carry several SKUs, so every
- * SKU under the same gate pass number becomes one picklist. Allocation
- * itself pools stock across every facility and fills strictly by
- * expiry — no facility-priority ordering; a SKU's demand can split across
- * facilities purely because that's where the earliest stock is. No
- * Supabase, no store mutation, no numbering. `generate()` uses this to
- * build real tasks; the Demand Planner's "review allocation" step calls the
- * same function to preview, so preview and generate can never disagree.
+ * rows sharing a supplied gate pass number group together as before; rows
+ * with none supplied, within one channel in one upload, become a single
+ * pending order (see gatePassGroupKey). Allocation itself pools stock
+ * across every facility and fills strictly by expiry — no facility-priority
+ * ordering; a SKU's demand can split across facilities purely because
+ * that's where the earliest stock is. Which facility gets which of the
+ * group's supplied gate pass numbers (if any) is resolved afterward by
+ * prefix — see reconcileGatePasses. No Supabase, no store mutation, no
+ * numbering. `generate()` uses this to build real tasks; the Demand
+ * Planner's "review allocation" step calls the same function to preview, so
+ * preview and generate can never disagree.
  */
 export function computeChannelAllocations(
   demand: DemandLine[],
@@ -235,7 +313,6 @@ export function computeChannelAllocations(
   const out: ChannelAllocation[] = [];
   for (const lines of byGroup.values()) {
     const channel = lines[0].channel;
-    const gatePassNo = lines[0].gatePassNo;
     const rule = channelRules[channel];
     if (!rule) continue;
     const byFacility: Record<string, PickLine[]> = {};
@@ -248,7 +325,9 @@ export function computeChannelAllocations(
       if (w.short > 0) shortfall.push({ sku: d.sku, name: skus[d.sku].name, qty: w.short });
       skipped.push(...w.skipped);
     }
-    out.push({ channel, gatePassNo, byFacility, shortfall, skipped });
+    const providedGatePasses = [...new Set(lines.map((d) => d.gatePassNo?.trim()).filter((gp): gp is string => !!gp))];
+    const { gatePassByFacility, unusedGatePasses } = reconcileGatePasses(Object.keys(byFacility), providedGatePasses);
+    out.push({ channel, demand: lines, byFacility, shortfall, skipped, gatePassByFacility, unusedGatePasses });
   }
   return out;
 }
@@ -259,6 +338,7 @@ function buildFacilityLists(
   byFacility: Record<string, PickLine[]>,
   priority: string[],
   suffix = "",
+  gatePassByFacility: Record<string, string | undefined> = {},
 ): FacilityPicklist[] {
   const createdAt = new Date().toISOString();
   return priority
@@ -272,6 +352,7 @@ function buildFacilityLists(
       bad: 0,
       lines: byFacility[f],
       createdAt,
+      gatePassNo: gatePassByFacility[f],
     }));
 }
 
@@ -381,6 +462,11 @@ export interface AppState {
   // hiding a whole gate pass regardless of pick status.
   discardFacilityPicklist: (taskNo: string, facilityNo: string) => Promise<void>;
   undiscardFacilityPicklist: (taskNo: string, facilityNo: string) => Promise<void>;
+  // Resolves a "Gate Pass Allocation Pending" facility picklist — validates
+  // the number's prefix against the facility (see gatePassMatchesFacility)
+  // before ever setting it. Only on success does the facility become
+  // visible to the Picking Supervisor queue for the first time.
+  setFacilityGatePass: (taskNo: string, facilityNo: string, gatePassNo: string) => Promise<{ ok: boolean; error?: string }>;
   // Admin/Super Admin only — reverses an auto-fired WMS block. Stays revoked
   // until the picklist is reassigned to a picker (see stampAssignment).
   revokeWmsBlock: (taskNo: string, facilityNo: string, revokedBy: string) => Promise<void>;
@@ -637,8 +723,10 @@ export const useStore = create<AppState>()(
       // One picking task per (channel, gate pass) present in the demand list,
       // created together so a single multi-channel CSV upload queues
       // multiple picklists at once. Internal task numbers keep working as
-      // before (needed for FEFO reservation + Alternate Picklist linking);
-      // gatePassNo is the customer-facing label captured at upload time.
+      // before (needed for FEFO reservation + Alternate Picklist linking).
+      // Gate pass is now per-facility (see FacilityPicklist.gatePassNo) —
+      // a facility with no matching one goes into "Gate Pass Allocation
+      // Pending" instead of getting a task-level label.
       generate: async (createdBy, createdByName) => {
         const { skus, demand, channelRules, facilityPriority, stock, tasks } = get();
         if (Object.keys(skus).length === 0) {
@@ -651,24 +739,21 @@ export const useStore = create<AppState>()(
         }
 
         const allocations = computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(get().holds));
-        const demandByGroup = new Map<string, DemandLine[]>();
-        for (const d of demand) {
-          const key = `${d.channel}::${d.gatePassNo}`;
-          if (!demandByGroup.has(key)) demandByGroup.set(key, []);
-          demandByGroup.get(key)!.push(d);
-        }
         const newTasks: PickingTask[] = [];
+        const allUnusedGatePasses: string[] = [];
+        let pendingCount = 0;
 
-        for (const { channel, gatePassNo, byFacility, shortfall, skipped } of allocations) {
+        for (const { channel, demand: groupDemand, byFacility, shortfall, skipped, gatePassByFacility, unusedGatePasses } of allocations) {
           const prefix = taskNumberPrefix(channel, get().channelBuckets);
           const seq = isSupabaseConfigured ? await nextSequence(prefix) : newTasks.length + 1;
           const no = `${prefix}${String(seq).padStart(3, "0")}`;
+          allUnusedGatePasses.push(...unusedGatePasses);
+          pendingCount += Object.values(gatePassByFacility).filter((gp) => !gp).length;
           newTasks.push({
             no,
-            gatePassNo,
             channel,
-            demand: JSON.parse(JSON.stringify(demandByGroup.get(`${channel}::${gatePassNo}`))),
-            facilities: buildFacilityLists(no, 1, byFacility, facilityPriority),
+            demand: JSON.parse(JSON.stringify(groupDemand)),
+            facilities: buildFacilityLists(no, 1, byFacility, facilityPriority, "", gatePassByFacility),
             shortfall,
             binSkips: skipped.length ? skipped : undefined,
             createdAt: new Date().toISOString(),
@@ -676,10 +761,12 @@ export const useStore = create<AppState>()(
           });
         }
 
+        const pendingNote = pendingCount > 0 ? ` ${pendingCount} facility picklist(s) awaiting gate pass allocation.` : "";
+        const unusedNote = allUnusedGatePasses.length > 0 ? ` Not used (no matching facility): ${[...new Set(allUnusedGatePasses)].join(", ")}.` : "";
         set({
           tasks: [...tasks, ...newTasks],
           demand: [],
-          notice: `${newTasks.length} picking task(s) created — ${newTasks.map((t) => t.no).join(", ")}.`,
+          notice: `${newTasks.length} picking task(s) created — ${newTasks.map((t) => t.no).join(", ")}.${pendingNote}${unusedNote}`,
         });
 
         if (isSupabaseConfigured) {
@@ -1013,6 +1100,23 @@ export const useStore = create<AppState>()(
         const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, discarded: false } : f)) };
         set({ tasks: mergeTask(get().tasks, updated) });
         if (isSupabaseConfigured) await updateTaskData(updated);
+      },
+
+      setFacilityGatePass: async (taskNo, facilityNo, gatePassNo) => {
+        const task = get().tasks.find((t) => t.no === taskNo);
+        if (!task) return { ok: false, error: "Picklist not found." };
+        const target = task.facilities.find((f) => f.no === facilityNo);
+        if (!target) return { ok: false, error: "Picklist not found." };
+        const trimmed = gatePassNo.trim();
+        if (!trimmed) return { ok: false, error: "Enter a gate pass number." };
+        if (!gatePassMatchesFacility(trimmed, target.facility)) {
+          const prefix = FACILITY_GATE_PASS_PREFIX[target.facility];
+          return { ok: false, error: prefix ? `Gate pass for ${target.facility} must start with ${prefix}.` : `No known gate pass prefix for ${target.facility}.` };
+        }
+        const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, gatePassNo: trimmed } : f)) };
+        set({ tasks: mergeTask(get().tasks, updated) });
+        if (isSupabaseConfigured) await updateTaskData(updated);
+        return { ok: true };
       },
 
       revokeWmsBlock: async (taskNo, facilityNo, revokedBy) => {

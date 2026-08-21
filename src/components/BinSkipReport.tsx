@@ -12,7 +12,7 @@ function toCsv(entries: BinSkipEntry[]): string {
   const header = "Date,Channel,Gate Pass,Picklist,SKU,Product,Facility,Bin,Batch,Qty Available,Threshold";
   const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
   const rows = entries.map((e) =>
-    [timeLabel(e.createdAt), e.channel, e.gatePassNo, e.taskNo, e.sku, e.name, e.facility, e.bin, e.batch, e.qtyAvailable, e.threshold]
+    [timeLabel(e.createdAt), e.channel, e.gatePassNo ?? "Pending", e.taskNo, e.sku, e.name, e.facility, e.bin, e.batch, e.qtyAvailable, e.threshold]
       .map((v) => cell(String(v)))
       .join(","),
   );
@@ -71,7 +71,7 @@ export function BinSkipReport({ tasks: tasksProp }: { tasks?: PickingTask[] } = 
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{timeLabel(e.createdAt)}</td>
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{e.channel}</td>
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                  {e.gatePassNo} <span className="text-slate-400">· {e.taskNo}</span>
+                  {e.gatePassNo ?? "Pending"} <span className="text-slate-400">· {e.taskNo}</span>
                 </td>
                 <td className="border-b border-slate-100 p-1.5 font-mono text-[10px] dark:border-slate-700/60">
                   {e.sku}

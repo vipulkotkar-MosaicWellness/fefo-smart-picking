@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../../lib/authStore";
-import { activeTasks, useStore } from "../../lib/store";
+import { activeTasks, effectiveGatePassNo, useStore } from "../../lib/store";
 import { Button, Card, Tag } from "../Ui";
 
 export function ArchivedPicklists() {
@@ -90,7 +90,8 @@ export function ArchivedPicklists() {
             {archived.map((t) => (
               <div key={t.no} className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900">
                 <span>
-                  <b>{t.gatePassNo}</b> <span className="text-slate-500 dark:text-slate-400">{t.no} · {t.channel}</span>{" "}
+                  <b>{t.facilities.map((f) => effectiveGatePassNo(f, t) ?? "pending").join(", ")}</b>{" "}
+                  <span className="text-slate-500 dark:text-slate-400">{t.no} · {t.channel}</span>{" "}
                   <Tag tone="muted">{t.facilities.length} facility picklist(s)</Tag>
                 </span>
                 <Button variant="sm" onClick={() => void restore(t.no)}>Unarchive</Button>

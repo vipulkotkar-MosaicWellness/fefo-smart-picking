@@ -31,6 +31,7 @@ const task: PickingTask = {
       status: "open",
       round: 1,
       bad: 0,
+      gatePassNo: "GPSLMH-1001", // must be set — PickerView only shows facilities past "Gate Pass Allocation Pending"
       lines: [
         { rid: 1, sku: "SKU-A", name: "Product A", facility: "SL Mother Hub", bin: "A1", batch: "BA019232", exp: [2099, 1], rem: 12, qty: 15, picker: "Ravi" },
         { rid: 2, sku: "SKU-B", name: "Product B", facility: "SL Mother Hub", bin: "A2", batch: "BA000111", exp: [2099, 2], rem: 12, qty: 6, picker: "Ravi" },

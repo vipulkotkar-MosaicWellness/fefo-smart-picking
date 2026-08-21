@@ -26,7 +26,12 @@ export interface DemandLine {
   channel: string;
   sku: string;
   qty: number;
-  gatePassNo: string; // externally supplied gate pass document number, captured at demand upload
+  // Optional — a Planner who already knows a facility's gate pass number can
+  // supply it at import, but it's no longer required. Every row left blank
+  // (within one channel, one upload) becomes one pending order; the actual
+  // gate pass per facility gets reconciled after allocation — see
+  // reconcileGatePasses in store.ts and FACILITY_GATE_PASS_PREFIX.
+  gatePassNo?: string;
 }
 
 export interface PickLine {
@@ -56,6 +61,17 @@ export interface FacilityPicklist {
   round: number; // 1 = first pass, 2 = round-2 (re-offer of not-found)
   bad: number; // qty moved to bad location / not found
   gp?: string; // gatepass number
+  // The customer-facing gate pass number FOR THIS FACILITY specifically —
+  // one gate pass per facility, never shared across facilities (see
+  // FACILITY_GATE_PASS_PREFIX). undefined means "Gate Pass Allocation
+  // Pending": this facility picklist was generated (fully allocated, bins
+  // and batches picked out) but is deliberately held back from the Picking
+  // Supervisor queue until someone supplies a matching gate pass number —
+  // see gatePassPending() in store.ts, which is what actually gates
+  // visibility, not a separate status flag. Falls back to the parent task's
+  // legacy single gatePassNo for data created before this field existed —
+  // see effectiveGatePassNo() in store.ts, used everywhere this is read.
+  gatePassNo?: string;
   pickedTotal?: number;
   lines: PickLine[];
   createdAt?: string; // when this specific round was generated — undefined on data from before this field existed, falls back to the parent task's createdAt
@@ -101,7 +117,12 @@ export interface Shortfall {
 /** A demand upload from the planner — the top-level unit the warehouse acts on. */
 export interface PickingTask {
   no: string; // PT-260722-001 — internal ID, kept for FEFO/reservation bookkeeping
-  gatePassNo: string; // externally supplied gate pass number — the customer-facing label
+  // Legacy field: before gate passes moved to being per-facility (see
+  // FacilityPicklist.gatePassNo), one task carried a single gate pass number
+  // shared by every facility it drew from. Still set for backward-compat
+  // display on tasks created before this change — new tasks leave it
+  // undefined and rely entirely on each facility's own gatePassNo instead.
+  gatePassNo?: string;
   channel: string;
   demand: DemandLine[];
   facilities: FacilityPicklist[]; // in priority order, only those with lines

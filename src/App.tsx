@@ -9,6 +9,7 @@ import { AppShell } from "./components/AppShell";
 import { MosaicLogo } from "./components/brand/MosaicLogo";
 import { AuthGate, PendingApproval, SetNewPassword } from "./components/AuthGate";
 import { DemandPanel } from "./components/DemandPanel";
+import { GatePassPending } from "./components/GatePassPending";
 import { InventoryPanel } from "./components/InventoryPanel";
 import { PerformancePanel } from "./components/PerformancePanel";
 import { PickerView } from "./components/PickerView";
@@ -19,7 +20,7 @@ import { Tag } from "./components/Ui";
 import { useAuth } from "./lib/authStore";
 import { getNavigation, type ViewId } from "./lib/navigation";
 import { isSupabaseConfigured } from "./lib/supabaseClient";
-import { activeFacilityLists, useStore } from "./lib/store";
+import { activeFacilityLists, pendingGatePassFacilityLists, supervisorVisibleFacilityLists, useStore } from "./lib/store";
 import { syncSourceLabel } from "./lib/syncSource";
 
 function initialsOf(name: string): string {
@@ -151,9 +152,10 @@ function Workspace() {
   const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
   const isAdminTier = role === "admin" || role === "super_admin";
 
-  const unassignedCount = activeFacilityLists(tasks).filter(
+  const unassignedCount = supervisorVisibleFacilityLists(tasks).filter(
     (f) => f.status !== "completed" && !f.lines.some((l) => l.picker),
   ).length;
+  const pendingGatePassCount = pendingGatePassFacilityLists(tasks).length;
   const activeHoldsCount = useStore((s) => s.holds).filter((h) => !h.releasedAt).length;
 
   const navItems = useMemo(() => getNavigation(role), [role]);
@@ -215,12 +217,13 @@ function Workspace() {
       onNavigate={setActiveView}
       breadcrumb={VIEW_LABEL[activeView]}
       headerActions={<HeaderActions role={role} displayName={profile!.display_name} onSignOut={() => void signOut()} />}
-      badges={{ supervisor: unassignedCount, holds: activeHoldsCount }}
+      badges={{ supervisor: unassignedCount, holds: activeHoldsCount, demand: pendingGatePassCount }}
     >
       <OperationsToolbar />
       {activeView === "demand" && (
         <div className="space-y-4">
           <DemandPanel />
+          <GatePassPending />
           <PerformancePanel />
         </div>
       )}

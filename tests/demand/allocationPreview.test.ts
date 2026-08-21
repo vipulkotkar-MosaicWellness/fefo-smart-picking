@@ -28,7 +28,7 @@ function stockRow(overrides: Partial<StockRow>): StockRow {
 }
 
 function demandLine(overrides: Partial<DemandLine> = {}): DemandLine {
-  return { channel: "TestChannel", sku: "TEST-SKU", qty: 20, gatePassNo: "GP-1001", ...overrides };
+  return { channel: "TestChannel", sku: "TEST-SKU", qty: 20, gatePassNo: "GPSLMH-1001", ...overrides };
 }
 
 describe("computeChannelAllocations — channel minBinQty floor", () => {
@@ -60,7 +60,7 @@ describe("computeChannelAllocations (pure — no Supabase, no side effects)", ()
     const demand: DemandLine[] = [demandLine({ qty: 20 })];
     const [result] = computeChannelAllocations(demand, channelRules, skus, stock, []);
     expect(result.channel).toBe("TestChannel");
-    expect(result.gatePassNo).toBe("GP-1001");
+    expect(result.gatePassByFacility["SL Mother Hub"]).toBe("GPSLMH-1001");
     expect(Object.keys(result.byFacility)).toEqual(["SL Mother Hub"]);
     expect(result.shortfall).toEqual([]);
   });
@@ -158,16 +158,50 @@ describe("computeChannelAllocations (pure — no Supabase, no side effects)", ()
   it("groups by (channel, gate pass) — same channel, different gate passes, become two separate picklists", () => {
     const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Mother Hub", qty: 100 })];
     const demand: DemandLine[] = [
-      demandLine({ sku: "TEST-SKU", qty: 5, gatePassNo: "GP-1001" }),
-      demandLine({ sku: "TEST-SKU", qty: 7, gatePassNo: "GP-1002" }),
+      demandLine({ sku: "TEST-SKU", qty: 5, gatePassNo: "GPSLMH-1001" }),
+      demandLine({ sku: "TEST-SKU", qty: 7, gatePassNo: "GPSLMH-1002" }),
     ];
     const result = computeChannelAllocations(demand, channelRules, skus, stock, []);
     expect(result).toHaveLength(2);
-    expect(result.map((r) => r.gatePassNo).sort()).toEqual(["GP-1001", "GP-1002"]);
-    const gp1 = result.find((r) => r.gatePassNo === "GP-1001")!;
-    const gp2 = result.find((r) => r.gatePassNo === "GP-1002")!;
-    expect(gp1.byFacility["SL Mother Hub"].reduce((s, l) => s + l.qty, 0)).toBe(5);
-    expect(gp2.byFacility["SL Mother Hub"].reduce((s, l) => s + l.qty, 0)).toBe(7);
+    const byGp = (gp: string) => result.find((r) => r.gatePassByFacility["SL Mother Hub"] === gp)!;
+    expect(byGp("GPSLMH-1001").byFacility["SL Mother Hub"].reduce((s, l) => s + l.qty, 0)).toBe(5);
+    expect(byGp("GPSLMH-1002").byFacility["SL Mother Hub"].reduce((s, l) => s + l.qty, 0)).toBe(7);
+  });
+
+  it("groups blank-gate-pass rows for the same channel in one upload into a single pending order", () => {
+    const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Mother Hub", qty: 100 })];
+    const demand: DemandLine[] = [
+      demandLine({ sku: "TEST-SKU", qty: 5, gatePassNo: undefined }),
+      demandLine({ sku: "TEST-SKU", qty: 7, gatePassNo: undefined }),
+    ];
+    const result = computeChannelAllocations(demand, channelRules, skus, stock, []);
+    expect(result).toHaveLength(1);
+    expect(result[0].byFacility["SL Mother Hub"].reduce((s, l) => s + l.qty, 0)).toBe(12);
+    expect(result[0].gatePassByFacility["SL Mother Hub"]).toBeUndefined();
+  });
+
+  it("resolves each facility's gate pass strictly by prefix — a Mother Hub number never applies to Ambient", () => {
+    const stock: StockRow[] = [
+      stockRow({ rid: 1, location: "SL Mother Hub", qty: 20 }),
+      stockRow({ rid: 2, location: "SL Ambient", qty: 20 }),
+    ];
+    const demand: DemandLine[] = [demandLine({ qty: 40, gatePassNo: "GPSLMH-9999" })];
+    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, []);
+    expect(Object.keys(result.byFacility).sort()).toEqual(["SL Ambient", "SL Mother Hub"]);
+    expect(result.gatePassByFacility["SL Mother Hub"]).toBe("GPSLMH-9999");
+    expect(result.gatePassByFacility["SL Ambient"]).toBeUndefined();
+    expect(result.unusedGatePasses).toEqual([]);
+  });
+
+  it("reports a supplied gate pass as unused when it matches no facility this order actually allocated to", () => {
+    // Only Ambient stock exists, but the Planner supplied a Mother Hub gate
+    // pass — it must not be silently applied to Ambient's picklist.
+    const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Ambient", qty: 20 })];
+    const demand: DemandLine[] = [demandLine({ qty: 10, gatePassNo: "GPSLMH-1234" })];
+    const [result] = computeChannelAllocations(demand, channelRules, skus, stock, []);
+    expect(Object.keys(result.byFacility)).toEqual(["SL Ambient"]);
+    expect(result.gatePassByFacility["SL Ambient"]).toBeUndefined();
+    expect(result.unusedGatePasses).toEqual(["GPSLMH-1234"]);
   });
 
   it("merges multiple SKUs under the same gate pass into one picklist", () => {

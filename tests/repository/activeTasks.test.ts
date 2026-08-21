@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { holdKey } from "../../src/lib/holds";
-import { activeFacilityLists, activeTasks, dueForWmsBlock, reservedFor, stampAssignment, WMS_BLOCK_DELAY_MS } from "../../src/lib/store";
-import type { PickingTask } from "../../src/lib/types";
+import {
+  activeFacilityLists,
+  activeTasks,
+  dueForWmsBlock,
+  effectiveGatePassNo,
+  gatePassGroupKey,
+  gatePassPending,
+  pendingGatePassFacilityLists,
+  reservedFor,
+  stampAssignment,
+  supervisorVisibleFacilityLists,
+  WMS_BLOCK_DELAY_MS,
+} from "../../src/lib/store";
+import type { DemandLine, FacilityPicklist, PickingTask } from "../../src/lib/types";
 
 function task(overrides: Partial<PickingTask> = {}): PickingTask {
   return {
@@ -209,5 +221,92 @@ describe("activeFacilityLists — discarding is a separate concept from archivin
       facilities: [{ no: "TASK-1-MH", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [] }],
     });
     expect(activeFacilityLists([task1]).map((f) => f.no)).toEqual(["TASK-1-MH"]);
+  });
+});
+
+function facility(overrides: Partial<FacilityPicklist> = {}): FacilityPicklist {
+  return { no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [], ...overrides };
+}
+
+describe("effectiveGatePassNo / gatePassPending", () => {
+  it("prefers the facility's own gate pass over the parent task's", () => {
+    const t = task({ gatePassNo: "GP-TASK-LEVEL" });
+    const f = facility({ gatePassNo: "GPSLMH-OWN" });
+    expect(effectiveGatePassNo(f, t)).toBe("GPSLMH-OWN");
+    expect(gatePassPending(f, t)).toBe(false);
+  });
+
+  it("falls back to the parent task's legacy gate pass when the facility has none of its own", () => {
+    const t = task({ gatePassNo: "GP-LEGACY" });
+    const f = facility({ gatePassNo: undefined });
+    expect(effectiveGatePassNo(f, t)).toBe("GP-LEGACY");
+    expect(gatePassPending(f, t)).toBe(false);
+  });
+
+  it("is pending when neither the facility nor the parent task has a gate pass", () => {
+    const t = task({ gatePassNo: undefined });
+    const f = facility({ gatePassNo: undefined });
+    expect(effectiveGatePassNo(f, t)).toBeUndefined();
+    expect(gatePassPending(f, t)).toBe(true);
+  });
+
+  it("is pending when there's no parent task at all", () => {
+    const f = facility({ gatePassNo: undefined });
+    expect(gatePassPending(f, undefined)).toBe(true);
+  });
+});
+
+describe("supervisorVisibleFacilityLists / pendingGatePassFacilityLists", () => {
+  it("hides a facility with no resolved gate pass from the Supervisor view", () => {
+    const t = task({ gatePassNo: undefined, facilities: [facility({ no: "F-1", gatePassNo: undefined })] });
+    expect(supervisorVisibleFacilityLists([t])).toEqual([]);
+    expect(pendingGatePassFacilityLists([t]).map((f) => f.no)).toEqual(["F-1"]);
+  });
+
+  it("shows a facility with a resolved gate pass in the Supervisor view, and excludes it from pending", () => {
+    const t = task({ gatePassNo: undefined, facilities: [facility({ no: "F-1", gatePassNo: "GPSLMH-1001" })] });
+    expect(supervisorVisibleFacilityLists([t]).map((f) => f.no)).toEqual(["F-1"]);
+    expect(pendingGatePassFacilityLists([t])).toEqual([]);
+  });
+
+  it("does not list a completed facility as pending, even with no gate pass — nothing left to release to Supervisor", () => {
+    const t = task({ gatePassNo: undefined, facilities: [facility({ no: "F-1", gatePassNo: undefined, status: "completed" })] });
+    expect(pendingGatePassFacilityLists([t])).toEqual([]);
+  });
+
+  it("a task-level legacy gate pass makes every one of its facilities visible without needing their own", () => {
+    const t = task({
+      gatePassNo: "GP-LEGACY",
+      facilities: [facility({ no: "F-1", facility: "SL Mother Hub" }), facility({ no: "F-2", facility: "SL Ambient" })],
+    });
+    expect(supervisorVisibleFacilityLists([t]).map((f) => f.no).sort()).toEqual(["F-1", "F-2"]);
+  });
+});
+
+describe("gatePassGroupKey", () => {
+  function demandLine(overrides: Partial<DemandLine> = {}): DemandLine {
+    return { channel: "Blinkit", sku: "SKU-1", qty: 10, ...overrides };
+  }
+
+  it("groups by channel + gate pass when one is supplied", () => {
+    expect(gatePassGroupKey(demandLine({ gatePassNo: "GP-1001" }))).toBe(gatePassGroupKey(demandLine({ gatePassNo: "GP-1001" })));
+  });
+
+  it("gives every blank-gate-pass row for the same channel the same pending group key", () => {
+    const a = gatePassGroupKey(demandLine({ gatePassNo: undefined }));
+    const b = gatePassGroupKey(demandLine({ gatePassNo: undefined, sku: "SKU-2" }));
+    expect(a).toBe(b);
+  });
+
+  it("keeps a blank-gate-pass row's group distinct from a supplied-gate-pass row's, same channel", () => {
+    const pending = gatePassGroupKey(demandLine({ gatePassNo: undefined }));
+    const supplied = gatePassGroupKey(demandLine({ gatePassNo: "GP-1001" }));
+    expect(pending).not.toBe(supplied);
+  });
+
+  it("keeps two different channels' pending groups separate", () => {
+    const blinkit = gatePassGroupKey(demandLine({ channel: "Blinkit", gatePassNo: undefined }));
+    const amazon = gatePassGroupKey(demandLine({ channel: "Amazon", gatePassNo: undefined }));
+    expect(blinkit).not.toBe(amazon);
   });
 });

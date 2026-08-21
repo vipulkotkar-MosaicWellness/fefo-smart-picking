@@ -1,5 +1,5 @@
 import { useAuth } from "../../lib/authStore";
-import { useStore } from "../../lib/store";
+import { effectiveGatePassNo, useStore } from "../../lib/store";
 import { Button, Card, Tag } from "../Ui";
 
 /**
@@ -16,9 +16,9 @@ export function DiscardedPicklists() {
 
   const discarded = tasks.flatMap((t) => t.facilities.filter((f) => f.discarded).map((f) => ({ task: t, f })));
 
-  async function restore(taskNo: string, facilityNo: string, gatePassNo: string, facility: string) {
+  async function restore(taskNo: string, facilityNo: string, gatePassNo: string | undefined, facility: string) {
     await undiscardFacilityPicklist(taskNo, facilityNo);
-    logAudit(myName, `Restored discarded picklist ${facilityNo} (${gatePassNo}, ${facility})`);
+    logAudit(myName, `Restored discarded picklist ${facilityNo} (${gatePassNo ?? "gate pass pending"}, ${facility})`);
   }
 
   return (
@@ -35,10 +35,11 @@ export function DiscardedPicklists() {
           {discarded.map(({ task, f }) => (
             <div key={f.no} className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900">
               <span>
-                <b>{task.gatePassNo}</b> <span className="text-slate-500 dark:text-slate-400">{f.no} · {f.facility}</span>{" "}
+                <b>{effectiveGatePassNo(f, task) ?? "Gate pass pending"}</b>{" "}
+                <span className="text-slate-500 dark:text-slate-400">{f.no} · {f.facility}</span>{" "}
                 <Tag tone="muted">Round {f.round}</Tag>
               </span>
-              <Button variant="sm" onClick={() => void restore(task.no, f.no, task.gatePassNo, f.facility)}>
+              <Button variant="sm" onClick={() => void restore(task.no, f.no, effectiveGatePassNo(f, task), f.facility)}>
                 Undo discard
               </Button>
             </div>

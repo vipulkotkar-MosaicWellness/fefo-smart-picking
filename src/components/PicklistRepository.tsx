@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ageDays } from "../lib/ageing";
 import { downloadCsv } from "../lib/format";
 import { groupPicklistFamilies, type PicklistFamily } from "../lib/picklistFamilies";
-import { activeTasks, useStore } from "../lib/store";
+import { activeTasks, effectiveGatePassNo, useStore } from "../lib/store";
 import type { PickingTask } from "../lib/types";
 import { gatePassBulkCsv, uniwareCsv } from "../lib/uniwareExport";
 import { Button, Card, Tag } from "./Ui";
@@ -25,7 +25,7 @@ function FamilyRow({
   onSelectRound,
 }: {
   family: PicklistFamily;
-  gatePassNo: string;
+  gatePassNo?: string;
   createdByName?: string;
   selectedRound: number;
   onSelectRound: (round: number) => void;
@@ -39,7 +39,7 @@ function FamilyRow({
     <div className="rounded-lg border border-slate-200 dark:border-slate-700">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
         <div>
-          <span className="text-sm font-semibold">{gatePassNo}</span>
+          <span className="text-sm font-semibold">{gatePassNo ?? <span className="text-amber-700 dark:text-amber-400">Gate pass pending</span>}</span>
           <span className="ml-2 text-[11px] text-slate-500 dark:text-slate-400">{family.taskNo} · {active.facility}</span>
         </div>
         {hasAlternates && (
@@ -84,7 +84,10 @@ function FamilyRow({
               {active.bad > 0 && <Tag tone="bad">{active.bad} not found</Tag>}
             </td>
             <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
-              <Button variant="sm" onClick={() => downloadCsv(uniwareCsv(active.lines, gatePassNo), `${gatePassNo}-${roundLabel(active.round).replace(/\s+/g, "_")}.csv`)}>
+              <Button
+                variant="sm"
+                onClick={() => downloadCsv(uniwareCsv(active.lines, gatePassNo || active.no), `${gatePassNo || active.no}-${roundLabel(active.round).replace(/\s+/g, "_")}.csv`)}
+              >
                 CSV
               </Button>
             </td>
@@ -127,7 +130,8 @@ export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[]
               gatePassBulkCsv(
                 families.flatMap((fam) => {
                   const r = fam.rounds.find((x) => x.round === (selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round)) ?? fam.rounds[fam.rounds.length - 1];
-                  return [{ gatePassNo: taskByNo.get(fam.taskNo)?.gatePassNo ?? fam.taskNo, lines: r.lines }];
+                  const gp = effectiveGatePassNo(fam.rounds[0], taskByNo.get(fam.taskNo)) ?? fam.taskNo;
+                  return [{ gatePassNo: gp, lines: r.lines }];
                 }),
               ),
               `gate_pass_bulk.csv`,
@@ -145,7 +149,7 @@ export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[]
             <FamilyRow
               key={fam.key}
               family={fam}
-              gatePassNo={t?.gatePassNo ?? fam.taskNo}
+              gatePassNo={effectiveGatePassNo(fam.rounds[0], t)}
               createdByName={t?.createdByName}
               selectedRound={selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round}
               onSelectRound={(round) => setSelectedRounds((prev) => ({ ...prev, [fam.key]: round }))}

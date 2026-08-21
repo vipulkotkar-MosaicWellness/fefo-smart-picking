@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ageingRangeFor, inAgeingRange, type AgeingPreset } from "../lib/ageing";
 import { primaryFacilityNo } from "../lib/format";
-import { activeFacilityLists, activeTasks, useStore } from "../lib/store";
+import { activeTasks, effectiveGatePassNo, supervisorVisibleFacilityLists, useStore } from "../lib/store";
 import { bucketSummary, pickerWorkload, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
 import type { FacilityPicklist } from "../lib/types";
 import { AgeingFilter } from "./AgeingFilter";
@@ -20,7 +20,7 @@ function channelOf(f: FacilityPicklist, tasks: ReturnType<typeof useStore.getSta
 }
 
 function gatePassOf(f: FacilityPicklist, tasks: ReturnType<typeof useStore.getState>["tasks"]): string | undefined {
-  return tasks.find((t) => t.no === f.taskNo)?.gatePassNo;
+  return effectiveGatePassNo(f, tasks.find((t) => t.no === f.taskNo));
 }
 
 function createdAtOf(f: FacilityPicklist, tasks: ReturnType<typeof useStore.getState>["tasks"]): string {
@@ -148,7 +148,7 @@ export function SupervisorQueue() {
   const tasks = activeTasks(useStore((s) => s.tasks));
   const facilityPriority = useStore((s) => s.facilityPriority);
   const pickers = useStore((s) => s.pickers);
-  const all = activeFacilityLists(tasks); // already in task-creation order
+  const all = supervisorVisibleFacilityLists(tasks); // already in task-creation order; excludes anything still Gate Pass Allocation Pending
 
   const [facilityFilter, setFacilityFilter] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
