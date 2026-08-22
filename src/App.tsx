@@ -147,7 +147,18 @@ function OperationsToolbar() {
 }
 
 function Workspace() {
-  const { loadFromSupabase, loadTasks, startTasksRealtime, loadHolds, tasks, flushOfflineQueue, checkWmsAutoBlock, checkHoldAutoRelease } = useStore();
+  const {
+    loadFromSupabase,
+    loadTasks,
+    startTasksRealtime,
+    loadHolds,
+    loadPickers,
+    startPickersRealtime,
+    tasks,
+    flushOfflineQueue,
+    checkWmsAutoBlock,
+    checkHoldAutoRelease,
+  } = useStore();
   const { profile, signOut } = useAuth();
   const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
   const isAdminTier = role === "admin" || role === "super_admin";
@@ -169,8 +180,10 @@ function Workspace() {
     void loadFromSupabase();
     void loadTasks();
     void loadHolds();
+    void loadPickers();
     void flushOfflineQueue();
     const stop = startTasksRealtime();
+    const stopPickers = startPickersRealtime();
     const onOnline = () => void flushOfflineQueue();
     window.addEventListener("online", onOnline);
     // Sweeps for picklists whose 15-minute WMS-block clock has run out.
@@ -183,6 +196,7 @@ function Workspace() {
     const holdTimer = window.setInterval(() => void checkHoldAutoRelease(), 60_000);
     return () => {
       stop();
+      stopPickers();
       window.removeEventListener("online", onOnline);
       window.clearInterval(wmsTimer);
       window.clearInterval(holdTimer);

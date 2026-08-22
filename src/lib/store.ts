@@ -13,6 +13,7 @@ import { isSupabaseConfigured } from "./supabaseClient";
 import type { ShelfwiseStockRow } from "./shelfwiseCsv";
 import { fetchStock, fetchSyncState, replaceStock } from "./supabaseStock";
 import type { SyncSource } from "./syncSource";
+import { deletePickerRow, fetchPickers, insertPicker, renamePickerRow, subscribePickers } from "./pickersSupabase";
 import { fetchAllTasks, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
   BinSkip,
@@ -430,9 +431,13 @@ export interface AppState {
   uploadStockFallback: (rows: ShelfwiseStockRow[], uploadedBy: string) => Promise<boolean>;
   loadTasks: () => Promise<void>;
   startTasksRealtime: () => () => void;
-  addPicker: (name: string) => void;
+  // Pickers are shared across every logged-in user (see pickersSupabase.ts) —
+  // NOT the same kind of local-only setting as channelRules/facilityPriority.
+  loadPickers: () => Promise<void>;
+  startPickersRealtime: () => () => void;
+  addPicker: (name: string) => Promise<void>;
   renamePicker: (oldName: string, newName: string) => Promise<void>;
-  removePicker: (name: string) => void;
+  removePicker: (name: string) => Promise<void>;
   loadHolds: () => Promise<void>;
   placeHold: (h: { sku: string; facility: string; bin: string; batch: string; qty: number; heldBy: string; reason?: string; sourceTaskNo?: string }) => Promise<void>;
   releaseHold: (id: number, releasedBy: string) => Promise<void>;
@@ -536,19 +541,48 @@ export const useStore = create<AppState>()(
             : [...get().visibleFacilities, f],
         }),
 
-      addPicker: (name) => {
+      loadPickers: async () => {
+        if (!isSupabaseConfigured) return;
+        try {
+          const pickers = await fetchPickers();
+          set({ pickers });
+        } catch {
+          // Transient failure — keep whatever's already in state.
+        }
+      },
+
+      startPickersRealtime: () => {
+        if (!isSupabaseConfigured) return () => {};
+        return subscribePickers(() => void get().loadPickers());
+      },
+
+      addPicker: async (name) => {
         const trimmed = name.trim();
         if (!trimmed || get().pickers.includes(trimmed)) return;
         set({ pickers: [...get().pickers, trimmed] });
+        if (isSupabaseConfigured) {
+          try {
+            await insertPicker(trimmed);
+          } catch (e) {
+            set({ notice: "Could not save picker " + trimmed + ": " + (e as Error).message });
+          }
+        }
       },
 
-      // Renames the picker everywhere: the managed list, and every not-yet-picked
-      // line already assigned to their old name (so in-flight assignments and the
-      // Picker workload panel keep matching correctly instead of orphaning).
+      // Renames the picker everywhere: the shared managed list, and every
+      // not-yet-picked line already assigned to their old name (so in-flight
+      // assignments keep matching correctly instead of orphaning).
       renamePicker: async (oldName, newName) => {
         const trimmed = newName.trim();
         if (!trimmed || trimmed === oldName) return;
         set({ pickers: get().pickers.map((p) => (p === oldName ? trimmed : p)) });
+        if (isSupabaseConfigured) {
+          try {
+            await renamePickerRow(oldName, trimmed);
+          } catch (e) {
+            set({ notice: "Could not rename picker " + oldName + ": " + (e as Error).message });
+          }
+        }
 
         const affected = get().tasks.filter((t) => t.facilities.some((f) => f.lines.some((l) => l.picker === oldName)));
         let tasks = get().tasks;
@@ -574,7 +608,16 @@ export const useStore = create<AppState>()(
         }
       },
 
-      removePicker: (name) => set({ pickers: get().pickers.filter((p) => p !== name) }),
+      removePicker: async (name) => {
+        set({ pickers: get().pickers.filter((p) => p !== name) });
+        if (isSupabaseConfigured) {
+          try {
+            await deletePickerRow(name);
+          } catch (e) {
+            set({ notice: "Could not remove picker " + name + ": " + (e as Error).message });
+          }
+        }
+      },
 
       loadHolds: async () => {
         if (!isSupabaseConfigured) return;
@@ -1202,9 +1245,10 @@ export const useStore = create<AppState>()(
         }
         return merged;
       },
-      // Stock and tasks are not persisted locally when Supabase is configured —
-      // they come live from the shared database instead. Local mode (no
-      // Supabase keys) keeps everything in browser storage as before.
+      // Stock, tasks, and pickers are not persisted locally when Supabase is
+      // configured — they come live from the shared database instead (see
+      // loadPickers/startPickersRealtime). Local mode (no Supabase keys)
+      // keeps everything in browser storage as before.
       partialize: (s) => ({
         tasks: isSupabaseConfigured ? [] : s.tasks,
         gpSeq: s.gpSeq,
@@ -1212,7 +1256,7 @@ export const useStore = create<AppState>()(
         channelBuckets: s.channelBuckets,
         deletedChannels: s.deletedChannels,
         facilityPriority: s.facilityPriority,
-        pickers: s.pickers,
+        pickers: isSupabaseConfigured ? [] : s.pickers,
         visibleFacilities: s.visibleFacilities,
         savedInventoryViews: s.savedInventoryViews,
         partnerActive: s.partnerActive,
