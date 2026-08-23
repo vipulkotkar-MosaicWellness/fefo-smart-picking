@@ -38,3 +38,23 @@ Once `stock` is populated, add the **anon key** to the app and it reads live inv
 - Vercel: Project → Settings → Environment Variables → add the same two.
 
 Tell me when Step 1–3 are done (and share the **anon** key — it's public/safe), and I'll wire the app to read from Supabase.
+
+---
+
+## Step 5 — Gate pass adherence check (daily, unattended)
+
+Compares every gate pass closed yesterday at SL Mother Hub / SL Ambient / SL RX against what
+this app instructed it to pick — no file upload, runs entirely on its own schedule.
+
+1. Run [`../supabase/add_gatepass_adherence_table.sql`](../supabase/add_gatepass_adherence_table.sql)
+   in the Supabase SQL Editor (same project as above).
+2. In the **same** Apps Script project from Step 3 — **File → New → Script file**, name it
+   `GatepassAdherenceCheck`, paste in [`GatepassAdherenceCheck.gs`](GatepassAdherenceCheck.gs).
+   It reuses the `SUPABASE_URL` / `SERVICE_KEY` script properties already set — nothing new to add there.
+3. Select function **`checkGatepassAdherence`** → **Run**. Approve the Gmail prompt if asked again.
+   Check **Executions** — it should log something like `Scored N gate pass(es) for 2026-08-22`.
+4. **Triggers** → **Add Trigger**:
+   - Function: `checkGatepassAdherence` · Event source: **Time-driven** · Type: **Day timer** ·
+     time of day **9am to 10am** (after your 9 AM "Gatepass All Facility" email lands).
+
+That's it — results show up under **Reports → Gate Pass Adherence** in the app the next time it loads.
