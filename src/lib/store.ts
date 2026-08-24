@@ -466,7 +466,7 @@ export interface AppState {
   // A separate feature from archive: cancels one specific facility picklist
   // (only while still open) and frees its reserved stock, rather than
   // hiding a whole gate pass regardless of pick status.
-  discardFacilityPicklist: (taskNo: string, facilityNo: string) => Promise<void>;
+  discardFacilityPicklist: (taskNo: string, facilityNo: string, revokedBy?: string) => Promise<void>;
   undiscardFacilityPicklist: (taskNo: string, facilityNo: string) => Promise<void>;
   // Resolves a "Gate Pass Allocation Pending" facility picklist — validates
   // the number's prefix against the facility (see gatePassMatchesFacility)
@@ -1124,7 +1124,7 @@ export const useStore = create<AppState>()(
       // completed one, that's the whole point of "pending for picking
       // only." Frees the stock it was reserving, same as archiving does,
       // but leaves the rest of the gate pass (other facilities) untouched.
-      discardFacilityPicklist: async (taskNo, facilityNo) => {
+      discardFacilityPicklist: async (taskNo, facilityNo, revokedBy) => {
         const task = get().tasks.find((t) => t.no === taskNo);
         if (!task) return;
         const target = task.facilities.find((f) => f.no === facilityNo);
@@ -1133,15 +1133,35 @@ export const useStore = create<AppState>()(
           set({ notice: "✗ Can't discard a completed picklist." });
           return;
         }
-        // WMS already owns this reservation externally — discarding would
-        // free it in our own system while WMS still holds it, a real
+        // A picklist still awaiting its gate pass was never released to the
+        // Supervisor/WMS, so any wmsBlocked flag on it is spurious (an
+        // artifact of the 15-minute auto-block sweep firing before gate pass
+        // pending was excluded — see dueForWmsBlock) rather than a real
+        // external reservation. Safe to clear it in the same transaction as
+        // the discard, in one write, instead of forcing a separate revoke step.
+        const spuriousBlock = target.wmsBlocked && gatePassPending(target, task);
+        // Otherwise WMS already owns this reservation externally — discarding
+        // would free it in our own system while WMS still holds it, a real
         // inventory mismatch between the two. Admin must revoke the WMS
         // block first, which is its own explicit, audited action.
-        if (target.wmsBlocked) {
+        if (target.wmsBlocked && !spuriousBlock) {
           set({ notice: "✗ Can't discard — inventory is blocked in WMS. Revoke the WMS block first." });
           return;
         }
-        const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, discarded: true } : f)) };
+        const updated = {
+          ...task,
+          facilities: task.facilities.map((f) =>
+            f.no === facilityNo
+              ? {
+                  ...f,
+                  discarded: true,
+                  ...(spuriousBlock
+                    ? { wmsBlocked: false, wmsRevokedAt: new Date().toISOString(), wmsRevokedBy: revokedBy ?? "System (auto-revoked — never released to WMS)" }
+                    : {}),
+                }
+              : f,
+          ),
+        };
         set({ tasks: mergeTask(get().tasks, updated) });
         if (isSupabaseConfigured) await updateTaskData(updated);
         if (!get().anyOpen()) void get().loadFromSupabase();

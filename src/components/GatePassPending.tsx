@@ -17,11 +17,8 @@ export function GatePassPending() {
   const tasks = useStore((s) => s.tasks);
   const setFacilityGatePass = useStore((s) => s.setFacilityGatePass);
   const discardFacilityPicklist = useStore((s) => s.discardFacilityPicklist);
-  const revokeWmsBlock = useStore((s) => s.revokeWmsBlock);
   const logAudit = useStore((s) => s.logAudit);
   const myName = useAuth((s) => s.profile?.display_name ?? "Planner");
-  const role = useAuth((s) => s.profile?.role);
-  const canRevoke = role === "admin" || role === "super_admin";
 
   const pending = pendingGatePassFacilityLists(tasks);
   const [inputs, setInputs] = useState<Record<string, string>>({});
@@ -54,15 +51,12 @@ export function GatePassPending() {
   }
 
   async function discard(f: FacilityPicklist) {
-    if (!window.confirm(`Discard ${f.no} at ${f.facility}? Its reserved stock is freed, nothing is deleted, and it can be restored from Admin → Discarded picklists.`)) return;
-    await discardFacilityPicklist(f.taskNo, f.no);
-    logAudit(myName, `Discarded picklist ${f.no} at ${f.facility} while awaiting gate pass`);
-  }
-
-  async function revokeWms(f: FacilityPicklist) {
-    if (!window.confirm(`Revoke the WMS block on ${f.no} at ${f.facility}? It was never released to a Supervisor, so nothing in WMS actually depends on this block.`)) return;
-    await revokeWmsBlock(f.taskNo, f.no, myName);
-    logAudit(myName, `Revoked WMS block on picklist ${f.no} at ${f.facility} while awaiting gate pass`);
+    const blocked = f.wmsBlocked
+      ? " It's showing as WMS-blocked, but was never released to a Supervisor, so that block is auto-revoked as part of this same discard."
+      : "";
+    if (!window.confirm(`Discard ${f.no} at ${f.facility}? Its reserved stock is freed, nothing is deleted, and it can be restored from Admin → Discarded picklists.${blocked}`)) return;
+    await discardFacilityPicklist(f.taskNo, f.no, myName);
+    logAudit(myName, `Discarded picklist ${f.no} at ${f.facility} while awaiting gate pass${f.wmsBlocked ? " (auto-revoked WMS block)" : ""}`);
   }
 
   if (pending.length === 0) {
@@ -109,22 +103,10 @@ export function GatePassPending() {
                 <Button variant="sm" onClick={() => void submit(f)} disabled={busyNo === f.no}>
                   {busyNo === f.no ? "Saving…" : "Validate & Release"}
                 </Button>
-                {f.wmsBlocked && canRevoke && (
-                  <Button variant="sm" onClick={() => void revokeWms(f)}>
-                    Revoke WMS block
-                  </Button>
-                )}
-                {!f.wmsBlocked && (
-                  <Button variant="sm" onClick={() => void discard(f)}>
-                    Discard
-                  </Button>
-                )}
+                <Button variant="sm" onClick={() => void discard(f)}>
+                  Discard
+                </Button>
               </div>
-              {f.wmsBlocked && !canRevoke && (
-                <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-300">
-                  This picklist is WMS-blocked and can't be discarded yet — ask an Admin to revoke the block.
-                </p>
-              )}
               {errors[f.no] && <p className="mt-1.5 text-[11px] text-rose-700 dark:text-rose-300">{errors[f.no]}</p>}
             </div>
           );
