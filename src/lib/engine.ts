@@ -115,6 +115,7 @@ export function allocate(args: AllocateArgs): AllocateResult {
       facility: o.b.location,
       bin: o.b.bin,
       batch: o.b.batch,
+      vendorBatch: o.b.vendorBatch,
       exp: o.b.exp,
       rem: o.rem,
       qty: take,

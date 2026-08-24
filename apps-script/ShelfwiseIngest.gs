@@ -43,6 +43,10 @@ var COLUMNS = {
   status: 'Batch Status',
 };
 
+// Optional — not every export variant carries this column, so a missing one
+// just means vendor_batch stays null rather than failing the whole ingest.
+var VENDOR_BATCH_COLUMN = 'Vendor batch code';
+
 /**
  * Runs the sync. Always returns a status object instead of relying only on
  * logs, so both the hourly trigger (which ignores the return value) and the
@@ -91,7 +95,8 @@ function ingest() {
     }
     idx[key] = pos;
   }
-  Logger.log('Column positions: ' + JSON.stringify(idx));
+  var vendorBatchIdx = header.indexOf(VENDOR_BATCH_COLUMN);
+  Logger.log('Column positions: ' + JSON.stringify(idx) + ', vendorBatchIdx: ' + vendorBatchIdx);
 
   // 4) filter: our 3 facilities, Good inventory, Active batch status, qty > 0
   var out = [];
@@ -110,6 +115,7 @@ function ingest() {
       sku: r[idx.sku],
       name: r[idx.name],
       batch: r[idx.batch] || null,
+      vendor_batch: (vendorBatchIdx >= 0 ? r[vendorBatchIdx] : null) || null,
       expiry: (r[idx.expiry] || '').slice(0, 10) || null,
       qty: qty,
       shelf: shelfMonths(r[idx.mfg], r[idx.expiry]),

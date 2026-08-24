@@ -10,6 +10,7 @@ create table if not exists stock (
   sku        text not null,          -- Item Type SKU Code (col B)
   name       text not null,          -- Item Type Name (col C)
   batch      text,                   -- Batch Code (col P)
+  vendor_batch text,                 -- Vendor batch code (manufacturer's own lot #, distinct from Batch Code)
   expiry     date,                   -- Expiry (col Q)
   qty        integer not null,       -- Quantity (col J)
   shelf      integer not null,       -- total shelf life months (Mfg→Expiry)

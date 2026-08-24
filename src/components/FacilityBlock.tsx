@@ -25,12 +25,15 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
   lines.forEach((l, i) => seq.set(l.rid, i + 1));
 
   function shareRows() {
-    return lines.map((l, i) => ({ sr: i + 1, bin: l.bin, sku: l.sku, name: l.name, qty: l.qty, picker: l.picker ?? "" }));
+    return lines.map((l, i) => ({
+      sr: i + 1, bin: l.bin, sku: l.sku, name: l.name, batch: l.batch, vendorBatch: l.vendorBatch ?? "",
+      qty: l.qty, picker: l.picker ?? "",
+    }));
   }
   function copy() {
     const txt =
-      `${f.no} · ${f.facility}\nSr#\tLocation\tSKU\tSKU Name\tQty\tPicker\n` +
-      shareRows().map((r) => `${r.sr}\t${r.bin}\t${r.sku}\t${r.name}\t${r.qty}\t${r.picker}`).join("\n");
+      `${f.no} · ${f.facility}\nSr#\tLocation\tSKU\tSKU Name\tBatch\tVendor Batch\tQty\tPicker\n` +
+      shareRows().map((r) => `${r.sr}\t${r.bin}\t${r.sku}\t${r.name}\t${r.batch}\t${r.vendorBatch}\t${r.qty}\t${r.picker}`).join("\n");
     navigator.clipboard.writeText(txt).then(() => alert("Picklist copied."), () => alert("Copy blocked; use CSV."));
   }
   function csv() {
@@ -50,8 +53,8 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
           ? `<p style="font-size:14px;color:#555;margin:4px 0">Multiple pickers assigned — see table</p>`
           : "";
     const html =
-      `<h2>${f.no}</h2><p>${f.facility}</p>${pickerHeader}<table border=1 cellpadding=6 style="border-collapse:collapse;font-family:Arial"><tr><th>Sr #</th><th>Location</th><th>SKU / SKU Name</th><th>Qty</th><th>Picker</th><th>Picked</th></tr>` +
-      shareRows().map((r) => `<tr><td>${r.sr}</td><td>${r.bin}</td><td>${r.sku}<br><small>${r.name}</small></td><td>${r.qty}</td><td>${r.picker}</td><td></td></tr>`).join("") +
+      `<h2>${f.no}</h2><p>${f.facility}</p>${pickerHeader}<table border=1 cellpadding=6 style="border-collapse:collapse;font-family:Arial"><tr><th>Sr #</th><th>Location</th><th>SKU / SKU Name</th><th>Batch</th><th>Vendor Batch</th><th>Qty</th><th>Picker</th><th>Picked</th></tr>` +
+      shareRows().map((r) => `<tr><td>${r.sr}</td><td>${r.bin}</td><td>${r.sku}<br><small>${r.name}</small></td><td>${r.batch}</td><td>${r.vendorBatch}</td><td>${r.qty}</td><td>${r.picker}</td><td></td></tr>`).join("") +
       `</table>`;
     const w = window.open("", "_blank");
     if (!w) return alert("Allow pop-ups to print.");
@@ -163,7 +166,9 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
                 <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">{l.bin}</td>
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
                   {l.sku}
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400">{l.name} · {l.batch} · exp {monLabel(l.exp)} ({l.rem}m)</div>
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                    {l.name} · {l.batch}{l.vendorBatch ? ` (VB ${l.vendorBatch})` : ""} · exp {monLabel(l.exp)} ({l.rem}m)
+                  </div>
                 </td>
                 <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">
                   {open ? l.qty : (l.picked ?? l.qty)}

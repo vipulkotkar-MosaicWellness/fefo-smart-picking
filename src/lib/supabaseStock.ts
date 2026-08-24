@@ -15,6 +15,7 @@ interface StockRowDb {
   sku: string;
   name: string;
   batch: string | null;
+  vendor_batch: string | null;
   expiry: string | null;
   qty: number;
   shelf: number;
@@ -28,7 +29,7 @@ export async function fetchStock(): Promise<StockRow[]> {
   for (let from = 0; ; from += page) {
     const { data, error } = await supabase
       .from("stock")
-      .select("facility,bin,sku,name,batch,expiry,qty,shelf")
+      .select("facility,bin,sku,name,batch,vendor_batch,expiry,qty,shelf")
       .range(from, from + page - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -42,6 +43,7 @@ export async function fetchStock(): Promise<StockRow[]> {
     sku: r.sku,
     name: r.name,
     batch: r.batch ?? "-",
+    vendorBatch: r.vendor_batch ?? undefined,
     exp: expFromDate(r.expiry),
     expDate: r.expiry ?? undefined,
     qty: r.qty,

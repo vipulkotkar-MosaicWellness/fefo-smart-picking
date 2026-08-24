@@ -7,6 +7,7 @@ export interface ShelfwiseStockRow {
   sku: string;
   name: string;
   batch: string | null;
+  vendor_batch: string | null;
   expiry: string | null; // "YYYY-MM-DD" or null
   qty: number;
   shelf: number; // total shelf life in months
@@ -32,6 +33,10 @@ const COLUMNS = {
   mfg: "Manufacturing",
   status: "Batch Status",
 } as const;
+
+// Optional — not every export variant carries this column, so a missing one
+// just means vendor_batch stays null rather than failing the whole import.
+const VENDOR_BATCH_COLUMN = "Vendor batch code";
 
 /** Splits one CSV line into fields, honoring double-quoted fields that may contain commas. */
 function splitCsvLine(line: string): string[] {
@@ -98,6 +103,7 @@ export function parseShelfwiseCsv(text: string): ParseShelfwiseResult {
     }
     idx[key] = pos;
   }
+  const vendorBatchIdx = header.indexOf(VENDOR_BATCH_COLUMN);
 
   const dropped = { facility: 0, invType: 0, status: 0, qtyZero: 0 };
   const rows: ShelfwiseStockRow[] = [];
@@ -129,6 +135,7 @@ export function parseShelfwiseCsv(text: string): ParseShelfwiseResult {
       sku: r[idx.sku],
       name: r[idx.name],
       batch: r[idx.batch] || null,
+      vendor_batch: (vendorBatchIdx >= 0 ? r[vendorBatchIdx] : null) || null,
       expiry: toIsoDate(r[idx.expiry]),
       qty,
       shelf: shelfMonths(r[idx.mfg], r[idx.expiry]),

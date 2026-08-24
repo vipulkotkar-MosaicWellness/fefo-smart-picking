@@ -26,8 +26,21 @@ describe("parseShelfwiseCsv", () => {
     const csv = HEADER + "\n" + row({});
     const result = parseShelfwiseCsv(csv);
     expect(result.rows).toEqual([
-      { facility: "SL Mother Hub", bin: "A1", sku: "SKU-1", name: "Product 1", batch: "B1", expiry: "2028-01-01", qty: 10, shelf: 24 },
+      { facility: "SL Mother Hub", bin: "A1", sku: "SKU-1", name: "Product 1", batch: "B1", vendor_batch: null, expiry: "2028-01-01", qty: 10, shelf: 24 },
     ]);
+  });
+
+  it("reads vendor_batch when the export carries a 'Vendor batch code' column", () => {
+    const headerWithVendorBatch = HEADER + ",Vendor batch code";
+    const csv = headerWithVendorBatch + "\n" + row({}) + ",VB-123";
+    const result = parseShelfwiseCsv(csv);
+    expect(result.rows[0].vendor_batch).toBe("VB-123");
+  });
+
+  it("leaves vendor_batch null when the export has no 'Vendor batch code' column at all", () => {
+    const csv = HEADER + "\n" + row({});
+    const result = parseShelfwiseCsv(csv);
+    expect(result.rows[0].vendor_batch).toBeNull();
   });
 
   it("computes shelf life in months from manufacturing to expiry", () => {

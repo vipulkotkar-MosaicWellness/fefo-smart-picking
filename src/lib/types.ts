@@ -10,6 +10,10 @@ export interface StockRow {
   sku: string;
   name: string;
   batch: string;
+  // Manufacturer's own lot number, distinct from `batch` (Uniware's internal
+  // code) — not every stock row has one (older syncs, or an export variant
+  // without the column).
+  vendorBatch?: string;
   exp: Expiry;
   // Full "YYYY-MM-DD" expiry when known (Supabase stores the exact date; local/
   // sample stock doesn't carry one). Purely a same-month FEFO tiebreaker — see
@@ -46,6 +50,7 @@ export interface PickLine {
   facility: string;
   bin: string;
   batch: string;
+  vendorBatch?: string;
   exp: Expiry;
   rem: number; // remaining months at pick time
   qty: number; // suggested pick qty
