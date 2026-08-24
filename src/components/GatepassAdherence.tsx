@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { downloadCsv } from "../lib/format";
+import * as XLSX from "xlsx";
 import { fetchGatepassAdherence, type AdherenceLine, type GatepassAdherence as GatepassAdherenceRow } from "../lib/gatepassAdherenceSupabase";
 import { Button, Card, Tag } from "./Ui";
 
@@ -34,29 +34,40 @@ function byDay(rows: GatepassAdherenceRow[]): DaySummary[] {
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
-function csvCell(v: string | number): string {
-  const s = String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
+/** Two sheets: gate-pass rollup, and full line-level detail (with Gate Pass kept as the
+ * first column on the detail sheet only so a line can still be traced back to its gate pass). */
+function exportWorkbook(rows: GatepassAdherenceRow[]) {
+  const summarySheet = XLSX.utils.json_to_sheet(
+    rows.map((r) => ({
+      "Gate Pass": r.gatepass_code,
+      Facility: r.facility,
+      "Instructed Qty": r.instructed_qty,
+      "Compliant Qty": r.compliant_qty,
+      "Adherence %": r.adherence_pct,
+    })),
+  );
 
-/** One row per instructed line (SKU/bin/batch), not per gate pass — so the export carries the same
- * detail as the Line Detail drill-down, not just the per-gate-pass rollup. */
-function toCsv(rows: GatepassAdherenceRow[]): string {
-  const header = [
-    "Report Date", "Gate Pass", "Facility", "Gate Pass Instructed Qty", "Gate Pass Compliant Qty", "Gate Pass Adherence %",
-    "SKU", "SKU Name", "Instructed Bin", "Instructed Batch", "Instructed Qty", "Actual Qty", "Compliant Qty", "Status", "Actually Picked Bin/Batch (Qty)",
-  ].join(",");
-  const body = rows
-    .flatMap((r) =>
-      r.lines.map((l) =>
-        [
-          r.report_date, r.gatepass_code, r.facility, r.instructed_qty, r.compliant_qty, r.adherence_pct,
-          l.sku, l.name ?? "", l.bin, l.batch, l.instructed_qty, l.actual_qty, l.compliant_qty, l.status, l.picked_bin_batch ?? "",
-        ].map(csvCell).join(","),
-      ),
-    )
-    .join("\n");
-  return header + "\n" + body + "\n";
+  const detailSheet = XLSX.utils.json_to_sheet(
+    rows.flatMap((r) =>
+      r.lines.map((l) => ({
+        "Gate Pass": r.gatepass_code,
+        SKU: l.sku,
+        "SKU Name": l.name ?? "",
+        "Instructed Bin": l.bin,
+        "Instructed Batch": l.batch,
+        "Instructed Qty": l.instructed_qty,
+        "Actual Qty": l.actual_qty,
+        "Compliant Qty": l.compliant_qty,
+        Status: l.status,
+        "Actually Picked Bin/Batch (Qty)": l.picked_bin_batch ?? "",
+      })),
+    ),
+  );
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, summarySheet, "Gate Pass Summary");
+  XLSX.utils.book_append_sheet(wb, detailSheet, "Line Detail");
+  XLSX.writeFile(wb, "gatepass_adherence.xlsx");
 }
 
 function lineTone(status: AdherenceLine["status"]): "ok" | "warn" | "bad" {
@@ -101,10 +112,10 @@ function StatCard({ icon, tone, label, value, sub }: { icon: string; tone: "ok" 
 
 function TrendChart({ days }: { days: DaySummary[] }) {
   const w = 560;
-  const h = 200;
-  const padL = 34;
-  const padB = 24;
-  const padT = 12;
+  const h = 220;
+  const padL = 42;
+  const padB = 32;
+  const padT = 20;
   const chartW = w - padL - 10;
   const chartH = h - padT - padB;
   const barW = Math.min(36, (chartW / days.length) * 0.55);
@@ -116,7 +127,7 @@ function TrendChart({ days }: { days: DaySummary[] }) {
         return (
           <g key={tick}>
             <line x1={padL} y1={y} x2={w - 6} y2={y} stroke="currentColor" strokeOpacity={0.12} strokeDasharray="2,3" />
-            <text x={padL - 6} y={y + 3} textAnchor="end" fontSize="9" fill="currentColor" opacity={0.6}>
+            <text x={padL - 8} y={y + 4} textAnchor="end" fontSize="13" fill="currentColor" opacity={0.65}>
               {tick}
             </text>
           </g>
@@ -130,10 +141,10 @@ function TrendChart({ days }: { days: DaySummary[] }) {
         return (
           <g key={d.date}>
             <rect x={x} y={y} width={barW} height={Math.max(barH, 1)} rx={3} fill={color} />
-            <text x={x + barW / 2} y={y - 4} textAnchor="middle" fontSize="9" fontWeight={600} fill="currentColor">
+            <text x={x + barW / 2} y={y - 6} textAnchor="middle" fontSize="14" fontWeight={700} fill="currentColor">
               {d.pct}%
             </text>
-            <text x={x + barW / 2} y={h - 6} textAnchor="middle" fontSize="8.5" fill="currentColor" opacity={0.65}>
+            <text x={x + barW / 2} y={h - 8} textAnchor="middle" fontSize="12.5" fill="currentColor" opacity={0.7}>
               {d.date.slice(5)}
             </text>
           </g>
@@ -210,8 +221,8 @@ export function GatepassAdherence() {
           closed gate passes at SL Mother Hub, SL Ambient, and SL RX. Over-picking from the right bin isn't penalized —
           only a missing bin or a short pick is.
         </p>
-        <Button variant="sm" onClick={() => downloadCsv(toCsv(rows), "gatepass_adherence.csv")}>
-          Export CSV
+        <Button variant="sm" onClick={() => exportWorkbook(rows)}>
+          Export Excel
         </Button>
       </div>
 
@@ -223,9 +234,9 @@ export function GatepassAdherence() {
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[3fr_2fr]">
-        <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+        <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
           <table className="w-full min-w-[520px] border-collapse text-lg tabular-nums">
-            <thead>
+            <thead className="sticky top-0 z-10">
               <tr className="text-left text-base uppercase tracking-wide text-teal-800 dark:text-teal-300">
                 <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Report Date</th>
                 <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Gate Passes</th>
@@ -281,9 +292,9 @@ export function GatepassAdherence() {
           <p className="mb-1.5 text-base font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
             Gate passes on {expandedDay.date}
           </p>
-          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+          <div className="max-h-96 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
             <table className="w-full min-w-[480px] border-collapse text-lg tabular-nums">
-              <thead>
+              <thead className="sticky top-0 z-10">
                 <tr className="text-left text-base uppercase tracking-wide text-teal-800 dark:text-teal-300">
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Gate Pass</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Facility</th>
@@ -324,9 +335,9 @@ export function GatepassAdherence() {
           <p className="mb-1.5 text-base font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
             Line detail for {expandedGp.gatepass_code}
           </p>
-          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+          <div className="max-h-96 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
             <table className="w-full min-w-[720px] border-collapse text-base">
-              <thead>
+              <thead className="sticky top-0 z-10">
                 <tr className="text-left text-sm uppercase tracking-wide text-teal-800 dark:text-teal-300">
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">SKU</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">SKU Name</th>
