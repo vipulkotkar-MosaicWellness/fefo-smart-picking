@@ -34,10 +34,27 @@ function byDay(rows: GatepassAdherenceRow[]): DaySummary[] {
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
+function csvCell(v: string | number): string {
+  const s = String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+/** One row per instructed line (SKU/bin/batch), not per gate pass — so the export carries the same
+ * detail as the Line Detail drill-down, not just the per-gate-pass rollup. */
 function toCsv(rows: GatepassAdherenceRow[]): string {
-  const header = "Report Date,Gate Pass,Facility,Instructed Qty,Compliant Qty,Adherence %";
+  const header = [
+    "Report Date", "Gate Pass", "Facility", "Gate Pass Instructed Qty", "Gate Pass Compliant Qty", "Gate Pass Adherence %",
+    "SKU", "SKU Name", "Instructed Bin", "Instructed Batch", "Instructed Qty", "Actual Qty", "Compliant Qty", "Status", "Actually Picked Bin/Batch (Qty)",
+  ].join(",");
   const body = rows
-    .map((r) => [r.report_date, r.gatepass_code, r.facility, r.instructed_qty, r.compliant_qty, r.adherence_pct].join(","))
+    .flatMap((r) =>
+      r.lines.map((l) =>
+        [
+          r.report_date, r.gatepass_code, r.facility, r.instructed_qty, r.compliant_qty, r.adherence_pct,
+          l.sku, l.name ?? "", l.bin, l.batch, l.instructed_qty, l.actual_qty, l.compliant_qty, l.status, l.picked_bin_batch ?? "",
+        ].map(csvCell).join(","),
+      ),
+    )
     .join("\n");
   return header + "\n" + body + "\n";
 }
@@ -70,13 +87,13 @@ const TONE_BADGE: Record<"ok" | "warn" | "bad" | "info", string> = {
 function StatCard({ icon, tone, label, value, sub }: { icon: string; tone: "ok" | "warn" | "bad" | "info"; label: string; value: string; sub?: string }) {
   return (
     <div className="flex items-start gap-3 rounded-xl border border-[var(--fefo-line)] bg-white p-3.5 dark:border-slate-700 dark:bg-slate-800">
-      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-base font-bold ${TONE_BADGE[tone]} ${TONE_TEXT[tone]}`}>
+      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-lg font-bold ${TONE_BADGE[tone]} ${TONE_TEXT[tone]}`}>
         {icon}
       </span>
       <div>
-        <p className="text-xs font-semibold text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
-        <p className={`mt-0.5 text-2xl font-bold tabular-nums ${TONE_TEXT[tone]}`}>{value}</p>
-        {sub && <p className="text-xs text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
+        <p className="text-sm font-semibold text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
+        <p className={`mt-0.5 text-4xl font-bold tabular-nums ${TONE_TEXT[tone]}`}>{value}</p>
+        {sub && <p className="text-sm text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
       </div>
     </div>
   );
@@ -149,7 +166,7 @@ export function GatepassAdherence() {
   if (loading) {
     return (
       <Card title="Gate pass adherence">
-        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">Loading…</p>
+        <p className="py-3 text-center text-base text-slate-500 dark:text-slate-400">Loading…</p>
       </Card>
     );
   }
@@ -157,7 +174,7 @@ export function GatepassAdherence() {
   if (error) {
     return (
       <Card title="Gate pass adherence">
-        <p className="py-3 text-center text-xs text-rose-600 dark:text-rose-400">Could not load: {error}</p>
+        <p className="py-3 text-center text-base text-rose-600 dark:text-rose-400">Could not load: {error}</p>
       </Card>
     );
   }
@@ -165,7 +182,7 @@ export function GatepassAdherence() {
   if (rows.length === 0) {
     return (
       <Card title="Gate pass adherence">
-        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">
+        <p className="py-3 text-center text-base text-slate-500 dark:text-slate-400">
           Nothing scored yet — the daily check runs automatically each morning against yesterday's closed gate passes.
         </p>
       </Card>
@@ -188,7 +205,7 @@ export function GatepassAdherence() {
   return (
     <Card title="Gate pass adherence">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-500 dark:text-slate-400">
+        <p className="text-base text-slate-500 dark:text-slate-400">
           Was the instructed bin actually picked from, at the instructed quantity? Checked daily against yesterday's
           closed gate passes at SL Mother Hub, SL Ambient, and SL RX. Over-picking from the right bin isn't penalized —
           only a missing bin or a short pick is.
@@ -207,9 +224,9 @@ export function GatepassAdherence() {
 
       <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[3fr_2fr]">
         <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-          <table className="w-full min-w-[520px] border-collapse text-sm tabular-nums">
+          <table className="w-full min-w-[520px] border-collapse text-lg tabular-nums">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-teal-800 dark:text-teal-300">
+              <tr className="text-left text-base uppercase tracking-wide text-teal-800 dark:text-teal-300">
                 <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Report Date</th>
                 <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Gate Passes</th>
                 <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
@@ -252,7 +269,7 @@ export function GatepassAdherence() {
         </div>
 
         <div className="rounded-lg border border-[var(--fefo-line)] bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+          <p className="mb-1 text-base font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
             Daily adherence trend
           </p>
           <TrendChart days={days} />
@@ -261,13 +278,13 @@ export function GatepassAdherence() {
 
       {expandedDay && (
         <div className="mb-4">
-          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+          <p className="mb-1.5 text-base font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
             Gate passes on {expandedDay.date}
           </p>
           <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-            <table className="w-full min-w-[480px] border-collapse text-sm tabular-nums">
+            <table className="w-full min-w-[480px] border-collapse text-lg tabular-nums">
               <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                <tr className="text-left text-base uppercase tracking-wide text-teal-800 dark:text-teal-300">
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Gate Pass</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Facility</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
@@ -304,13 +321,13 @@ export function GatepassAdherence() {
 
       {expandedGp && (
         <div>
-          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+          <p className="mb-1.5 text-base font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
             Line detail for {expandedGp.gatepass_code}
           </p>
           <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-            <table className="w-full min-w-[720px] border-collapse text-xs">
+            <table className="w-full min-w-[720px] border-collapse text-base">
               <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                <tr className="text-left text-sm uppercase tracking-wide text-teal-800 dark:text-teal-300">
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">SKU</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">SKU Name</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Instructed Bin</th>
