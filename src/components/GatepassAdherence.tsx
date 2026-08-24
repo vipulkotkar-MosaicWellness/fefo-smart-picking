@@ -157,11 +157,12 @@ export function GatepassAdherence() {
                       <thead>
                         <tr className="text-left uppercase tracking-wide text-teal-800 dark:text-teal-300">
                           <th className="border-b border-slate-200 p-1 dark:border-slate-700">SKU</th>
-                          <th className="border-b border-slate-200 p-1 dark:border-slate-700">Bin</th>
-                          <th className="border-b border-slate-200 p-1 dark:border-slate-700">Batch</th>
+                          <th className="border-b border-slate-200 p-1 dark:border-slate-700">Instructed bin</th>
+                          <th className="border-b border-slate-200 p-1 dark:border-slate-700">Instructed batch</th>
                           <th className="border-b border-slate-200 p-1 dark:border-slate-700">Instructed</th>
                           <th className="border-b border-slate-200 p-1 dark:border-slate-700">Actual</th>
                           <th className="border-b border-slate-200 p-1 dark:border-slate-700">Status</th>
+                          <th className="border-b border-slate-200 p-1 dark:border-slate-700">Picked bin / batch (qty)</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -174,6 +175,9 @@ export function GatepassAdherence() {
                             <td className="border-b border-slate-100 p-1 dark:border-slate-700/60">{l.actual_qty}</td>
                             <td className="border-b border-slate-100 p-1 dark:border-slate-700/60">
                               <Tag tone={lineTone(l.status)}>{l.status}</Tag>
+                            </td>
+                            <td className="border-b border-slate-100 p-1 font-mono dark:border-slate-700/60">
+                              {l.picked_bin_batch || "—"}
                             </td>
                           </tr>
                         ))}

@@ -9,6 +9,8 @@ export interface AdherenceLine {
   actual_qty: number;
   compliant_qty: number;
   status: "OK" | "PARTIAL" | "BIN BREACH";
+  /** Every bin/batch this SKU was actually picked from in this gate pass — where the picker really went. */
+  picked_bin_batch?: string;
 }
 
 export interface GatepassAdherence {

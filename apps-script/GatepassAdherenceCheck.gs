@@ -79,8 +79,11 @@ function gpaRun_(reportDate) {
     col[name] = pos;
   });
 
-  // 2) actual picked qty per (gatepass|batch|bin), and which gate passes closed yesterday
+  // 2) actual picked qty per (gatepass|batch|bin), and — separately — every
+  // actual bin+batch a SKU was picked from within a gate pass (gp|sku), so a
+  // breached line can show WHERE the picker actually took the stock from.
   var actualQty = {};
+  var actualBySku = {}; // 'gatepass|sku' -> [{bin,batch,qty}]
   var closedGatepassesByFacility = {}; // gatepassCode -> facility
   for (var i = 1; i < rows.length; i++) {
     var r = rows[i];
@@ -91,12 +94,17 @@ function gpaRun_(reportDate) {
     if (updatedDate !== reportDate) continue;
 
     var gp = r[col['Gatepass Code']];
+    var sku = r[col['Item SkuCode']];
     var batch = r[col['Uniware Batch Code']] || '';
     var bin = r[col['Shelf']] || '';
     var qty = parseInt(r[col['Quantity']], 10) || 0;
     var key = gpaKey_(gp, batch, bin);
     actualQty[key] = (actualQty[key] || 0) + qty;
     closedGatepassesByFacility[gp] = facility;
+
+    var skuKey = gp + '|' + sku;
+    actualBySku[skuKey] = actualBySku[skuKey] || [];
+    actualBySku[skuKey].push({ bin: bin, batch: batch, qty: qty });
   }
 
   var closedGatepasses = Object.keys(closedGatepassesByFacility);
@@ -139,7 +147,17 @@ function gpaRun_(reportDate) {
       instructedTotal += l.qty;
       compliantTotal += compliant;
       var status = actual === 0 ? 'BIN BREACH' : (actual < l.qty ? 'PARTIAL' : 'OK');
-      return { sku: l.sku, name: l.name, bin: l.bin, batch: l.batch, instructed_qty: l.qty, actual_qty: actual, compliant_qty: compliant, status: status };
+      // Every bin+batch this SKU was actually picked from anywhere in this
+      // gate pass — for an OK line this just echoes the instructed bin back;
+      // for a BREACH/PARTIAL line it shows where the picker went instead.
+      var pickedFrom = (actualBySku[gp + '|' + l.sku] || [])
+        .map(function (p) { return p.bin + ' / ' + p.batch + ' (' + p.qty + ')'; })
+        .join('; ');
+      return {
+        sku: l.sku, name: l.name, bin: l.bin, batch: l.batch,
+        instructed_qty: l.qty, actual_qty: actual, compliant_qty: compliant, status: status,
+        picked_bin_batch: pickedFrom,
+      };
     });
 
     upserts.push({
