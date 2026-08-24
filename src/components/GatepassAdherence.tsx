@@ -63,6 +63,7 @@ function exportWorkbook(rows: GatepassAdherenceRow[]) {
         "Compliant Qty": l.compliant_qty,
         Status: l.status,
         "Actually Picked Bin/Batch (Qty)": l.picked_bin_batch ?? "",
+        "Vendor Batch #": l.vendor_batch ?? "",
       })),
     ),
   );
@@ -351,6 +352,7 @@ export function GatepassAdherence() {
                   <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Status</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Actually Picked Bin/Batch (Qty)</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Vendor Batch #</th>
                 </tr>
               </thead>
               <tbody>
@@ -367,6 +369,7 @@ export function GatepassAdherence() {
                       <Tag tone={lineTone(l.status)}>{l.status}</Tag>
                     </td>
                     <td className="border-b border-slate-100 p-2 font-mono dark:border-slate-700/60">{l.picked_bin_batch || "—"}</td>
+                    <td className="border-b border-slate-100 p-2 font-mono dark:border-slate-700/60">{l.vendor_batch || "—"}</td>
                   </tr>
                 ))}
               </tbody>

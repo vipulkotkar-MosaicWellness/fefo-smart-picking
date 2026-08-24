@@ -14,7 +14,9 @@
  *      least that quantity was actually picked from that exact bin. Not
  *      found at all = picked from a different bin = FEFO non-compliance.
  *      Over-picking from the correct bin is NOT penalized — only the
- *      instructed quantity ever counts toward "compliant".
+ *      instructed quantity ever counts toward "compliant". Also carries the
+ *      manufacturer's Vendor Batch No for whatever was actually picked
+ *      (Uniware's own internal batch code isn't the same thing).
  *   4. Writes one row per gate pass into `gatepass_adherence` (see
  *      ../supabase/add_gatepass_adherence_table.sql) — the app's Reports
  *      screen reads straight from that table.
@@ -73,7 +75,7 @@ function gpaRun_(reportDate) {
 
   var header = rows[0];
   var col = {};
-  ['Gatepass Code', 'Item SkuCode', 'Shelf', 'Quantity', 'Uniware Batch Code', 'Gatepass Item Status', 'From Party', 'Gatepass Updated At'].forEach(function (name) {
+  ['Gatepass Code', 'Item SkuCode', 'Shelf', 'Quantity', 'Uniware Batch Code', 'Vendor Batch No', 'Gatepass Item Status', 'From Party', 'Gatepass Updated At'].forEach(function (name) {
     var pos = header.indexOf(name);
     if (pos < 0) throw new Error('Expected column "' + name + '" not found in gatepass export header.');
     col[name] = pos;
@@ -96,6 +98,7 @@ function gpaRun_(reportDate) {
     var gp = r[col['Gatepass Code']];
     var sku = r[col['Item SkuCode']];
     var batch = r[col['Uniware Batch Code']] || '';
+    var vendorBatch = r[col['Vendor Batch No']] || '';
     var bin = r[col['Shelf']] || '';
     var qty = parseInt(r[col['Quantity']], 10) || 0;
     var key = gpaKey_(gp, batch, bin);
@@ -104,7 +107,7 @@ function gpaRun_(reportDate) {
 
     var skuKey = gp + '|' + sku;
     actualBySku[skuKey] = actualBySku[skuKey] || [];
-    actualBySku[skuKey].push({ bin: bin, batch: batch, qty: qty });
+    actualBySku[skuKey].push({ bin: bin, batch: batch, qty: qty, vendorBatch: vendorBatch });
   }
 
   var closedGatepasses = Object.keys(closedGatepassesByFacility);
@@ -150,13 +153,25 @@ function gpaRun_(reportDate) {
       // Every bin+batch this SKU was actually picked from anywhere in this
       // gate pass — for an OK line this just echoes the instructed bin back;
       // for a BREACH/PARTIAL line it shows where the picker went instead.
-      var pickedFrom = (actualBySku[gp + '|' + l.sku] || [])
+      var actualEntries = actualBySku[gp + '|' + l.sku] || [];
+      var pickedFrom = actualEntries
         .map(function (p) { return p.bin + ' / ' + p.batch + ' (' + p.qty + ')'; })
         .join('; ');
+      // Distinct vendor batch numbers seen across those same actual picks —
+      // Uniware's own internal batch code (above) isn't the manufacturer's.
+      var vendorBatchSeen = {};
+      var vendorBatchList = [];
+      actualEntries.forEach(function (p) {
+        if (p.vendorBatch && !vendorBatchSeen[p.vendorBatch]) {
+          vendorBatchSeen[p.vendorBatch] = true;
+          vendorBatchList.push(p.vendorBatch);
+        }
+      });
       return {
         sku: l.sku, name: l.name, bin: l.bin, batch: l.batch,
         instructed_qty: l.qty, actual_qty: actual, compliant_qty: compliant, status: status,
         picked_bin_batch: pickedFrom,
+        vendor_batch: vendorBatchList.join('; '),
       };
     });
 

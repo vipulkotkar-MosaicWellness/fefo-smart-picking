@@ -11,6 +11,11 @@ export interface StockRow {
   name: string;
   batch: string;
   exp: Expiry;
+  // Full "YYYY-MM-DD" expiry when known (Supabase stores the exact date; local/
+  // sample stock doesn't carry one). Purely a same-month FEFO tiebreaker — see
+  // allocate() in engine.ts — never used for the shelf-life cutoff check itself,
+  // which stays month-granularity since channel rules are expressed in months.
+  expDate?: string;
   qty: number;
   shelf: number; // total shelf life in months
   type: string; // Inventory Type, e.g. "Good", "Damaged"

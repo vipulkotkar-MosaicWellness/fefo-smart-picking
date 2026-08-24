@@ -11,6 +11,8 @@ export interface AdherenceLine {
   status: "OK" | "PARTIAL" | "BIN BREACH";
   /** Every bin/batch this SKU was actually picked from in this gate pass — where the picker really went. */
   picked_bin_batch?: string;
+  /** Manufacturer's vendor batch number(s) for whatever was actually picked — distinct from the Uniware batch code. */
+  vendor_batch?: string;
 }
 
 export interface GatepassAdherence {

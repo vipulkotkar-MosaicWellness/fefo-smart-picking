@@ -43,6 +43,7 @@ export async function fetchStock(): Promise<StockRow[]> {
     name: r.name,
     batch: r.batch ?? "-",
     exp: expFromDate(r.expiry),
+    expDate: r.expiry ?? undefined,
     qty: r.qty,
     shelf: r.shelf,
     type: "Good",

@@ -91,7 +91,10 @@ export function allocate(args: AllocateArgs): AllocateResult {
     )
     .map((b) => ({ b, rem: monthsRemaining(b.exp, today), av: b.qty - reservedFor(holdKey(b.sku, b.location, b.bin, b.batch)) }))
     .filter((o) => o.rem >= cutoff && o.av > 0)
-    .sort((x, y) => x.rem - y.rem);
+    // rem is month-granularity (matches how channel cutoffs are expressed), so two
+    // batches expiring in the same month tie on it — break the tie by the exact
+    // expiry date when both sides have one, instead of leaving it to array order.
+    .sort((x, y) => x.rem - y.rem || (x.b.expDate && y.b.expDate ? x.b.expDate.localeCompare(y.b.expDate) : 0));
 
   const eligible = minQty ? withinShelfLife.filter((o) => o.av >= minQty) : withinShelfLife;
   const skipped: BinSkip[] = minQty
