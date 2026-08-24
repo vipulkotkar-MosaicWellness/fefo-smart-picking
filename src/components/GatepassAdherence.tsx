@@ -117,17 +117,43 @@ export function GatepassAdherence() {
         </div>
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
-        {days.map((d) => (
-          <div key={d.date} className="rounded-lg border border-[var(--fefo-line)] bg-white p-2.5 dark:border-slate-700 dark:bg-slate-800">
-            <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{d.date}</p>
-            <p className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-xl font-bold text-[var(--fefo-text)] dark:text-slate-100">{d.pct}%</span>
-              <span className="text-[11px] text-slate-500 dark:text-slate-400">{d.gatepassCount} gate pass{d.gatepassCount === 1 ? "" : "es"}</span>
-            </p>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">{d.compliantQty}/{d.instructedQty} units</p>
-          </div>
-        ))}
+      <div className="mb-4 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+        <table className="w-full min-w-[520px] border-collapse text-xs tabular-nums">
+          <thead>
+            <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+              <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Report Date</th>
+              <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Gate Passes</th>
+              <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
+              <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
+              <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Adherence %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {days
+              .slice()
+              .sort((a, b) => (a.date < b.date ? -1 : 1))
+              .map((d) => (
+                <tr key={d.date} className="text-slate-700 dark:text-slate-200">
+                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{d.date}</td>
+                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.gatepassCount}</td>
+                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.instructedQty.toLocaleString()}</td>
+                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.compliantQty.toLocaleString()}</td>
+                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
+                    <Tag tone={pctTone(d.pct)}>{d.pct}%</Tag>
+                  </td>
+                </tr>
+              ))}
+            <tr className="font-bold text-[var(--fefo-text)] dark:text-slate-100">
+              <td className="p-1.5">Overall</td>
+              <td className="p-1.5 text-right">{rows.length}</td>
+              <td className="p-1.5 text-right">{totalInstructed.toLocaleString()}</td>
+              <td className="p-1.5 text-right">{totalCompliant.toLocaleString()}</td>
+              <td className="p-1.5 text-right">
+                <Tag tone={pctTone(overallPct)}>{overallPct}%</Tag>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div className="space-y-4">
