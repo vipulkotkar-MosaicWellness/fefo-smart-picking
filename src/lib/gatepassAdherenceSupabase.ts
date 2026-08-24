@@ -23,6 +23,31 @@ export interface GatepassAdherence {
   lines: AdherenceLine[];
 }
 
+export interface LatestDayAdherence {
+  report_date: string;
+  gatepass_count: number;
+  instructed_qty: number;
+  compliant_qty: number;
+  adherence_pct: number;
+}
+
+/** Aggregate adherence % for the most recent report_date that's actually been scored (usually yesterday). */
+export async function fetchLatestDayAdherence(): Promise<LatestDayAdherence | null> {
+  const rows = await fetchGatepassAdherence(7);
+  if (rows.length === 0) return null;
+  const latestDate = rows.reduce((max, r) => (r.report_date > max ? r.report_date : max), rows[0].report_date);
+  const dayRows = rows.filter((r) => r.report_date === latestDate);
+  const instructed_qty = dayRows.reduce((s, r) => s + r.instructed_qty, 0);
+  const compliant_qty = dayRows.reduce((s, r) => s + r.compliant_qty, 0);
+  return {
+    report_date: latestDate,
+    gatepass_count: dayRows.length,
+    instructed_qty,
+    compliant_qty,
+    adherence_pct: instructed_qty ? Math.round((compliant_qty / instructed_qty) * 10000) / 100 : 0,
+  };
+}
+
 /** Rows for the last `days` report dates — populated daily by GatepassAdherenceCheck.gs. */
 export async function fetchGatepassAdherence(days = 30): Promise<GatepassAdherence[]> {
   if (!supabase) return [];
