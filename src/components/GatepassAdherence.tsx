@@ -74,9 +74,9 @@ function StatCard({ icon, tone, label, value, sub }: { icon: string; tone: "ok" 
         {icon}
       </span>
       <div>
-        <p className="text-[11px] font-semibold text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
-        <p className={`mt-0.5 text-xl font-bold tabular-nums ${TONE_TEXT[tone]}`}>{value}</p>
-        {sub && <p className="text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
+        <p className="text-xs font-semibold text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
+        <p className={`mt-0.5 text-2xl font-bold tabular-nums ${TONE_TEXT[tone]}`}>{value}</p>
+        {sub && <p className="text-xs text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
       </div>
     </div>
   );
@@ -188,7 +188,7 @@ export function GatepassAdherence() {
   return (
     <Card title="Gate pass adherence">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
           Was the instructed bin actually picked from, at the instructed quantity? Checked daily against yesterday's
           closed gate passes at SL Mother Hub, SL Ambient, and SL RX. Over-picking from the right bin isn't penalized —
           only a missing bin or a short pick is.
@@ -205,16 +205,16 @@ export function GatepassAdherence() {
         <StatCard icon="↓" tone="bad" label="Worst day" value={`${worstDay.pct}%`} sub={worstDay.date} />
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_320px]">
+      <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[3fr_2fr]">
         <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-          <table className="w-full min-w-[520px] border-collapse text-xs tabular-nums">
+          <table className="w-full min-w-[520px] border-collapse text-sm tabular-nums">
             <thead>
-              <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
-                <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Report Date</th>
-                <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Gate Passes</th>
-                <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
-                <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
-                <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Adherence %</th>
+              <tr className="text-left text-xs uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Report Date</th>
+                <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Gate Passes</th>
+                <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
+                <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
+                <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Adherence %</th>
               </tr>
             </thead>
             <tbody>
@@ -226,24 +226,24 @@ export function GatepassAdherence() {
                     expandedDate === d.date ? "bg-[var(--fefo-teal-50)] dark:bg-slate-900" : ""
                   }`}
                 >
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                  <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">
                     <span className="mr-1 inline-block w-3 text-[var(--fefo-muted)]">{expandedDate === d.date ? "▾" : "▸"}</span>
                     {d.date}
                   </td>
-                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.gatepassCount}</td>
-                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.instructedQty.toLocaleString()}</td>
-                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.compliantQty.toLocaleString()}</td>
-                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
+                  <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{d.gatepassCount}</td>
+                  <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{d.instructedQty.toLocaleString()}</td>
+                  <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{d.compliantQty.toLocaleString()}</td>
+                  <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">
                     <Tag tone={pctTone(d.pct)}>{d.pct}%</Tag>
                   </td>
                 </tr>
               ))}
               <tr className="font-bold text-[var(--fefo-text)] dark:text-slate-100">
-                <td className="p-1.5">Overall</td>
-                <td className="p-1.5 text-right">{rows.length}</td>
-                <td className="p-1.5 text-right">{totalInstructed.toLocaleString()}</td>
-                <td className="p-1.5 text-right">{totalCompliant.toLocaleString()}</td>
-                <td className="p-1.5 text-right">
+                <td className="p-2">Overall</td>
+                <td className="p-2 text-right">{rows.length}</td>
+                <td className="p-2 text-right">{totalInstructed.toLocaleString()}</td>
+                <td className="p-2 text-right">{totalCompliant.toLocaleString()}</td>
+                <td className="p-2 text-right">
                   <Tag tone={pctTone(overallPct)}>{overallPct}%</Tag>
                 </td>
               </tr>
@@ -252,7 +252,7 @@ export function GatepassAdherence() {
         </div>
 
         <div className="rounded-lg border border-[var(--fefo-line)] bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
             Daily adherence trend
           </p>
           <TrendChart days={days} />
@@ -261,18 +261,18 @@ export function GatepassAdherence() {
 
       {expandedDay && (
         <div className="mb-4">
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
             Gate passes on {expandedDay.date}
           </p>
           <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-            <table className="w-full min-w-[480px] border-collapse text-xs tabular-nums">
+            <table className="w-full min-w-[480px] border-collapse text-sm tabular-nums">
               <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Gate Pass</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Facility</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Adherence %</th>
+                <tr className="text-left text-xs uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Gate Pass</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Facility</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Adherence %</th>
                 </tr>
               </thead>
               <tbody>
@@ -284,14 +284,14 @@ export function GatepassAdherence() {
                       expandedGatepass === r.gatepass_code ? "bg-[var(--fefo-teal-50)] dark:bg-slate-900" : ""
                     }`}
                   >
-                    <td className="border-b border-slate-100 p-1.5 font-mono dark:border-slate-700/60">
+                    <td className="border-b border-slate-100 p-2 font-mono dark:border-slate-700/60">
                       <span className="mr-1 inline-block w-3 text-[var(--fefo-muted)]">{expandedGatepass === r.gatepass_code ? "▾" : "▸"}</span>
                       {r.gatepass_code}
                     </td>
-                    <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{r.facility}</td>
-                    <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{r.instructed_qty.toLocaleString()}</td>
-                    <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{r.compliant_qty.toLocaleString()}</td>
-                    <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
+                    <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">{r.facility}</td>
+                    <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{r.instructed_qty.toLocaleString()}</td>
+                    <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{r.compliant_qty.toLocaleString()}</td>
+                    <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">
                       <Tag tone={pctTone(r.adherence_pct)}>{r.adherence_pct}%</Tag>
                     </td>
                   </tr>
@@ -304,38 +304,38 @@ export function GatepassAdherence() {
 
       {expandedGp && (
         <div>
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
             Line detail for {expandedGp.gatepass_code}
           </p>
           <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-            <table className="w-full min-w-[720px] border-collapse text-[11px]">
+            <table className="w-full min-w-[720px] border-collapse text-xs">
               <thead>
-                <tr className="text-left uppercase tracking-wide text-teal-800 dark:text-teal-300">
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">SKU</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">SKU Name</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Instructed Bin</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Instructed Batch</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Actual Qty</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Status</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Actually Picked Bin/Batch (Qty)</th>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">SKU</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">SKU Name</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Instructed Bin</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Instructed Batch</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Actual Qty</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Status</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Actually Picked Bin/Batch (Qty)</th>
                 </tr>
               </thead>
               <tbody>
                 {expandedGp.lines.map((l, i) => (
                   <tr key={`${l.bin}-${l.batch}-${i}`} className="text-slate-700 dark:text-slate-200">
-                    <td className="border-b border-slate-100 p-1.5 font-mono dark:border-slate-700/60">{l.sku}</td>
-                    <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{l.name || "—"}</td>
-                    <td className="border-b border-slate-100 p-1.5 font-mono dark:border-slate-700/60">{l.bin}</td>
-                    <td className="border-b border-slate-100 p-1.5 font-mono dark:border-slate-700/60">{l.batch}</td>
-                    <td className="border-b border-slate-100 p-1.5 text-right tabular-nums dark:border-slate-700/60">{l.instructed_qty}</td>
-                    <td className="border-b border-slate-100 p-1.5 text-right tabular-nums dark:border-slate-700/60">{l.actual_qty}</td>
-                    <td className="border-b border-slate-100 p-1.5 text-right tabular-nums dark:border-slate-700/60">{l.compliant_qty}</td>
-                    <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                    <td className="border-b border-slate-100 p-2 font-mono dark:border-slate-700/60">{l.sku}</td>
+                    <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">{l.name || "—"}</td>
+                    <td className="border-b border-slate-100 p-2 font-mono dark:border-slate-700/60">{l.bin}</td>
+                    <td className="border-b border-slate-100 p-2 font-mono dark:border-slate-700/60">{l.batch}</td>
+                    <td className="border-b border-slate-100 p-2 text-right tabular-nums dark:border-slate-700/60">{l.instructed_qty}</td>
+                    <td className="border-b border-slate-100 p-2 text-right tabular-nums dark:border-slate-700/60">{l.actual_qty}</td>
+                    <td className="border-b border-slate-100 p-2 text-right tabular-nums dark:border-slate-700/60">{l.compliant_qty}</td>
+                    <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">
                       <Tag tone={lineTone(l.status)}>{l.status}</Tag>
                     </td>
-                    <td className="border-b border-slate-100 p-1.5 font-mono dark:border-slate-700/60">{l.picked_bin_batch || "—"}</td>
+                    <td className="border-b border-slate-100 p-2 font-mono dark:border-slate-700/60">{l.picked_bin_batch || "—"}</td>
                   </tr>
                 ))}
               </tbody>
