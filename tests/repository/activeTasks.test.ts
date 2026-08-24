@@ -192,6 +192,23 @@ describe("dueForWmsBlock — keyed off creation, not assignment", () => {
     });
     expect(dueForWmsBlock([t])).toEqual([]);
   });
+
+  it("does not flag a facility still awaiting its gate pass — it was never released to WMS/Supervisor, so there's nothing to block", () => {
+    const t = task({
+      gatePassNo: undefined,
+      createdAt: staleCreatedAt,
+      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line] }],
+    });
+    expect(dueForWmsBlock([t])).toEqual([]);
+  });
+
+  it("still flags a stale facility once its own or the task's gate pass is set", () => {
+    const t = task({
+      createdAt: staleCreatedAt,
+      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line] }],
+    });
+    expect(dueForWmsBlock([t]).map((f) => f.no)).toEqual(["F-1"]);
+  });
 });
 
 describe("activeFacilityLists — discarding is a separate concept from archiving", () => {

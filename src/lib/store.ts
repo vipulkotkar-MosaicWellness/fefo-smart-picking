@@ -160,10 +160,12 @@ export function stampAssignment(f: FacilityPicklist): FacilityPicklist {
  * there's nothing left to block.
  */
 export function dueForWmsBlock(tasks: PickingTask[], now = Date.now()): FacilityPicklist[] {
-  const createdAtByTask = new Map(tasks.map((t) => [t.no, t.createdAt] as const));
+  const taskByNo = new Map(tasks.map((t) => [t.no, t] as const));
   return activeFacilityLists(tasks).filter((f) => {
     if (f.status === "completed" || f.wmsBlocked || f.wmsRevokedAt) return false;
-    const created = f.createdAt ?? createdAtByTask.get(f.taskNo);
+    // Never released to the Supervisor/WMS yet — nothing there to have reserved.
+    if (gatePassPending(f, taskByNo.get(f.taskNo))) return false;
+    const created = f.createdAt ?? taskByNo.get(f.taskNo)?.createdAt;
     if (!created) return false;
     return now - new Date(created).getTime() >= WMS_BLOCK_DELAY_MS;
   });
