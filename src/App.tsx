@@ -235,7 +235,7 @@ function Workspace() {
       headerActions={<HeaderActions role={role} displayName={profile!.display_name} onSignOut={() => void signOut()} />}
       badges={{ supervisor: unassignedCount, holds: activeHoldsCount, demand: pendingGatePassCount }}
     >
-      <OperationsToolbar />
+      {activeView !== "adherence" && <OperationsToolbar />}
       {activeView === "adherence" && (
         <div className="space-y-4">
           <GatepassAdherence />
