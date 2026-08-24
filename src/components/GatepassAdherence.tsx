@@ -54,60 +54,76 @@ function pctTone(pct: number): "ok" | "warn" | "bad" {
   return "bad";
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+const TONE_TEXT: Record<"ok" | "warn" | "bad" | "info", string> = {
+  ok: "text-emerald-700 dark:text-emerald-400",
+  warn: "text-amber-700 dark:text-amber-400",
+  bad: "text-rose-700 dark:text-rose-400",
+  info: "text-[var(--fefo-teal-700)] dark:text-teal-300",
+};
+const TONE_BADGE: Record<"ok" | "warn" | "bad" | "info", string> = {
+  ok: "bg-emerald-100 dark:bg-emerald-900/40",
+  warn: "bg-amber-100 dark:bg-amber-900/40",
+  bad: "bg-rose-100 dark:bg-rose-900/40",
+  info: "bg-[var(--fefo-teal-50)] dark:bg-slate-700",
+};
+
+function StatCard({ icon, tone, label, value, sub }: { icon: string; tone: "ok" | "warn" | "bad" | "info"; label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl border border-[var(--fefo-line)] bg-white p-3.5 dark:border-slate-700 dark:bg-slate-800">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
-      <p className="mt-1.5 text-2xl font-bold tabular-nums text-[var(--fefo-text)] dark:text-slate-100">{value}</p>
-      {sub && <p className="mt-0.5 text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
+    <div className="flex items-start gap-3 rounded-xl border border-[var(--fefo-line)] bg-white p-3.5 dark:border-slate-700 dark:bg-slate-800">
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-base font-bold ${TONE_BADGE[tone]} ${TONE_TEXT[tone]}`}>
+        {icon}
+      </span>
+      <div>
+        <p className="text-[11px] font-semibold text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
+        <p className={`mt-0.5 text-xl font-bold tabular-nums ${TONE_TEXT[tone]}`}>{value}</p>
+        {sub && <p className="text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
+      </div>
     </div>
   );
 }
 
-function GatepassDetail({ r }: { r: GatepassAdherenceRow }) {
+function TrendChart({ days }: { days: DaySummary[] }) {
+  const w = 560;
+  const h = 200;
+  const padL = 34;
+  const padB = 24;
+  const padT = 12;
+  const chartW = w - padL - 10;
+  const chartH = h - padT - padB;
+  const barW = Math.min(36, (chartW / days.length) * 0.55);
+
   return (
-    <details className="rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden">
-      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-lg p-2 hover:bg-slate-50 dark:hover:bg-slate-900">
-        <span className="flex items-center gap-1.5 text-xs">
-          <b className="font-mono">{r.gatepass_code}</b>
-          <span className="text-slate-500 dark:text-slate-400">{r.facility}</span>
-        </span>
-        <span className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-          {r.compliant_qty}/{r.instructed_qty} units
-          <Tag tone={pctTone(r.adherence_pct)}>{r.adherence_pct}%</Tag>
-        </span>
-      </summary>
-      <div className="border-t border-slate-200 p-2 dark:border-slate-700">
-        <table className="w-full border-collapse text-[11px]">
-          <thead>
-            <tr className="text-left uppercase tracking-wide text-teal-800 dark:text-teal-300">
-              <th className="border-b border-slate-200 p-1 dark:border-slate-700">SKU</th>
-              <th className="border-b border-slate-200 p-1 dark:border-slate-700">Instructed bin</th>
-              <th className="border-b border-slate-200 p-1 dark:border-slate-700">Instructed batch</th>
-              <th className="border-b border-slate-200 p-1 dark:border-slate-700">Instructed</th>
-              <th className="border-b border-slate-200 p-1 dark:border-slate-700">Actual</th>
-              <th className="border-b border-slate-200 p-1 dark:border-slate-700">Status</th>
-              <th className="border-b border-slate-200 p-1 dark:border-slate-700">Picked bin / batch (qty)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {r.lines.map((l, i) => (
-              <tr key={`${l.bin}-${l.batch}-${i}`} className="text-slate-700 dark:text-slate-200">
-                <td className="border-b border-slate-100 p-1 font-mono dark:border-slate-700/60">{l.sku}</td>
-                <td className="border-b border-slate-100 p-1 font-mono dark:border-slate-700/60">{l.bin}</td>
-                <td className="border-b border-slate-100 p-1 font-mono dark:border-slate-700/60">{l.batch}</td>
-                <td className="border-b border-slate-100 p-1 dark:border-slate-700/60">{l.instructed_qty}</td>
-                <td className="border-b border-slate-100 p-1 dark:border-slate-700/60">{l.actual_qty}</td>
-                <td className="border-b border-slate-100 p-1 dark:border-slate-700/60">
-                  <Tag tone={lineTone(l.status)}>{l.status}</Tag>
-                </td>
-                <td className="border-b border-slate-100 p-1 font-mono dark:border-slate-700/60">{l.picked_bin_batch || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </details>
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" role="img" aria-label="Daily adherence percentage trend">
+      {[0, 25, 50, 75, 100].map((tick) => {
+        const y = padT + chartH - (tick / 100) * chartH;
+        return (
+          <g key={tick}>
+            <line x1={padL} y1={y} x2={w - 6} y2={y} stroke="currentColor" strokeOpacity={0.12} strokeDasharray="2,3" />
+            <text x={padL - 6} y={y + 3} textAnchor="end" fontSize="9" fill="currentColor" opacity={0.6}>
+              {tick}
+            </text>
+          </g>
+        );
+      })}
+      {days.map((d, i) => {
+        const x = padL + (chartW / days.length) * (i + 0.5) - barW / 2;
+        const barH = (d.pct / 100) * chartH;
+        const y = padT + chartH - barH;
+        const color = d.pct >= 95 ? "#10b981" : d.pct >= 80 ? "#f59e0b" : "#e11d48";
+        return (
+          <g key={d.date}>
+            <rect x={x} y={y} width={barW} height={Math.max(barH, 1)} rx={3} fill={color} />
+            <text x={x + barW / 2} y={y - 4} textAnchor="middle" fontSize="9" fontWeight={600} fill="currentColor">
+              {d.pct}%
+            </text>
+            <text x={x + barW / 2} y={h - 6} textAnchor="middle" fontSize="8.5" fill="currentColor" opacity={0.65}>
+              {d.date.slice(5)}
+            </text>
+          </g>
+        );
+      })}
+      <line x1={padL} y1={padT + chartH} x2={w - 6} y2={padT + chartH} stroke="currentColor" strokeOpacity={0.25} />
+    </svg>
   );
 }
 
@@ -116,6 +132,7 @@ export function GatepassAdherence() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
+  const [expandedGatepass, setExpandedGatepass] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,7 +177,13 @@ export function GatepassAdherence() {
   const overallPct = totalInstructed ? Math.round((totalCompliant / totalInstructed) * 10000) / 100 : 0;
   const bestDay = days.reduce((a, b) => (b.pct > a.pct ? b : a), days[0]);
   const worstDay = days.reduce((a, b) => (b.pct < a.pct ? b : a), days[0]);
-  const expanded = days.find((d) => d.date === expandedDate) ?? null;
+  const expandedDay = days.find((d) => d.date === expandedDate) ?? null;
+  const expandedGp = expandedDay?.rows.find((r) => r.gatepass_code === expandedGatepass) ?? null;
+
+  function selectDate(date: string) {
+    setExpandedGatepass(null);
+    setExpandedDate(expandedDate === date ? null : date);
+  }
 
   return (
     <Card title="Gate pass adherence">
@@ -176,65 +199,148 @@ export function GatepassAdherence() {
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        <StatCard label="Overall adherence" value={`${overallPct}%`} sub={`${totalCompliant.toLocaleString()} / ${totalInstructed.toLocaleString()} units`} />
-        <StatCard label="Gate passes checked" value={String(rows.length)} sub={`across ${days.length} day${days.length === 1 ? "" : "s"}`} />
-        <StatCard label="Best day" value={`${bestDay.pct}%`} sub={bestDay.date} />
-        <StatCard label="Worst day" value={`${worstDay.pct}%`} sub={worstDay.date} />
+        <StatCard icon="%" tone={pctTone(overallPct)} label="Overall adherence" value={`${overallPct}%`} sub={`${totalCompliant.toLocaleString()} / ${totalInstructed.toLocaleString()} units`} />
+        <StatCard icon="Σ" tone="info" label="Gate passes checked" value={String(rows.length)} sub={`across ${days.length} day${days.length === 1 ? "" : "s"}`} />
+        <StatCard icon="↑" tone="ok" label="Best day" value={`${bestDay.pct}%`} sub={bestDay.date} />
+        <StatCard icon="↓" tone="bad" label="Worst day" value={`${worstDay.pct}%`} sub={worstDay.date} />
       </div>
 
-      <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-        <table className="w-full min-w-[520px] border-collapse text-xs tabular-nums">
-          <thead>
-            <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
-              <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Report Date</th>
-              <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Gate Passes</th>
-              <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
-              <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
-              <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Adherence %</th>
-            </tr>
-          </thead>
-          <tbody>
-            {days.map((d) => (
-              <tr
-                key={d.date}
-                onClick={() => setExpandedDate(expandedDate === d.date ? null : d.date)}
-                className={`cursor-pointer text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900 ${
-                  expandedDate === d.date ? "bg-[var(--fefo-teal-50)] dark:bg-slate-900" : ""
-                }`}
-              >
-                <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                  <span className="mr-1 inline-block w-3 text-[var(--fefo-muted)]">{expandedDate === d.date ? "▾" : "▸"}</span>
-                  {d.date}
-                </td>
-                <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.gatepassCount}</td>
-                <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.instructedQty.toLocaleString()}</td>
-                <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.compliantQty.toLocaleString()}</td>
-                <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
-                  <Tag tone={pctTone(d.pct)}>{d.pct}%</Tag>
+      <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_320px]">
+        <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+          <table className="w-full min-w-[520px] border-collapse text-xs tabular-nums">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Report Date</th>
+                <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Gate Passes</th>
+                <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
+                <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
+                <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Adherence %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {days.map((d) => (
+                <tr
+                  key={d.date}
+                  onClick={() => selectDate(d.date)}
+                  className={`cursor-pointer text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900 ${
+                    expandedDate === d.date ? "bg-[var(--fefo-teal-50)] dark:bg-slate-900" : ""
+                  }`}
+                >
+                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                    <span className="mr-1 inline-block w-3 text-[var(--fefo-muted)]">{expandedDate === d.date ? "▾" : "▸"}</span>
+                    {d.date}
+                  </td>
+                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.gatepassCount}</td>
+                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.instructedQty.toLocaleString()}</td>
+                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{d.compliantQty.toLocaleString()}</td>
+                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
+                    <Tag tone={pctTone(d.pct)}>{d.pct}%</Tag>
+                  </td>
+                </tr>
+              ))}
+              <tr className="font-bold text-[var(--fefo-text)] dark:text-slate-100">
+                <td className="p-1.5">Overall</td>
+                <td className="p-1.5 text-right">{rows.length}</td>
+                <td className="p-1.5 text-right">{totalInstructed.toLocaleString()}</td>
+                <td className="p-1.5 text-right">{totalCompliant.toLocaleString()}</td>
+                <td className="p-1.5 text-right">
+                  <Tag tone={pctTone(overallPct)}>{overallPct}%</Tag>
                 </td>
               </tr>
-            ))}
-            <tr className="font-bold text-[var(--fefo-text)] dark:text-slate-100">
-              <td className="p-1.5">Overall</td>
-              <td className="p-1.5 text-right">{rows.length}</td>
-              <td className="p-1.5 text-right">{totalInstructed.toLocaleString()}</td>
-              <td className="p-1.5 text-right">{totalCompliant.toLocaleString()}</td>
-              <td className="p-1.5 text-right">
-                <Tag tone={pctTone(overallPct)}>{overallPct}%</Tag>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="rounded-lg border border-[var(--fefo-line)] bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+            Daily adherence trend
+          </p>
+          <TrendChart days={days} />
+        </div>
       </div>
 
-      {expanded && (
-        <div className="space-y-1.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-            Gate passes on {expanded.date}
+      {expandedDay && (
+        <div className="mb-4">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+            Gate passes on {expandedDay.date}
           </p>
-          {expanded.rows.map((r) => (
-            <GatepassDetail key={`${r.gatepass_code}-${r.report_date}`} r={r} />
-          ))}
+          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+            <table className="w-full min-w-[480px] border-collapse text-xs tabular-nums">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Gate Pass</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Facility</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Adherence %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {expandedDay.rows.map((r) => (
+                  <tr
+                    key={r.gatepass_code}
+                    onClick={() => setExpandedGatepass(expandedGatepass === r.gatepass_code ? null : r.gatepass_code)}
+                    className={`cursor-pointer text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900 ${
+                      expandedGatepass === r.gatepass_code ? "bg-[var(--fefo-teal-50)] dark:bg-slate-900" : ""
+                    }`}
+                  >
+                    <td className="border-b border-slate-100 p-1.5 font-mono dark:border-slate-700/60">
+                      <span className="mr-1 inline-block w-3 text-[var(--fefo-muted)]">{expandedGatepass === r.gatepass_code ? "▾" : "▸"}</span>
+                      {r.gatepass_code}
+                    </td>
+                    <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{r.facility}</td>
+                    <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{r.instructed_qty.toLocaleString()}</td>
+                    <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">{r.compliant_qty.toLocaleString()}</td>
+                    <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
+                      <Tag tone={pctTone(r.adherence_pct)}>{r.adherence_pct}%</Tag>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {expandedGp && (
+        <div>
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+            Line detail for {expandedGp.gatepass_code}
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+            <table className="w-full min-w-[720px] border-collapse text-[11px]">
+              <thead>
+                <tr className="text-left uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">SKU</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">SKU Name</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Instructed Bin</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Instructed Batch</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Actual Qty</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Status</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-1.5 dark:border-slate-700 dark:bg-slate-900">Actually Picked Bin/Batch (Qty)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {expandedGp.lines.map((l, i) => (
+                  <tr key={`${l.bin}-${l.batch}-${i}`} className="text-slate-700 dark:text-slate-200">
+                    <td className="border-b border-slate-100 p-1.5 font-mono dark:border-slate-700/60">{l.sku}</td>
+                    <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{l.name || "—"}</td>
+                    <td className="border-b border-slate-100 p-1.5 font-mono dark:border-slate-700/60">{l.bin}</td>
+                    <td className="border-b border-slate-100 p-1.5 font-mono dark:border-slate-700/60">{l.batch}</td>
+                    <td className="border-b border-slate-100 p-1.5 text-right tabular-nums dark:border-slate-700/60">{l.instructed_qty}</td>
+                    <td className="border-b border-slate-100 p-1.5 text-right tabular-nums dark:border-slate-700/60">{l.actual_qty}</td>
+                    <td className="border-b border-slate-100 p-1.5 text-right tabular-nums dark:border-slate-700/60">{l.compliant_qty}</td>
+                    <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                      <Tag tone={lineTone(l.status)}>{l.status}</Tag>
+                    </td>
+                    <td className="border-b border-slate-100 p-1.5 font-mono dark:border-slate-700/60">{l.picked_bin_batch || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </Card>
