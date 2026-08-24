@@ -4,12 +4,11 @@ import { activeTasks, useStore } from "../lib/store";
 import { AgeingFilter } from "./AgeingFilter";
 import { BinSkipReport } from "./BinSkipReport";
 import { FillRateReport } from "./FillRateReport";
-import { GatepassAdherence } from "./GatepassAdherence";
 import { NotFoundSummary } from "./NotFoundSummary";
 import { OverallReport } from "./OverallReport";
 import { PicklistRepository } from "./PicklistRepository";
 
-type ReportTab = "notfound" | "overall" | "repository" | "binskips" | "fillrate" | "adherence";
+type ReportTab = "notfound" | "overall" | "repository" | "binskips" | "fillrate";
 
 const TABS: { id: ReportTab; label: string }[] = [
   { id: "notfound", label: "Not-Found Summary" },
@@ -17,7 +16,6 @@ const TABS: { id: ReportTab; label: string }[] = [
   { id: "repository", label: "Picklist Repository" },
   { id: "binskips", label: "Bin Skip Report" },
   { id: "fillrate", label: "Fill Rate" },
-  { id: "adherence", label: "Gate Pass Adherence" },
 ];
 
 export function Reports() {
@@ -54,7 +52,6 @@ export function Reports() {
       {tab === "repository" && <PicklistRepository tasks={filtered} />}
       {tab === "binskips" && <BinSkipReport tasks={filtered} />}
       {tab === "fillrate" && <FillRateReport tasks={filtered} />}
-      {tab === "adherence" && <GatepassAdherence />}
     </div>
   );
 }

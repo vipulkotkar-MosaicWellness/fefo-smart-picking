@@ -4,6 +4,7 @@ import { getNavigation } from "../../src/lib/navigation";
 describe("getNavigation", () => {
   it("orders items for an admin-tier account, with Admin under Settings", () => {
     expect(getNavigation("admin").map((item) => item.label)).toEqual([
+      "Gate Pass Adherence",
       "Demand Planner",
       "Picking Supervisor",
       "Reports",
@@ -15,6 +16,7 @@ describe("getNavigation", () => {
 
   it("gives super_admin the same workflow access as admin", () => {
     expect(getNavigation("super_admin").map((item) => item.label)).toEqual([
+      "Gate Pass Adherence",
       "Demand Planner",
       "Picking Supervisor",
       "Reports",

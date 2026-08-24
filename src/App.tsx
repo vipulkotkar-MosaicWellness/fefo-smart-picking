@@ -9,6 +9,7 @@ import { AppShell } from "./components/AppShell";
 import { MosaicLogo } from "./components/brand/MosaicLogo";
 import { AuthGate, PendingApproval, SetNewPassword } from "./components/AuthGate";
 import { DemandPanel } from "./components/DemandPanel";
+import { GatepassAdherence } from "./components/GatepassAdherence";
 import { GatePassPending } from "./components/GatePassPending";
 import { InventoryPanel } from "./components/InventoryPanel";
 import { PerformanceSummaryTiles } from "./components/PerformanceSummaryTiles";
@@ -29,6 +30,7 @@ function initialsOf(name: string): string {
 }
 
 const VIEW_LABEL: Record<ViewId, string> = {
+  adherence: "Gate Pass Adherence",
   demand: "Demand Planner",
   supervisor: "Picking Supervisor",
   picker: "Picker",
@@ -234,6 +236,11 @@ function Workspace() {
       badges={{ supervisor: unassignedCount, holds: activeHoldsCount, demand: pendingGatePassCount }}
     >
       <OperationsToolbar />
+      {activeView === "adherence" && (
+        <div className="space-y-4">
+          <GatepassAdherence />
+        </div>
+      )}
       {activeView === "demand" && (
         <div className="space-y-4">
           <DemandPanel />
