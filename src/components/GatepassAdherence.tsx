@@ -34,11 +34,12 @@ function byDay(rows: GatepassAdherenceRow[]): DaySummary[] {
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
-/** Two sheets: gate-pass rollup, and full line-level detail (with Gate Pass kept as the
- * first column on the detail sheet only so a line can still be traced back to its gate pass). */
+/** Two sheets: gate-pass rollup, and full line-level detail. Report Date and Facility are
+ * repeated on both sheets so either can be filtered/traced without cross-referencing the other. */
 function exportWorkbook(rows: GatepassAdherenceRow[]) {
   const summarySheet = XLSX.utils.json_to_sheet(
     rows.map((r) => ({
+      "Report Date": r.report_date,
       "Gate Pass": r.gatepass_code,
       Facility: r.facility,
       "Instructed Qty": r.instructed_qty,
@@ -50,7 +51,9 @@ function exportWorkbook(rows: GatepassAdherenceRow[]) {
   const detailSheet = XLSX.utils.json_to_sheet(
     rows.flatMap((r) =>
       r.lines.map((l) => ({
+        "Report Date": r.report_date,
         "Gate Pass": r.gatepass_code,
+        Facility: r.facility,
         SKU: l.sku,
         "SKU Name": l.name ?? "",
         "Instructed Bin": l.bin,
