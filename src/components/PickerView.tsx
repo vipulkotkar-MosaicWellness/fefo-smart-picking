@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../lib/authStore";
 import { criticalPathSort } from "../lib/engine";
 import { monLabel } from "../lib/format";
+import { NOT_FOUND_REASONS } from "../lib/notFoundReasons";
 import { loadQueue } from "../lib/offlineQueue";
 import { supervisorVisibleFacilityLists, useStore } from "../lib/store";
 import type { FacilityPicklist, PickLine } from "../lib/types";
 import { Button, Tag } from "./Ui";
 
-const EXCEPTION_REASONS = ["Not enough stock", "Batch not found", "Damaged stock", "Location blocked", "Other"] as const;
+const EXCEPTION_REASONS = NOT_FOUND_REASONS;
 
 function SyncStatus() {
   const [online, setOnline] = useState(navigator.onLine);

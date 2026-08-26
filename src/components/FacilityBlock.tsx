@@ -2,6 +2,7 @@ import { useState, type ChangeEvent } from "react";
 import { useAuth } from "../lib/authStore";
 import { criticalPathSort } from "../lib/engine";
 import { downloadCsv, monLabel } from "../lib/format";
+import { NOT_FOUND_REASONS } from "../lib/notFoundReasons";
 import { useStore } from "../lib/store";
 import { uniwareCsv } from "../lib/uniwareExport";
 import type { FacilityPicklist } from "../lib/types";
@@ -18,6 +19,7 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
   const role = useAuth((s) => s.profile?.role);
   const canDiscard = role === "admin" || role === "super_admin";
   const [nf, setNf] = useState<Record<number, number>>({});
+  const [nfReason, setNfReason] = useState<Record<number, string>>({});
   const [assignTo, setAssignTo] = useState("");
   const open = f.status === "open";
   const lines = criticalPathSort(f.lines);
@@ -72,7 +74,7 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
   function complete() {
     const results: Record<number, number> = {};
     lines.forEach((l) => (results[l.rid] = nf[l.rid] ?? 0));
-    void applyPicks(f.no, results, undefined, myName);
+    void applyPicks(f.no, results, nfReason, myName);
   }
   async function discard() {
     if (!window.confirm(`Discard picklist ${f.no}${gatePassNo ? ` (${gatePassNo})` : ""} at ${f.facility}? Its reserved stock is freed, nothing is deleted, and it can be restored from Admin → Discarded picklists.`)) {
@@ -190,14 +192,25 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
                 </td>
                 {open && (
                   <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                    <input
-                      type="number"
-                      min={0}
-                      max={l.qty}
-                      value={nf[l.rid] ?? 0}
-                      onChange={(e) => setNf({ ...nf, [l.rid]: parseInt(e.target.value, 10) || 0 })}
-                      className="w-16 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-900"
-                    />
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        max={l.qty}
+                        value={nf[l.rid] ?? 0}
+                        onChange={(e) => setNf({ ...nf, [l.rid]: parseInt(e.target.value, 10) || 0 })}
+                        className="w-16 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-900"
+                      />
+                      {(nf[l.rid] ?? 0) > 0 && (
+                        <select
+                          value={nfReason[l.rid] ?? NOT_FOUND_REASONS[0]}
+                          onChange={(e) => setNfReason({ ...nfReason, [l.rid]: e.target.value })}
+                          className="rounded border border-slate-300 p-1 text-[11px] dark:border-slate-600 dark:bg-slate-900"
+                        >
+                          {NOT_FOUND_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      )}
+                    </div>
                   </td>
                 )}
               </tr>
