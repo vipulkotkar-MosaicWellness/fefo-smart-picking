@@ -930,7 +930,19 @@ export const useStore = create<AppState>()(
           return { ...t, facilities };
         });
 
-        if (completedFacility && parentTask && completedFacility.bad > 0) {
+        // channelRules lives in each browser's own localStorage (see partialize
+        // below), not Supabase — a channel added on one device isn't visible on
+        // another's until that browser reopens/re-adds it. Missing a rule here
+        // must never crash the whole completion (it used to: cutoffMonths(undefined,
+        // ...) threw, so the entire applyPicks call failed before its set() ever
+        // ran — the picklist looked stuck, nothing had actually saved). Skip the
+        // not-found re-offer for this channel and say so instead; the completion
+        // itself (stock deduction, gate pass, holds) still goes through below.
+        let missingRuleNotice = "";
+        if (completedFacility && parentTask && completedFacility.bad > 0 && !state.channelRules[parentTask.channel]) {
+          missingRuleNotice = ` ⚠ "${parentTask.channel}" has no channel rule on this device — not-found items weren't auto re-offered. Open Admin → Channels here, or handle the shortfall manually.`;
+        }
+        if (completedFacility && parentTask && completedFacility.bad > 0 && state.channelRules[parentTask.channel]) {
           const task = parentTask;
           const rule = state.channelRules[task.channel];
           const usedRids = new Set(task.facilities.flatMap((f) => f.lines.map((l) => l.rid)));
@@ -972,7 +984,7 @@ export const useStore = create<AppState>()(
           }
         }
 
-        set({ tasks, stock, gpSeq, notice: `${facilityNo} updated.` });
+        set({ tasks, stock, gpSeq, notice: `${facilityNo} updated.${missingRuleNotice}` });
 
         if (completedFacility) {
           const requests = holdsToCreate(completedFacility.lines, completedFacility.facility, parentTask?.no ?? facilityNo, activeHoldKeys(get().holds), stock);
