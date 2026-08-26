@@ -11,11 +11,12 @@ interface Invite {
   created_at: string;
 }
 
-const ADMIN_ROLE_OPTIONS = ["pending", "planner", "picker"] as const;
-const SUPER_ADMIN_ROLE_OPTIONS = ["pending", "super_admin", "admin", "planner", "picker"] as const;
+const ADMIN_ROLE_OPTIONS = ["pending", "planner", "inventory_planner", "picker"] as const;
+const SUPER_ADMIN_ROLE_OPTIONS = ["pending", "super_admin", "admin", "planner", "inventory_planner", "picker"] as const;
 
 const ROLE_LABELS: Record<string, string> = {
   planner: "Planner / Supervisor",
+  inventory_planner: "Inventory Planner",
 };
 
 export function AdminUsers() {

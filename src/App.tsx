@@ -162,7 +162,7 @@ function Workspace() {
     checkHoldAutoRelease,
   } = useStore();
   const { profile, signOut } = useAuth();
-  const role = profile!.role as "super_admin" | "admin" | "planner" | "picker";
+  const role = profile!.role as "super_admin" | "admin" | "planner" | "picker" | "inventory_planner";
   const isAdminTier = role === "admin" || role === "super_admin";
 
   const unassignedCount = supervisorVisibleFacilityLists(tasks).filter(
@@ -243,6 +243,7 @@ function Workspace() {
       )}
       {activeView === "demand" && (
         <div className="space-y-4">
+          {role === "inventory_planner" && <InventoryUploadFallback />}
           <DemandPanel />
           <GatePassPending />
           <PerformanceSummaryTiles tasks={tasks} onViewReport={() => setActiveView("reports")} />

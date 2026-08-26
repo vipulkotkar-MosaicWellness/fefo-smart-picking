@@ -115,7 +115,11 @@ export interface FacilityPicklist {
   wmsRevokedBy?: string;
 }
 
-export type Role = "super_admin" | "admin" | "planner" | "picker";
+// inventory_planner: same screen access as planner, plus the manual
+// inventory-upload fallback planner doesn't have — a narrower tier for
+// people who only need to upload/sync stock and clear pending picklists,
+// without full admin.
+export type Role = "super_admin" | "admin" | "planner" | "picker" | "inventory_planner";
 
 /** Demand that could not be met at any facility. */
 export interface Shortfall {

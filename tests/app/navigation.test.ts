@@ -33,4 +33,11 @@ describe("getNavigation", () => {
   it("never shows Admin to the planner role", () => {
     expect(getNavigation("planner").map((item) => item.label)).not.toContain("Admin");
   });
+
+  it("gives inventory_planner the same workflow access as planner, minus Admin", () => {
+    expect(getNavigation("inventory_planner").map((item) => item.label)).toEqual(
+      getNavigation("planner").map((item) => item.label),
+    );
+    expect(getNavigation("inventory_planner").map((item) => item.label)).not.toContain("Admin");
+  });
 });
