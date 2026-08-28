@@ -974,7 +974,17 @@ export const useStore = create<AppState>()(
             const gp = effectiveGatePassNo(f, task);
             if (gp) gatePassByFacility[f.facility] = gp;
           });
-          const r2Lists = buildFacilityLists(task.no, 2, r2, state.facilityPriority, "-R2", gatePassByFacility);
+          // Next round, not always "2" — completing an already-round-2 (or
+          // later) facility with a fresh not-found qty must produce round 3,
+          // 4, etc., each with its own suffix. Hardcoding round 2/"-R2" here
+          // meant a second not-found event on the same facility tried to
+          // reuse the exact `no` of the facility just completed, so the
+          // "round 3" silently landed as a same-`no` duplicate entry in
+          // `facilities` instead of a distinct, visible picklist — refreshing
+          // could never surface it because nothing was actually missing, it
+          // was just unreachable under a collided id.
+          const nextRound = completedFacility.round + 1;
+          const r2Lists = buildFacilityLists(task.no, nextRound, r2, state.facilityPriority, `-R${nextRound}`, gatePassByFacility);
           if (r2Lists.length || extraShort.length || extraSkipped.length) {
             tasks = tasks.map((t) =>
               t.no === task.no
