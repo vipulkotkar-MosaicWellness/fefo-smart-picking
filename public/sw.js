@@ -32,10 +32,27 @@ self.addEventListener("fetch", (e) => {
     e.respondWith(
       fetch(req)
         .then((res) => {
-          caches.open(CACHE).then((c) => c.put(req, res.clone()));
+          // Clone synchronously, before returning res — the caller starts
+          // consuming its body as soon as it's returned, and cloning after
+          // that body is (even partly) read throws "Response body is
+          // already used". Storing into the cache itself can stay async;
+          // only the clone() call has to happen up front.
+          const resToCache = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, resToCache));
           return res;
         })
-        .catch(() => caches.match(req)),
+        .catch(async () => {
+          const cached = await caches.match(req);
+          // Both the network AND the cache can come back empty (first-ever
+          // load while offline) — respondWith() must always resolve to a
+          // real Response, or the browser reports a hard network error
+          // ("Failed to convert value to 'Response'") instead of this page.
+          return cached || new Response("You're offline and this page hasn't been cached yet.", {
+            status: 503,
+            statusText: "Offline",
+            headers: { "Content-Type": "text/plain" },
+          });
+        }),
     );
     return;
   }
@@ -44,9 +61,16 @@ self.addEventListener("fetch", (e) => {
     caches.open(CACHE).then(async (cache) => {
       const cached = await cache.match(req);
       if (cached) return cached;
-      const res = await fetch(req);
-      if (res && res.status === 200) cache.put(req, res.clone());
-      return res;
+      try {
+        const res = await fetch(req);
+        if (res && res.status === 200) cache.put(req, res.clone());
+        return res;
+      } catch {
+        // Offline and this asset was never cached — an uncaught rejection
+        // here would surface as the same hard network error as the HTML
+        // case above, so resolve to a real (failing) Response instead.
+        return new Response("Offline", { status: 503, statusText: "Offline" });
+      }
     }),
   );
 });
