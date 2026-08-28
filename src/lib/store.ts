@@ -963,17 +963,23 @@ export const useStore = create<AppState>()(
             if (w.short > 0) extraShort.push({ sku, name: state.skus[sku].name, qty: w.short });
             extraSkipped.push(...w.skipped);
           }
-          // Round-2 (not-found re-offer) picklists aren't a new order — they
-          // reuse whatever gate pass that facility already has on this task
-          // from round 1, so they never land in "Gate Pass Allocation
-          // Pending" for stock that was already cleared to pick. A facility
-          // round 2 lands on that round 1 never used still correctly falls
-          // through to pending, since it has no round-1 entry to inherit from.
+          // A re-offer that lands back on the SAME facility that just came up
+          // short isn't a new order — it reuses that facility's own existing
+          // gate pass, so it never lands in "Gate Pass Allocation Pending"
+          // for stock that was already cleared to pick. Deliberately scoped
+          // to `completedFacility` alone, NOT every facility on the task: an
+          // earlier version keyed this off facility NAME across the whole
+          // task, so a re-offer that got fulfilled at a DIFFERENT facility
+          // (because that's where the leftover stock actually was) could
+          // silently inherit some other, unrelated round-1 order's gate pass
+          // just because it happened to share that facility's name — tagging
+          // a shortfall re-offer with a gate pass for goods that have nothing
+          // to do with it. Landing on a different facility now always falls
+          // through to pending, same as a facility genuinely touched for the
+          // first time, and gets its own fresh gate pass.
           const gatePassByFacility: Record<string, string | undefined> = {};
-          task.facilities.forEach((f) => {
-            const gp = effectiveGatePassNo(f, task);
-            if (gp) gatePassByFacility[f.facility] = gp;
-          });
+          const completedGp = effectiveGatePassNo(completedFacility, task);
+          if (completedGp) gatePassByFacility[completedFacility.facility] = completedGp;
           // Next round, not always "2" — completing an already-round-2 (or
           // later) facility with a fresh not-found qty must produce round 3,
           // 4, etc., each with its own suffix. Hardcoding round 2/"-R2" here
