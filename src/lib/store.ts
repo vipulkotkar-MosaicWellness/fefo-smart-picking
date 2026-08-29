@@ -11,7 +11,7 @@ import { rowsFromTuples, type StockTuple } from "./sampleData";
 import { REAL_STOCK } from "./stockSnapshot";
 import { isSupabaseConfigured } from "./supabaseClient";
 import type { ShelfwiseStockRow } from "./shelfwiseCsv";
-import { fetchStock, fetchSyncState, replaceStock } from "./supabaseStock";
+import { fetchFacilityLastSynced, fetchStock, fetchSyncState, replaceStock } from "./supabaseStock";
 import type { SyncSource } from "./syncSource";
 import { deletePickerRow, fetchPickers, insertPicker, renamePickerRow, subscribePickers } from "./pickersSupabase";
 import { applyChannelOverrides, fetchChannelOverrides, markChannelOverrideDeleted, subscribeChannelOverrides, upsertChannelOverride } from "./channelsSupabase";
@@ -404,6 +404,11 @@ export interface AppState {
   lastSync: string;
   lastSyncSource: SyncSource;
   lastSyncBy: string | null;
+  // Per-facility last-synced time (facility -> ISO timestamp) — each
+  // facility's stock now refreshes independently, so this can legitimately
+  // differ from `lastSync` (which reflects whichever facility synced most
+  // recently). See facility_last_synced view / fetchFacilityLastSynced().
+  facilityLastSynced: Record<string, string>;
   syncing: boolean;
 
   visibleFacilities: string[];
@@ -509,6 +514,7 @@ export const useStore = create<AppState>()(
       lastSync: new Date().toISOString(),
       lastSyncSource: null,
       lastSyncBy: null,
+      facilityLastSynced: {},
       syncing: false,
 
       visibleFacilities: [...FACILITY_PRIORITY],
@@ -702,11 +708,12 @@ export const useStore = create<AppState>()(
       // clicked. When INGEST_TRIGGER_URL is configured, this calls the same
       // ingest() the hourly trigger runs, on demand, right now — then reads
       // back whatever Supabase ends up with either way.
+      //
+      // No client-side anyOpen() gate here — the freeze is enforced per
+      // facility, server-side (frozen_facilities view), so a picklist open
+      // at one facility no longer has to block a sync that would happily
+      // update the other two.
       syncStock: async () => {
-        if (get().anyOpen()) {
-          set({ notice: "⚠ Feed frozen — complete open picking before syncing." });
-          return;
-        }
         if (isSupabaseConfigured) {
           if (INGEST_TRIGGER_URL) {
             set({ syncing: true, notice: "Requesting a fresh pull from the inventory feed…" });
@@ -737,6 +744,7 @@ export const useStore = create<AppState>()(
         try {
           const rows = await fetchStock();
           const syncState = await fetchSyncState();
+          const facilityLastSynced = await fetchFacilityLastSynced().catch(() => get().facilityLastSynced);
           const changed = syncState.lastSynced && syncState.lastSynced !== prevLast;
           set({
             stock: rows,
@@ -744,6 +752,7 @@ export const useStore = create<AppState>()(
             lastSync: syncState.lastSynced ?? new Date().toISOString(),
             lastSyncSource: syncState.source,
             lastSyncBy: syncState.updatedBy,
+            facilityLastSynced,
             syncing: false,
             notice: changed
               ? `✓ New stock loaded — ${rows.length.toLocaleString()} rows.`

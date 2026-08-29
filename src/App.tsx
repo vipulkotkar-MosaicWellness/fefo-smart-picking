@@ -68,18 +68,20 @@ function HeaderActions({ role, displayName, onSignOut }: { role: string; display
 }
 
 function OperationsToolbar() {
-  const { locations, visibleFacilities, toggleFacility, anyOpen, tasks, lastSync, lastSyncSource, lastSyncBy, syncStock, syncing, notice } = useStore();
+  const { locations, visibleFacilities, toggleFacility, tasks, lastSyncSource, lastSyncBy, facilityLastSynced, syncStock, syncing, notice } =
+    useStore();
   // Must mirror anyOpen()'s own filtering exactly (activeFacilityLists, and
   // skip anything WMS-blocked) — otherwise this list shows archived,
   // discarded, or already-WMS-blocked tasks as if they were still holding
-  // the freeze, when none of them actually are.
-  const openTaskNos = new Set(
-    activeFacilityLists(tasks)
-      .filter((f) => !f.wmsBlocked && f.lines.some((l) => l.picked == null))
-      .map((f) => f.taskNo),
-  );
-  const openNos = [...openTaskNos].join(", ");
-  const syncLabel = new Date(lastSync).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  // the freeze, when none of them actually are. Grouped by facility since
+  // the freeze — and now the sync itself — is per-facility, not global: one
+  // facility having an open task no longer means every facility is stuck.
+  const openTaskNosByFacility = new Map<string, Set<string>>();
+  for (const f of activeFacilityLists(tasks)) {
+    if (f.wmsBlocked || !f.lines.some((l) => l.picked == null)) continue;
+    if (!openTaskNosByFacility.has(f.facility)) openTaskNosByFacility.set(f.facility, new Set());
+    openTaskNosByFacility.get(f.facility)!.add(f.taskNo);
+  }
   const source = syncSourceLabel(lastSyncSource, lastSyncBy);
 
   return (
@@ -101,9 +103,6 @@ function OperationsToolbar() {
         </div>
         <div className="ml-auto flex items-center gap-2 text-xs">
           <Tag tone={source.tone}>{source.text}</Tag>
-          <span className="text-[var(--fefo-muted)] dark:text-slate-400">
-            <b className="text-[var(--fefo-text)] dark:text-slate-200">{syncLabel}</b>
-          </span>
           <button
             onClick={syncStock}
             disabled={syncing}
@@ -128,21 +127,38 @@ function OperationsToolbar() {
         </div>
       )}
 
-      <div
-        className={`mt-2.5 rounded-lg px-3 py-2 text-xs font-semibold ${
-          anyOpen() ? "bg-[var(--fefo-warning-bg)] text-amber-900" : "bg-[var(--fefo-teal-50)] text-[var(--fefo-teal-700)]"
-        }`}
-      >
-        {anyOpen() ? (
-          <>
-            ⚠ Inventory feed <b>FROZEN</b> — open task(s): {openNos}. New stock will not load from the email until all picking is
-            complete.
-          </>
-        ) : (
-          <>
-            Inventory feed <b>live</b> — stock refreshes from the auto-generated email.
-          </>
-        )}
+      {/* Per-facility sync status — each facility refreshes independently now,
+          so one blended timestamp would understate how stale a busy facility
+          really is. */}
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        {locations().map((f) => {
+          const openNos = [...(openTaskNosByFacility.get(f) ?? [])].join(", ");
+          const frozen = openTaskNosByFacility.has(f);
+          const synced = facilityLastSynced[f];
+          const syncedLabel = synced
+            ? new Date(synced).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+            : "never synced";
+          return (
+            <div
+              key={f}
+              className={`rounded-lg px-3 py-2 text-xs font-semibold ${
+                frozen ? "bg-[var(--fefo-warning-bg)] text-amber-900" : "bg-[var(--fefo-teal-50)] text-[var(--fefo-teal-700)]"
+              }`}
+              title={frozen ? `Open: ${openNos}` : undefined}
+            >
+              <span className="mr-1">{f}:</span>
+              {frozen ? (
+                <>
+                  ⚠ <b>frozen</b> (picking in progress) — last synced <b>{syncedLabel}</b>
+                </>
+              ) : (
+                <>
+                  <b>live</b> — last synced <b>{syncedLabel}</b>
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

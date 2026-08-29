@@ -53,6 +53,24 @@ export async function fetchStock(): Promise<StockRow[]> {
   }));
 }
 
+/**
+ * Per-facility last-synced time — since the ingest now replaces each
+ * facility's stock rows independently (skipping only the ones frozen at
+ * that moment), there's no longer one single "last synced" for the whole
+ * feed. Backed by the facility_last_synced view (max(stock.updated_at)
+ * grouped by facility) — see add_per_facility_feed_frozen.sql.
+ */
+export async function fetchFacilityLastSynced(): Promise<Record<string, string>> {
+  if (!supabase) return {};
+  const { data, error } = await supabase.from("facility_last_synced").select("facility,last_synced");
+  if (error) throw error;
+  const out: Record<string, string> = {};
+  for (const row of (data ?? []) as { facility: string; last_synced: string }[]) {
+    out[row.facility] = row.last_synced;
+  }
+  return out;
+}
+
 export interface SyncStateInfo {
   lastSynced: string | null;
   source: SyncSource;

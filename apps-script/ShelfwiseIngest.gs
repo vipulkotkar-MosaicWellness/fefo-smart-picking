@@ -25,7 +25,7 @@
  * and put that full URL in the app's VITE_INGEST_TRIGGER_URL setting.
  */
 
-var INGEST_VERSION = 'v5-header-lookup';
+var INGEST_VERSION = 'v6-per-facility-freeze';
 var TARGET_FACILITIES = ['SL Mother Hub', 'SL Ambient', 'SL RX'];
 var EMAIL_QUERY = 'subject:"Export Job Complete - Shelfwise Inventory" newer_than:2d';
 
@@ -63,10 +63,11 @@ function ingest() {
     throw new Error('SERVICE_KEY is the PUBLISHABLE key — it cannot write. Use the SECRET (sb_secret / service_role) key.');
   }
 
-  if (isFeedFrozen(SUPABASE_URL, SERVICE_KEY)) {
-    Logger.log('Feed frozen — skipping.');
-    return { ok: true, status: 'frozen', rows: 0 };
-  }
+  // Which of our 3 facilities currently have an open, unpicked line —
+  // syncing those would shift stock out from under an active picker, so
+  // each one is skipped individually rather than freezing the whole feed.
+  var frozenFacilities = getFrozenFacilities(SUPABASE_URL, SERVICE_KEY);
+  if (frozenFacilities.length) Logger.log('Frozen this run: ' + frozenFacilities.join(', '));
 
   // 1) latest export email → CSV link
   var threads = GmailApp.search(EMAIL_QUERY, 0, 5);
@@ -99,7 +100,9 @@ function ingest() {
   Logger.log('Column positions: ' + JSON.stringify(idx) + ', vendorBatchIdx: ' + vendorBatchIdx);
 
   // 4) filter: our 3 facilities, Good inventory, Active batch status, qty > 0
-  var out = [];
+  // — grouped by facility so each one can be synced (or skipped) on its own.
+  var byFacility = {};
+  TARGET_FACILITIES.forEach(function (f) { byFacility[f] = []; });
   var dropped = { facility: 0, invType: 0, status: 0, qtyZero: 0 };
   for (var i = 1; i < rows.length; i++) {
     var r = rows[i];
@@ -109,7 +112,7 @@ function ingest() {
     if (r[idx.status] !== 'Active') { dropped.status++; continue; }
     var qty = parseInt(r[idx.qty], 10);
     if (!qty || qty <= 0) { dropped.qtyZero++; continue; }
-    out.push({
+    byFacility[facility].push({
       facility: facility,
       bin: r[idx.bin] || 'DEFAULT',
       sku: r[idx.sku],
@@ -121,22 +124,38 @@ function ingest() {
       shelf: shelfMonths(r[idx.mfg], r[idx.expiry]),
     });
   }
-  Logger.log('Parsed ' + out.length + ' usable rows. Dropped: ' + JSON.stringify(dropped));
-  if (!out.length) { Logger.log('Nothing to insert.'); return { ok: true, status: 'nothing_to_insert', rows: 0 }; }
+  Logger.log('Dropped: ' + JSON.stringify(dropped));
 
-  // 5) clear + bulk-insert, checking every response code
-  var del = supa(SUPABASE_URL, SERVICE_KEY, 'DELETE', '/rest/v1/stock?id=gte.0');
-  if (del.getResponseCode() >= 300) throw new Error('DELETE failed ' + del.getResponseCode() + ': ' + del.getContentText());
+  // 5) per-facility clear + bulk-insert — a frozen or empty-in-this-export
+  // facility is left completely untouched (its existing stock rows stay put).
+  var synced = [];
+  var skipped = [];
+  var totalRows = 0;
+  for (var fi = 0; fi < TARGET_FACILITIES.length; fi++) {
+    var fac = TARGET_FACILITIES[fi];
+    if (frozenFacilities.indexOf(fac) >= 0) { skipped.push(fac); continue; }
+    var facRows = byFacility[fac];
+    if (!facRows.length) { Logger.log('No usable rows for ' + fac + ' this export — leaving its stock untouched.'); continue; }
 
-  for (var b = 0; b < out.length; b += 500) {
-    var resp = supa(SUPABASE_URL, SERVICE_KEY, 'POST', '/rest/v1/stock', out.slice(b, b + 500));
-    if (resp.getResponseCode() >= 300) throw new Error('INSERT failed ' + resp.getResponseCode() + ': ' + resp.getContentText());
+    var del = supa(SUPABASE_URL, SERVICE_KEY, 'DELETE', '/rest/v1/stock?facility=eq.' + encodeURIComponent(fac));
+    if (del.getResponseCode() >= 300) throw new Error('DELETE failed for ' + fac + ' ' + del.getResponseCode() + ': ' + del.getContentText());
+    for (var b = 0; b < facRows.length; b += 500) {
+      var resp = supa(SUPABASE_URL, SERVICE_KEY, 'POST', '/rest/v1/stock', facRows.slice(b, b + 500));
+      if (resp.getResponseCode() >= 300) throw new Error('INSERT failed for ' + fac + ' ' + resp.getResponseCode() + ': ' + resp.getContentText());
+    }
+    synced.push(fac);
+    totalRows += facRows.length;
+  }
+
+  if (!synced.length) {
+    Logger.log('Nothing synced this run. Frozen: ' + (skipped.join(', ') || 'none') + '.');
+    return { ok: true, status: skipped.length ? 'frozen' : 'nothing_to_insert', rows: 0, skipped: skipped };
   }
 
   supa(SUPABASE_URL, SERVICE_KEY, 'PATCH', '/rest/v1/sync_state?id=eq.1',
-    { last_synced: new Date().toISOString(), rows: out.length, status: 'ok', source: 'email', updated_by: null });
-  Logger.log('Done — ' + out.length + ' rows synced.');
-  return { ok: true, status: 'synced', rows: out.length };
+    { last_synced: new Date().toISOString(), rows: totalRows, status: skipped.length ? 'partial' : 'ok', source: 'email', updated_by: null });
+  Logger.log('Done — synced ' + synced.join(', ') + ' (' + totalRows + ' rows). Skipped (frozen): ' + (skipped.join(', ') || 'none') + '.');
+  return { ok: true, status: skipped.length ? 'partial' : 'synced', rows: totalRows, synced: synced, skipped: skipped };
 }
 
 /**
@@ -170,12 +189,20 @@ function shelfMonths(mfg, exp) {
   } catch (err) { return 24; }
 }
 
-function isFeedFrozen(url, key) {
+// Returns the facility names that currently have an open, unpicked line —
+// only those are skipped this run. If the check itself fails, err toward
+// caution and treat every target facility as frozen rather than risk
+// shifting stock under an active picker on a Supabase hiccup.
+function getFrozenFacilities(url, key) {
   try {
-    var res = supa(url, key, 'GET', '/rest/v1/feed_frozen?select=frozen');
+    var res = supa(url, key, 'GET', '/rest/v1/frozen_facilities?select=facility');
+    if (res.getResponseCode() >= 300) throw new Error(res.getResponseCode() + ': ' + res.getContentText());
     var arr = JSON.parse(res.getContentText());
-    return arr.length && arr[0].frozen === true;
-  } catch (e) { return false; }
+    return arr.map(function (r) { return r.facility; });
+  } catch (e) {
+    Logger.log('Could not check frozen_facilities, assuming all frozen: ' + e);
+    return TARGET_FACILITIES.slice();
+  }
 }
 
 function supa(url, key, method, path, payload) {
