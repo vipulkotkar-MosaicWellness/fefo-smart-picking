@@ -156,6 +156,8 @@ function Workspace() {
     loadHolds,
     loadPickers,
     startPickersRealtime,
+    loadChannelOverrides,
+    startChannelOverridesRealtime,
     tasks,
     flushOfflineQueue,
     checkWmsAutoBlock,
@@ -183,9 +185,11 @@ function Workspace() {
     void loadTasks();
     void loadHolds();
     void loadPickers();
+    void loadChannelOverrides();
     void flushOfflineQueue();
     const stop = startTasksRealtime();
     const stopPickers = startPickersRealtime();
+    const stopChannelOverrides = startChannelOverridesRealtime();
     const onOnline = () => void flushOfflineQueue();
     window.addEventListener("online", onOnline);
     // Sweeps for picklists whose 15-minute WMS-block clock has run out.
@@ -199,6 +203,7 @@ function Workspace() {
     return () => {
       stop();
       stopPickers();
+      stopChannelOverrides();
       window.removeEventListener("online", onOnline);
       window.clearInterval(wmsTimer);
       window.clearInterval(holdTimer);

@@ -65,14 +65,14 @@ export function AdminConfig() {
   }
 
   function setRule(channel: string, rule: Parameters<typeof updateChannelRule>[1]) {
-    updateChannelRule(channel, rule);
+    void updateChannelRule(channel, rule);
     logAudit(myName, `Set ${channel} tolerance to ${rule.type === "fixed" ? `${rule.val} fixed months` : `${Math.round(rule.val * 100)}% of shelf life`}`);
   }
 
   function setMinBinQty(channel: string, raw: string) {
     const n = raw.trim() === "" ? undefined : Math.max(0, Number(raw));
     const r = channelRules[channel];
-    updateChannelRule(channel, { ...r, minBinQty: n });
+    void updateChannelRule(channel, { ...r, minBinQty: n });
     logAudit(myName, n ? `Set ${channel} min bin qty to ${n}` : `Cleared ${channel} min bin qty (no floor)`);
   }
 
@@ -85,7 +85,7 @@ export function AdminConfig() {
     }
     const minBinQty = newMinBinQty.trim() === "" ? undefined : Math.max(0, Number(newMinBinQty));
     const rule = { type: newRuleType, val: newRuleType === "pct" ? newRuleVal / 100 : newRuleVal, minBinQty };
-    addChannel(name, newBucket, rule);
+    void addChannel(name, newBucket, rule);
     logAudit(myName, `Added channel ${name} (${newBucket}) with tolerance ${newRuleType === "fixed" ? `${newRuleVal} fixed months` : `${newRuleVal}% of shelf life`}${minBinQty ? `, min bin qty ${minBinQty}` : ""}`);
     setNewName("");
     setNewRuleType("fixed");
@@ -95,7 +95,7 @@ export function AdminConfig() {
 
   function removeChannel(name: string) {
     if (!window.confirm(`Delete channel "${name}"? Already-created picklists keep their history — this only stops it being offered for new demand going forward. This can't be undone from here (an Admin would need to re-add it).`)) return;
-    deleteChannel(name);
+    void deleteChannel(name);
     logAudit(myName, `Deleted channel ${name}`);
   }
 

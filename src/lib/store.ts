@@ -14,6 +14,7 @@ import type { ShelfwiseStockRow } from "./shelfwiseCsv";
 import { fetchStock, fetchSyncState, replaceStock } from "./supabaseStock";
 import type { SyncSource } from "./syncSource";
 import { deletePickerRow, fetchPickers, insertPicker, renamePickerRow, subscribePickers } from "./pickersSupabase";
+import { applyChannelOverrides, fetchChannelOverrides, markChannelOverrideDeleted, subscribeChannelOverrides, upsertChannelOverride } from "./channelsSupabase";
 import { fetchAllTasks, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
   BinSkip,
@@ -433,10 +434,16 @@ export interface AppState {
   uploadStockFallback: (rows: ShelfwiseStockRow[], uploadedBy: string) => Promise<boolean>;
   loadTasks: () => Promise<void>;
   startTasksRealtime: () => () => void;
-  // Pickers are shared across every logged-in user (see pickersSupabase.ts) —
-  // NOT the same kind of local-only setting as channelRules/facilityPriority.
+  // Pickers are shared across every logged-in user (see pickersSupabase.ts).
   loadPickers: () => Promise<void>;
   startPickersRealtime: () => () => void;
+  // Channel rules/buckets/deletions are likewise shared across every
+  // logged-in user (see channelsSupabase.ts) — NOT a local-only setting like
+  // facilityPriority. Loaded on top of the built-in CHANNELS/CHANNEL_BUCKETS
+  // defaults baked into the client bundle; only what an Admin has actually
+  // touched lives in Supabase.
+  loadChannelOverrides: () => Promise<void>;
+  startChannelOverridesRealtime: () => () => void;
   addPicker: (name: string) => Promise<void>;
   renamePicker: (oldName: string, newName: string) => Promise<void>;
   removePicker: (name: string) => Promise<void>;
@@ -451,13 +458,13 @@ export interface AppState {
   uploadAssignments: (facilityNo: string, text: string) => Promise<void>;
   applyPicks: (facilityNo: string, results: Record<number, number>, reasons?: Record<number, string>, heldBy?: string) => Promise<void>;
   flushOfflineQueue: () => Promise<void>;
-  updateChannelRule: (channel: string, rule: ChannelRule) => void;
-  addChannel: (name: string, bucket: ChannelBucket, rule: ChannelRule) => void;
+  updateChannelRule: (channel: string, rule: ChannelRule) => Promise<void>;
+  addChannel: (name: string, bucket: ChannelBucket, rule: ChannelRule) => Promise<void>;
   // Super Admin only (enforced in the UI, same pattern as removePicker) —
   // removes a channel from the dispatch-tolerance list, built-in or custom.
   // Existing tasks already created under that channel keep their data; this
   // only stops it being offered for new demand going forward.
-  deleteChannel: (name: string) => void;
+  deleteChannel: (name: string) => Promise<void>;
   archiveTask: (taskNo: string) => Promise<void>;
   unarchiveTask: (taskNo: string) => Promise<void>;
   archiveAllActiveTasks: () => Promise<void>;
@@ -619,6 +626,21 @@ export const useStore = create<AppState>()(
             set({ notice: "Could not remove picker " + name + ": " + (e as Error).message });
           }
         }
+      },
+
+      loadChannelOverrides: async () => {
+        if (!isSupabaseConfigured) return;
+        try {
+          const overrides = await fetchChannelOverrides();
+          set(applyChannelOverrides(overrides));
+        } catch {
+          // Transient failure — keep whatever's already in state.
+        }
+      },
+
+      startChannelOverridesRealtime: () => {
+        if (!isSupabaseConfigured) return () => {};
+        return subscribeChannelOverrides(() => void get().loadChannelOverrides());
       },
 
       loadHolds: async () => {
@@ -1052,14 +1074,35 @@ export const useStore = create<AppState>()(
         if (loadPickQueue().length === 0) set({ notice: "✓ Synced queued pick(s)." });
       },
 
-      updateChannelRule: (channel, rule) => set({ channelRules: { ...get().channelRules, [channel]: rule } }),
-      addChannel: (name, bucket, rule) =>
+      updateChannelRule: async (channel, rule) => {
+        set({ channelRules: { ...get().channelRules, [channel]: rule } });
+        if (isSupabaseConfigured) {
+          try {
+            // A rule edit on a built-in channel has no bucket of its own to
+            // write — omit it so the upsert doesn't null out whatever bucket
+            // that channel already has (built-in default or a prior custom one).
+            await upsertChannelOverride(channel, rule, get().channelBuckets[channel]);
+          } catch (e) {
+            set({ notice: "Could not save channel " + channel + ": " + (e as Error).message });
+          }
+        }
+      },
+      addChannel: async (name, bucket, rule) => {
         set({
           channelRules: { ...get().channelRules, [name]: rule },
           channelBuckets: { ...get().channelBuckets, [name]: bucket },
           deletedChannels: get().deletedChannels.filter((c) => c !== name), // re-adding after a delete un-deletes it
-        }),
-      deleteChannel: (name) => {
+        });
+        if (isSupabaseConfigured) {
+          try {
+            await upsertChannelOverride(name, rule, bucket);
+          } catch (e) {
+            set({ notice: "Could not save channel " + name + ": " + (e as Error).message });
+          }
+        }
+      },
+      deleteChannel: async (name) => {
+        const rule = get().channelRules[name] ?? { type: "fixed", val: 0 };
         const { [name]: _removedRule, ...channelRules } = get().channelRules;
         const { [name]: _removedBucket, ...channelBuckets } = get().channelBuckets;
         set({
@@ -1067,6 +1110,13 @@ export const useStore = create<AppState>()(
           channelBuckets,
           deletedChannels: get().deletedChannels.includes(name) ? get().deletedChannels : [...get().deletedChannels, name],
         });
+        if (isSupabaseConfigured) {
+          try {
+            await markChannelOverrideDeleted(name, rule);
+          } catch (e) {
+            set({ notice: "Could not delete channel " + name + ": " + (e as Error).message });
+          }
+        }
       },
       archiveTask: async (taskNo) => {
         const updated = get().tasks.find((t) => t.no === taskNo);
@@ -1269,15 +1319,21 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "fefo-smart-picking-v7",
-      // Default merge() replaces a top-level persisted key outright, so a
-      // browser that already had channelRules/channelBuckets cached from
-      // before a new built-in channel shipped would never see it — the old
-      // cached object wins wholesale. Deep-merge just these two so new
-      // built-in channels always appear, while anything the user actually
-      // customized (their own rule edits, their own Admin-added channels)
-      // is preserved and still wins over the code defaults.
+      // channelRules/channelBuckets/deletedChannels come live from Supabase
+      // now (see loadChannelOverrides/startChannelOverridesRealtime) when
+      // it's configured, so there's nothing of theirs left to deep-merge
+      // from local storage — plain replacement is fine, same as tasks/stock.
+      // Local mode (no Supabase keys) keeps the old behavior: default
+      // merge() replaces a persisted key outright, so a browser that already
+      // had channelRules/channelBuckets cached from before a new built-in
+      // channel shipped would never see it — the old cached object wins
+      // wholesale. Deep-merge just these two so new built-in channels always
+      // appear, while anything the user actually customized (their own rule
+      // edits, their own Admin-added channels) is preserved and still wins
+      // over the code defaults.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<AppState>;
+        if (isSupabaseConfigured) return { ...current, ...p };
         const deletedChannels = p.deletedChannels ?? [];
         const merged = {
           ...current,
@@ -1295,16 +1351,17 @@ export const useStore = create<AppState>()(
         }
         return merged;
       },
-      // Stock, tasks, and pickers are not persisted locally when Supabase is
-      // configured — they come live from the shared database instead (see
-      // loadPickers/startPickersRealtime). Local mode (no Supabase keys)
-      // keeps everything in browser storage as before.
+      // Stock, tasks, pickers, and channel overrides are not persisted
+      // locally when Supabase is configured — they come live from the
+      // shared database instead (see loadPickers/startPickersRealtime and
+      // loadChannelOverrides/startChannelOverridesRealtime). Local mode (no
+      // Supabase keys) keeps everything in browser storage as before.
       partialize: (s) => ({
         tasks: isSupabaseConfigured ? [] : s.tasks,
         gpSeq: s.gpSeq,
-        channelRules: s.channelRules,
-        channelBuckets: s.channelBuckets,
-        deletedChannels: s.deletedChannels,
+        channelRules: isSupabaseConfigured ? {} : s.channelRules,
+        channelBuckets: isSupabaseConfigured ? {} : s.channelBuckets,
+        deletedChannels: isSupabaseConfigured ? [] : s.deletedChannels,
         facilityPriority: s.facilityPriority,
         pickers: isSupabaseConfigured ? [] : s.pickers,
         visibleFacilities: s.visibleFacilities,
