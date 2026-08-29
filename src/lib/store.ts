@@ -1011,17 +1011,35 @@ export const useStore = create<AppState>()(
           const gatePassByFacility: Record<string, string | undefined> = {};
           const completedGp = effectiveGatePassNo(completedFacility, task);
           if (completedGp) gatePassByFacility[completedFacility.facility] = completedGp;
-          // Next round, not always "2" — completing an already-round-2 (or
-          // later) facility with a fresh not-found qty must produce round 3,
-          // 4, etc., each with its own suffix. Hardcoding round 2/"-R2" here
-          // meant a second not-found event on the same facility tried to
-          // reuse the exact `no` of the facility just completed, so the
-          // "round 3" silently landed as a same-`no` duplicate entry in
-          // `facilities` instead of a distinct, visible picklist — refreshing
-          // could never surface it because nothing was actually missing, it
-          // was just unreachable under a collided id.
-          const nextRound = completedFacility.round + 1;
-          const r2Lists = buildFacilityLists(task.no, nextRound, r2, state.facilityPriority, `-R${nextRound}`, gatePassByFacility);
+          // Next round, computed PER FACILITY — not always completedFacility's
+          // own round + 1. Two ways a collision can happen if it were:
+          //  1) Completing an already-round-2 (or later) facility with a
+          //     fresh not-found qty must produce round 3, 4, etc. for THAT
+          //     facility. Hardcoding round 2/"-R2" here meant a second
+          //     not-found event on the same facility tried to reuse the
+          //     exact `no` of the facility just completed.
+          //  2) A re-offer can land on a DIFFERENT facility than the one
+          //     that just came up short (that's simply where the leftover
+          //     stock was) — and that other facility may already be sitting
+          //     on its own higher round from an earlier, unrelated
+          //     not-found event on this same task. Using completedFacility's
+          //     round for everyone then collided with THAT facility's
+          //     already-open entry instead.
+          // Either way the result was two facility objects sharing one `no`
+          // in `facilities` — the second one silently unreachable (every
+          // no-keyed lookup, discard, gate-pass-set, etc. only ever finds
+          // the first) rather than a distinct, visible picklist.
+          const highestRoundByFacility: Record<string, number> = {};
+          for (const f of task.facilities) {
+            highestRoundByFacility[f.facility] = Math.max(highestRoundByFacility[f.facility] ?? 0, f.round);
+          }
+          const roundFor = (facility: string) => Math.max(completedFacility!.round + 1, (highestRoundByFacility[facility] ?? 0) + 1);
+          const roundsNeeded = new Set(Object.keys(r2).map(roundFor));
+          const r2Lists = [...roundsNeeded].flatMap((round) => {
+            const subset: Record<string, PickLine[]> = {};
+            for (const f of Object.keys(r2)) if (roundFor(f) === round) subset[f] = r2[f];
+            return buildFacilityLists(task.no, round, subset, state.facilityPriority, `-R${round}`, gatePassByFacility);
+          });
           if (r2Lists.length || extraShort.length || extraSkipped.length) {
             tasks = tasks.map((t) =>
               t.no === task.no
