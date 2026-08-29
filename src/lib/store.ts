@@ -984,15 +984,29 @@ export const useStore = create<AppState>()(
           const extraSkipped: BinSkip[] = [];
           const reserved = (key: string) => reservedFor(tasks, key);
           const heldKeysForRound2 = activeHoldKeys(state.holds);
+          // Same crash shape as the missing-channel-rule case above:
+          // state.skus[sku] used to be read unguarded here, so a not-found
+          // SKU that isn't in this browser's current stock/skus snapshot
+          // (stale local state, or a SKU with zero stock everywhere right
+          // now) threw before set() ever ran — the whole completion silently
+          // failed, leaving the picklist looking untouched with nothing
+          // saved. Skip re-offering just that SKU and say so instead; every
+          // other not-found SKU, and the completion itself, still go through.
+          const missingSkus: string[] = [];
           for (const sku of Object.keys(nfBySku)) {
-            const cutoff = cutoffMonths(rule, state.skus[sku].shelf);
+            const skuInfo = state.skus[sku];
+            if (!skuInfo) { missingSkus.push(sku); continue; }
+            const cutoff = cutoffMonths(rule, skuInfo.shelf);
             const w = allocateAcrossFacilities(sku, nfBySku[sku], cutoff, stock, reserved, [...usedRids], heldKeysForRound2, rule.minBinQty);
             for (const f of Object.keys(w.byFacility)) {
               (r2[f] ??= []).push(...w.byFacility[f]);
               w.byFacility[f].forEach((l) => usedRids.add(l.rid));
             }
-            if (w.short > 0) extraShort.push({ sku, name: state.skus[sku].name, qty: w.short });
+            if (w.short > 0) extraShort.push({ sku, name: skuInfo.name, qty: w.short });
             extraSkipped.push(...w.skipped);
+          }
+          if (missingSkus.length) {
+            missingRuleNotice += ` ⚠ ${missingSkus.length} not-found SKU(s) not in the current stock sync (${missingSkus.join(", ")}) — not auto re-offered. Re-sync stock and handle manually if still needed.`;
           }
           // A re-offer that lands back on the SAME facility that just came up
           // short isn't a new order — it reuses that facility's own existing
