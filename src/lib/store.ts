@@ -6,7 +6,14 @@ import { FACILITY_GATE_PASS_PREFIX, FACILITY_PRIORITY, facilityCode, gatePassMat
 import { matchesCutoff } from "./dateRanges";
 import { activeHoldKeys, dueForHoldAutoRelease, holdKey, holdsToCreate } from "./holds";
 import { fetchHolds, insertHold, releaseHoldRow } from "./holdsSupabase";
-import { dequeue as dequeuePick, enqueue as enqueuePick, loadQueue as loadPickQueue } from "./offlineQueue";
+import {
+  dequeue as dequeuePick,
+  dequeueGatePass,
+  enqueue as enqueuePick,
+  enqueueGatePass,
+  loadGatePassQueue,
+  loadQueue as loadPickQueue,
+} from "./offlineQueue";
 import { rowsFromTuples, type StockTuple } from "./sampleData";
 import { REAL_STOCK } from "./stockSnapshot";
 import { isSupabaseConfigured } from "./supabaseClient";
@@ -15,7 +22,7 @@ import { fetchFacilityLastSynced, fetchStock, fetchSyncState, replaceStock } fro
 import type { SyncSource } from "./syncSource";
 import { deletePickerRow, fetchPickers, insertPicker, renamePickerRow, subscribePickers } from "./pickersSupabase";
 import { applyChannelOverrides, fetchChannelOverrides, markChannelOverrideDeleted, subscribeChannelOverrides, upsertChannelOverride } from "./channelsSupabase";
-import { fetchAllTasks, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
+import { fetchAllTasks, fetchTaskByNo, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
   BinSkip,
   ChannelRule,
@@ -369,6 +376,59 @@ function mergeTask(tasks: PickingTask[], updated: PickingTask): PickingTask[] {
   return next;
 }
 
+/**
+ * Every write that saves a task pushes the ENTIRE task object — all its
+ * facilities — back to Supabase, because a task is one row with all of its
+ * facilities in one JSONB column. That's fine when one person is touching a
+ * task, but this app's normal case is two DIFFERENT people finishing two
+ * DIFFERENT facilities (say, Mother Hub and Ambient) on the SAME task
+ * within seconds of each other — completely routine, not an edge case.
+ *
+ * If device A's local copy hasn't yet received device B's already-saved
+ * completion (there's always some delivery delay before a save shows up on
+ * someone else's screen) before device A saves its own change, A's "write
+ * my whole local copy" silently overwrites B's completion in the database
+ * — B's picked/not-found data just disappears, no error shown anywhere.
+ *
+ * Fix: right before saving, re-fetch the task fresh, then layer only THIS
+ * operation's own facilities on top of it — instead of trusting whatever
+ * full task object has been sitting in this browser's memory. Every
+ * facility this operation didn't touch is taken exactly as the fresh fetch
+ * found it, so a concurrent save elsewhere on the same task is preserved
+ * rather than clobbered. `shortfall`/`binSkips` are informational
+ * (not per-facility pick data), so those are merged as a best-effort
+ * append of whatever's new in `local` rather than a full replace.
+ */
+export function mergeOwnChangesOntoFreshTask(fresh: PickingTask, local: PickingTask, ownFacilityNos: ReadonlySet<string>): PickingTask {
+  const freshNos = new Set(fresh.facilities.map((f) => f.no));
+  const localByNo = new Map(local.facilities.map((f) => [f.no, f] as const));
+  const facilities = fresh.facilities.map((f) => (ownFacilityNos.has(f.no) ? (localByNo.get(f.no) ?? f) : f));
+  // Anything local has that fresh doesn't yet — a brand-new round-2 facility this operation just created.
+  for (const f of local.facilities) if (!freshNos.has(f.no)) facilities.push(f);
+  const appendNew = <T,>(freshArr: T[], localArr: T[]) => {
+    const seen = new Set(freshArr.map((x) => JSON.stringify(x)));
+    return [...freshArr, ...localArr.filter((x) => !seen.has(JSON.stringify(x)))];
+  };
+  return {
+    ...fresh,
+    facilities,
+    shortfall: appendNew(fresh.shortfall, local.shortfall),
+    binSkips: appendNew(fresh.binSkips ?? [], local.binSkips ?? []),
+  };
+}
+
+/**
+ * The safe-write pattern every task-saving action should use: re-fetch
+ * fresh, layer this operation's own facilities on top (see
+ * mergeOwnChangesOntoFreshTask), save that. Falls back to pushing `local`
+ * as-is if the fresh fetch comes back empty (task genuinely not found, or a
+ * transient read failure) — no worse than the old behavior in that case.
+ */
+async function saveOwnFacilityChanges(local: PickingTask, ownFacilityNos: ReadonlySet<string>): Promise<void> {
+  const fresh = await fetchTaskByNo(local.no);
+  await updateTaskData(fresh ? mergeOwnChangesOntoFreshTask(fresh, local, ownFacilityNos) : local);
+}
+
 export interface SavedInventoryView {
   name: string;
   filters: { text?: string; batch?: string; location?: string; minQty?: number; maxQty?: number };
@@ -484,7 +544,9 @@ export interface AppState {
   // the number's prefix against the facility (see gatePassMatchesFacility)
   // before ever setting it. Only on success does the facility become
   // visible to the Picking Supervisor queue for the first time.
-  setFacilityGatePass: (taskNo: string, facilityNo: string, gatePassNo: string) => Promise<{ ok: boolean; error?: string }>;
+  // `queued: true` means it's saved on this device but Supabase hasn't
+  // confirmed it yet — see the catch block in setFacilityGatePass.
+  setFacilityGatePass: (taskNo: string, facilityNo: string, gatePassNo: string) => Promise<{ ok: boolean; error?: string; queued?: boolean }>;
   // Admin/Super Admin only — reverses an auto-fired WMS block. Stays revoked
   // until the picklist is reassigned to a picker (see stampAssignment).
   revokeWmsBlock: (taskNo: string, facilityNo: string, revokedBy: string) => Promise<void>;
@@ -970,6 +1032,10 @@ export const useStore = create<AppState>()(
         // not-found re-offer for this channel and say so instead; the completion
         // itself (stock deduction, gate pass, holds) still goes through below.
         let missingRuleNotice = "";
+        // `no`s of every facility this call itself creates or completes —
+        // the only ones this device is authoritative for when saving (see
+        // saveOwnFacilityChanges / mergeOwnChangesOntoFreshTask below).
+        const ownFacilityNos = new Set<string>([facilityNo]);
         if (completedFacility && parentTask && completedFacility.bad > 0 && !state.channelRules[parentTask.channel]) {
           missingRuleNotice = ` ⚠ "${parentTask.channel}" has no channel rule on this device — not-found items weren't auto re-offered. Open Admin → Channels here, or handle the shortfall manually.`;
         }
@@ -1054,6 +1120,7 @@ export const useStore = create<AppState>()(
             for (const f of Object.keys(r2)) if (roundFor(f) === round) subset[f] = r2[f];
             return buildFacilityLists(task.no, round, subset, state.facilityPriority, `-R${round}`, gatePassByFacility);
           });
+          for (const l of r2Lists) ownFacilityNos.add(l.no);
           if (r2Lists.length || extraShort.length || extraSkipped.length) {
             tasks = tasks.map((t) =>
               t.no === task.no
@@ -1078,7 +1145,12 @@ export const useStore = create<AppState>()(
         const finalTask = tasks.find((t) => t.no === (parentTask?.no ?? ""));
         if (isSupabaseConfigured && finalTask) {
           try {
-            await updateTaskData(finalTask);
+            // Re-fetches fresh and layers only ownFacilityNos on top, rather
+            // than pushing this whole (possibly stale) local task — see
+            // mergeOwnChangesOntoFreshTask. Someone else finishing a
+            // DIFFERENT facility on this same task moments ago is routine
+            // here, not an edge case, and must not get silently overwritten.
+            await saveOwnFacilityChanges(finalTask, ownFacilityNos);
             // The feed may have just unfrozen (this was the last open line) —
             // pull in whatever stock the automated sync has already received,
             // instead of waiting for someone to notice and click "Sync now".
@@ -1097,7 +1169,8 @@ export const useStore = create<AppState>()(
       flushOfflineQueue: async () => {
         if (!isSupabaseConfigured) return;
         const queue = loadPickQueue();
-        if (queue.length === 0) return;
+        const gpQueue = loadGatePassQueue();
+        if (queue.length === 0 && gpQueue.length === 0) return;
         const { tasks } = get();
         for (const item of queue) {
           const task = tasks.find((t) => t.facilities.some((f) => f.no === item.facilityNo));
@@ -1106,13 +1179,30 @@ export const useStore = create<AppState>()(
             continue;
           }
           try {
-            await updateTaskData(task);
+            // Same fresh-fetch-and-layer save as the main path (not a blind
+            // push of local state) — a retry is exactly the case where the
+            // most time has passed since this device last read the task, so
+            // it's the likeliest of all to be stale.
+            await saveOwnFacilityChanges(task, new Set([item.facilityNo]));
             dequeuePick(item.id);
           } catch {
             // Still offline / still failing — leave it queued for next time.
           }
         }
-        if (loadPickQueue().length === 0) set({ notice: "✓ Synced queued pick(s)." });
+        for (const item of gpQueue) {
+          const task = tasks.find((t) => t.no === item.taskNo);
+          if (!task) {
+            dequeueGatePass(item.id);
+            continue;
+          }
+          try {
+            await saveOwnFacilityChanges(task, new Set([item.facilityNo]));
+            dequeueGatePass(item.id);
+          } catch {
+            // Still offline / still failing — leave it queued for next time.
+          }
+        }
+        if (loadPickQueue().length === 0 && loadGatePassQueue().length === 0) set({ notice: "✓ Synced queued update(s)." });
       },
 
       updateChannelRule: async (channel, rule) => {
@@ -1307,7 +1397,23 @@ export const useStore = create<AppState>()(
         }
         const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, gatePassNo: trimmed } : f)) };
         set({ tasks: mergeTask(get().tasks, updated) });
-        if (isSupabaseConfigured) await updateTaskData(updated);
+        if (isSupabaseConfigured) {
+          try {
+            // Fresh-fetch-and-layer, same as applyPicks — this facility may
+            // sit on a task where a sibling facility is being completed by
+            // someone else at the same moment; don't overwrite their save.
+            await saveOwnFacilityChanges(updated, new Set([facilityNo]));
+          } catch {
+            // It IS saved on this device (the set() above already ran) but
+            // nothing confirms Supabase actually has it yet — queue a retry
+            // instead of silently reporting success with nothing underneath
+            // it. flushOfflineQueue picks this up on the next reload/online
+            // event, same as a queued pick.
+            enqueueGatePass({ taskNo, facilityNo, gatePassNo: trimmed });
+            set({ notice: "⚠ Saved on this device — will sync once you're back online." });
+            return { ok: true, queued: true };
+          }
+        }
         return { ok: true };
       },
 

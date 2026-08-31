@@ -17,6 +17,19 @@ export async function fetchAllTasks(): Promise<PickingTask[]> {
   return (data ?? []).map((r) => (r as unknown as TaskRow).data);
 }
 
+/**
+ * One task, straight from Supabase — used right before a write to get a
+ * current copy to patch, instead of trusting whatever's been sitting in
+ * this browser's memory since its last full load. See
+ * mergeOwnChangesOntoFreshTask in store.ts for why.
+ */
+export async function fetchTaskByNo(no: string): Promise<PickingTask | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from("tasks").select("data").eq("no", no).maybeSingle();
+  if (error) throw error;
+  return data ? (data as unknown as TaskRow).data : null;
+}
+
 /** First-ever save of a new task — sets created_by, never touched again. */
 export async function insertTask(task: PickingTask, createdBy: string | null): Promise<void> {
   if (!supabase) return;
