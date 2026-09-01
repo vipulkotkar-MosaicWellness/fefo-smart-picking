@@ -939,9 +939,35 @@ export const useStore = create<AppState>()(
         const rejectedGatePasses: { gatePassNo: string; conflict: { taskNo: string; facility: string } }[] = [];
         let pendingCount = 0;
 
+        // Real case: one upload with two channels that map to the SAME
+        // task-number prefix (e.g. "Internal Stock Transfer - Warehouse -
+        // Local" and "Internal Stock Transfer - Dark Stores" both become
+        // REPL-INTERNALSTOC-...). nextSequence() asks Supabase "how many
+        // exist already", but nothing gets inserted until AFTER this whole
+        // loop finishes — so the second channel asked the same question
+        // before the first channel's task existed anywhere, got the same
+        // answer, and both tried to claim the identical task number. The
+        // second insert then failed outright on the database's own
+        // uniqueness check ("duplicate key... tasks_pkey") and that
+        // channel's picklist was silently never saved at all.
+        // seqUsedThisBatch counts how many numbers THIS batch has already
+        // handed out per prefix, on top of nextSequence()'s answer — asked
+        // once per prefix (cached in seqBase), not once per channel.
+        const seqBase = new Map<string, number>();
+        const seqUsedThisBatch = new Map<string, number>();
+        async function nextSeqForPrefix(prefix: string): Promise<number> {
+          if (!seqBase.has(prefix)) {
+            const base = isSupabaseConfigured ? await nextSequence(prefix) : tasks.filter((t) => t.no.startsWith(prefix)).length + 1;
+            seqBase.set(prefix, base);
+          }
+          const used = seqUsedThisBatch.get(prefix) ?? 0;
+          seqUsedThisBatch.set(prefix, used + 1);
+          return seqBase.get(prefix)! + used;
+        }
+
         for (const { channel, demand: groupDemand, byFacility, shortfall, skipped, gatePassByFacility, unusedGatePasses } of allocations) {
           const prefix = taskNumberPrefix(channel, get().channelBuckets);
-          const seq = isSupabaseConfigured ? await nextSequence(prefix) : newTasks.length + 1;
+          const seq = await nextSeqForPrefix(prefix);
           const no = `${prefix}${String(seq).padStart(3, "0")}`;
           allUnusedGatePasses.push(...unusedGatePasses);
           for (const facility of Object.keys(gatePassByFacility)) {
