@@ -347,7 +347,24 @@ export function computeChannelAllocations(
     byGroup.get(key)!.push(d);
   }
 
-  const reserved = (key: string) => reservedFor(existingTasks, key);
+  // Real case: one demand upload with 5 different replenishment channels
+  // (LJ Emiza Guwahati, LJ Emiza BLR, LJ Beyond NCR, LJ Beyond LUC, LJ
+  // Ahmedabad) all needing the same SKU. Bin R14-C5-008 physically held 149
+  // units — the 5 channel groups below each independently "saw" the full
+  // 149 as untouched and claimed up to 71 of it apiece, promising 308 units
+  // out of a 149-unit bin, because `reserved` only ever looked at tasks
+  // that existed BEFORE this whole generate() call started. Nothing tracked
+  // what THIS SAME batch's own earlier channel groups had just claimed, so
+  // every group after the first was allocating against a stale, too-high
+  // "available" figure.
+  //
+  // batchClaimed accumulates as each group is allocated, on top of
+  // whatever reservedFor() already accounts for — so the 2nd, 3rd... group
+  // needing the same bin correctly sees it as already (partly) spoken for
+  // by the 1st, exactly like a real reservation would, without needing
+  // Supabase round-trips mid-loop.
+  const batchClaimed = new Map<string, number>();
+  const reserved = (key: string) => reservedFor(existingTasks, key) + (batchClaimed.get(key) ?? 0);
   const out: ChannelAllocation[] = [];
   for (const lines of byGroup.values()) {
     const channel = lines[0].channel;
@@ -359,7 +376,14 @@ export function computeChannelAllocations(
     for (const d of lines) {
       const cutoff = cutoffMonths(rule, skus[d.sku].shelf);
       const w = allocateAcrossFacilities(d.sku, d.qty, cutoff, stock, reserved, [], heldKeys, rule.minBinQty);
-      for (const f of Object.keys(w.byFacility)) (byFacility[f] ??= []).push(...w.byFacility[f]);
+      for (const f of Object.keys(w.byFacility)) {
+        byFacility[f] ??= [];
+        byFacility[f].push(...w.byFacility[f]);
+        for (const l of w.byFacility[f]) {
+          const key = holdKey(l.sku, l.facility, l.bin, l.batch);
+          batchClaimed.set(key, (batchClaimed.get(key) ?? 0) + l.qty);
+        }
+      }
       if (w.short > 0) shortfall.push({ sku: d.sku, name: skus[d.sku].name, qty: w.short });
       skipped.push(...w.skipped);
     }

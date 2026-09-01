@@ -54,6 +54,57 @@ describe("computeChannelAllocations — channel minBinQty floor", () => {
   });
 });
 
+describe("computeChannelAllocations — one batch never over-promises the same bin across multiple channel groups", () => {
+  // Real case: one demand upload with 5 different replenishment channels
+  // (LJ Emiza Guwahati, LJ Emiza BLR, LJ Beyond NCR, LJ Beyond LUC, LJ
+  // Ahmedabad) all needing the same SKU, gate passes GPSLMH9863/64/65/67/71.
+  // Bin R14-C5-008 physically held 149 units; the app promised 71+71+71+
+  // 24+71 = 308 — more than double what the bin actually had — because each
+  // channel group's allocation only ever checked reservations from tasks
+  // that existed BEFORE the whole batch started, never what earlier groups
+  // in this SAME batch had already claimed.
+  it("depletes a shared bin across channel groups instead of each one claiming the full untouched amount", () => {
+    const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Mother Hub", batch: "BA036790", qty: 149 })];
+    const demand: DemandLine[] = [
+      { channel: "LJ Emiza Guwahati", sku: "TEST-SKU", qty: 71 },
+      { channel: "LJ Emiza BLR", sku: "TEST-SKU", qty: 71 },
+      { channel: "LJ Beyond NCR", sku: "TEST-SKU", qty: 71 },
+      { channel: "LJ Beyond LUC", sku: "TEST-SKU", qty: 24 },
+      { channel: "LJ Ahmedabad", sku: "TEST-SKU", qty: 71 },
+    ];
+    const fiveChannelRules = Object.fromEntries(
+      demand.map((d) => [d.channel, { type: "fixed" as const, val: 0 }]),
+    );
+    const allocations = computeChannelAllocations(demand, fiveChannelRules, skus, stock, []);
+
+    const totalAllocated = allocations.reduce(
+      (sum, a) => sum + Object.values(a.byFacility).flat().reduce((s, l) => s + l.qty, 0),
+      0,
+    );
+    const totalShortfall = allocations.reduce((sum, a) => sum + a.shortfall.reduce((s, sf) => s + sf.qty, 0), 0);
+
+    expect(totalAllocated).toBeLessThanOrEqual(149); // never more than the bin actually had
+    expect(totalAllocated + totalShortfall).toBe(71 + 71 + 71 + 24 + 71); // every unit accounted for, none silently dropped
+    expect(totalShortfall).toBe(308 - 149); // the 159 units the bin genuinely couldn't cover show up as real shortfall
+  });
+
+  it("still lets an unrelated SKU in a later group allocate normally — the fix doesn't over-restrict", () => {
+    const stock: StockRow[] = [
+      stockRow({ rid: 1, location: "SL Mother Hub", sku: "TEST-SKU", batch: "B1", qty: 20 }),
+      stockRow({ rid: 2, location: "SL Mother Hub", sku: "OTHER-SKU", batch: "B2", qty: 50 }),
+    ];
+    const twoSkus = { ...skus, "OTHER-SKU": { name: "Other Product", shelf: 24 } };
+    const demand: DemandLine[] = [
+      { channel: "ChannelA", sku: "TEST-SKU", qty: 15 },
+      { channel: "ChannelB", sku: "OTHER-SKU", qty: 30 },
+    ];
+    const twoChannelRules = { ChannelA: { type: "fixed" as const, val: 0 }, ChannelB: { type: "fixed" as const, val: 0 } };
+    const allocations = computeChannelAllocations(demand, twoChannelRules, twoSkus, stock, []);
+    expect(allocations[0].shortfall).toEqual([]);
+    expect(allocations[1].shortfall).toEqual([]);
+  });
+});
+
 describe("computeChannelAllocations (pure — no Supabase, no side effects)", () => {
   it("allocates within a single facility when its stock covers demand", () => {
     const stock: StockRow[] = [stockRow({ rid: 1, location: "SL Mother Hub", qty: 50 })];
