@@ -84,6 +84,33 @@ export function effectiveGatePassNo(f: FacilityPicklist, task: PickingTask | und
   return f.gatePassNo ?? task?.gatePassNo;
 }
 
+/**
+ * Is `gatePassNo` already sitting on some OTHER task's facility? Reusing a
+ * gate pass across different rounds of the SAME task is normal and expected
+ * (one physical gate pass can genuinely cover a re-offer at the same
+ * facility) — see effectiveGatePassNo — so that's deliberately allowed
+ * here via `excludeTaskNo`. What's not fine is the same number ending up
+ * on a completely different, unrelated order: real cases this session —
+ * GPSLAMB27789 and GPSLMH9820 — were both a gate pass number copy-pasted
+ * or retyped from one order straight into an unrelated second one, and
+ * the person then couldn't find their real order because the number
+ * already "belonged" to something else.
+ */
+export function findGatePassConflict(
+  tasks: PickingTask[],
+  gatePassNo: string,
+  excludeTaskNo: string,
+): { taskNo: string; facilityNo: string; facility: string } | undefined {
+  const taskByNo = new Map(tasks.map((t) => [t.no, t] as const));
+  for (const f of activeFacilityLists(tasks)) {
+    if (f.taskNo === excludeTaskNo) continue;
+    if (effectiveGatePassNo(f, taskByNo.get(f.taskNo)) === gatePassNo) {
+      return { taskNo: f.taskNo, facilityNo: f.no, facility: f.facility };
+    }
+  }
+  return undefined;
+}
+
 /** A facility picklist generated but held back from Picking until a matching gate pass is supplied. */
 export function gatePassPending(f: FacilityPicklist, task: PickingTask | undefined): boolean {
   return !effectiveGatePassNo(f, task);
@@ -878,6 +905,14 @@ export const useStore = create<AppState>()(
         const allocations = computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(get().holds));
         const newTasks: PickingTask[] = [];
         const allUnusedGatePasses: string[] = [];
+        // Gate passes a CSV supplied that turned out to already belong to
+        // some OTHER, unrelated order — real cases: GPSLAMB27789 and
+        // GPSLMH9820, both copy-pasted/retyped from one order straight
+        // into an unrelated second one. Rejected here rather than applied,
+        // so the facility falls through to Gate Pass Allocation Pending
+        // (same as if no gate pass had been given) instead of silently
+        // attaching to whatever this number already belongs to.
+        const rejectedGatePasses: { gatePassNo: string; conflict: { taskNo: string; facility: string } }[] = [];
         let pendingCount = 0;
 
         for (const { channel, demand: groupDemand, byFacility, shortfall, skipped, gatePassByFacility, unusedGatePasses } of allocations) {
@@ -885,6 +920,15 @@ export const useStore = create<AppState>()(
           const seq = isSupabaseConfigured ? await nextSequence(prefix) : newTasks.length + 1;
           const no = `${prefix}${String(seq).padStart(3, "0")}`;
           allUnusedGatePasses.push(...unusedGatePasses);
+          for (const facility of Object.keys(gatePassByFacility)) {
+            const gp = gatePassByFacility[facility];
+            if (!gp) continue;
+            const conflict = findGatePassConflict(tasks, gp, no);
+            if (conflict) {
+              rejectedGatePasses.push({ gatePassNo: gp, conflict });
+              gatePassByFacility[facility] = undefined;
+            }
+          }
           pendingCount += Object.values(gatePassByFacility).filter((gp) => !gp).length;
           newTasks.push({
             no,
@@ -900,10 +944,13 @@ export const useStore = create<AppState>()(
 
         const pendingNote = pendingCount > 0 ? ` ${pendingCount} facility picklist(s) awaiting gate pass allocation.` : "";
         const unusedNote = allUnusedGatePasses.length > 0 ? ` Not used (no matching facility): ${[...new Set(allUnusedGatePasses)].join(", ")}.` : "";
+        const rejectedNote = rejectedGatePasses.length
+          ? ` ⚠ ${rejectedGatePasses.length} gate pass number(s) already in use elsewhere, not applied — check and re-enter under Gate Pass Allocation Pending: ${rejectedGatePasses.map((r) => `${r.gatePassNo} (already on ${r.conflict.taskNo} at ${r.conflict.facility})`).join("; ")}.`
+          : "";
         set({
           tasks: [...tasks, ...newTasks],
           demand: [],
-          notice: `${newTasks.length} picking task(s) created — ${newTasks.map((t) => t.no).join(", ")}.${pendingNote}${unusedNote}`,
+          notice: `${newTasks.length} picking task(s) created — ${newTasks.map((t) => t.no).join(", ")}.${pendingNote}${unusedNote}${rejectedNote}`,
         });
 
         if (isSupabaseConfigured) {
@@ -1394,6 +1441,10 @@ export const useStore = create<AppState>()(
         if (!gatePassMatchesFacility(trimmed, target.facility)) {
           const prefix = FACILITY_GATE_PASS_PREFIX[target.facility];
           return { ok: false, error: prefix ? `Gate pass for ${target.facility} must start with ${prefix}.` : `No known gate pass prefix for ${target.facility}.` };
+        }
+        const conflict = findGatePassConflict(get().tasks, trimmed, taskNo);
+        if (conflict) {
+          return { ok: false, error: `Gate pass ${trimmed} is already on ${conflict.taskNo} at ${conflict.facility} (${conflict.facilityNo}) — check the number and try again.` };
         }
         const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, gatePassNo: trimmed } : f)) };
         set({ tasks: mergeTask(get().tasks, updated) });
