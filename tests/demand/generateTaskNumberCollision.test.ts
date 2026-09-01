@@ -14,6 +14,11 @@ vi.mock("../../src/lib/tasksSupabase", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/lib/tasksSupabase")>();
   return {
     ...actual,
+    // generate() re-fetches tasks fresh before allocating (see the
+    // cross-user race comment in store.ts) — empty here so this test's
+    // local, in-memory `tasks: []` isn't overwritten by whatever's really
+    // in production Supabase.
+    fetchAllTasks: vi.fn(async () => []),
     nextSequence: vi.fn(async () => 7), // same "7 already exist" answer every time, matching real Supabase behavior mid-batch
     insertTask: vi.fn(async () => undefined),
   };

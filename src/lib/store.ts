@@ -916,7 +916,7 @@ export const useStore = create<AppState>()(
       // a facility with no matching one goes into "Gate Pass Allocation
       // Pending" instead of getting a task-level label.
       generate: async (createdBy, createdByName) => {
-        const { skus, demand, channelRules, facilityPriority, stock, tasks } = get();
+        const { skus, demand, channelRules, facilityPriority, stock } = get();
         if (Object.keys(skus).length === 0) {
           set({ notice: "No stock synced yet." });
           return;
@@ -924,6 +924,31 @@ export const useStore = create<AppState>()(
         if (demand.length === 0) {
           set({ notice: "Add demand first." });
           return;
+        }
+
+        // Re-fetch tasks fresh right here, instead of trusting whatever's
+        // been sitting in this browser's memory since it last loaded or
+        // synced — this is the SAME class of gap as the within-one-batch
+        // over-allocation bug, just between two different PEOPLE instead
+        // of within one person's own upload. Two Planners generating
+        // picklists minutes (or even just a stale tab) apart, both against
+        // the same scarce bin, would otherwise each see it as fully free —
+        // neither one's screen knows about the other's just-created
+        // reservation until Realtime delivers it, which may not have
+        // happened yet. This can't close that gap to zero (there's still a
+        // short window between this fetch and the final insert below), but
+        // it shrinks it from "however stale this tab is" down to roughly
+        // one network round trip, the same tradeoff already made for
+        // applyPicks' save step — see saveOwnFacilityChanges.
+        let tasks = get().tasks;
+        if (isSupabaseConfigured) {
+          try {
+            tasks = await fetchAllTasks();
+            set({ tasks });
+          } catch {
+            // Couldn't refresh — proceed with whatever's already in memory
+            // rather than blocking generation entirely over a network blip.
+          }
         }
 
         const allocations = computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(get().holds));
