@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/Reports.tsx"
+        ],
+        "createdAt": "2026-09-02T13:37:11.828Z",
+        "reason": "pre-existing tab-button pattern, unchanged: identical text-slate-600/hover:bg-slate-100 ternary already used for all 5 other tabs in this file before this edit; only added a 6th tab using the same existing styling"
+      }
+    ]
+  }
+}

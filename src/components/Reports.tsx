@@ -3,16 +3,18 @@ import { ageingRangeFor, inAgeingRange, type AgeingPreset } from "../lib/ageing"
 import { activeTasks, useStore } from "../lib/store";
 import { AgeingFilter } from "./AgeingFilter";
 import { BinSkipReport } from "./BinSkipReport";
+import { DetailedReport } from "./DetailedReport";
 import { FillRateReport } from "./FillRateReport";
 import { NotFoundSummary } from "./NotFoundSummary";
 import { OverallReport } from "./OverallReport";
 import { PicklistRepository } from "./PicklistRepository";
 
-type ReportTab = "notfound" | "overall" | "repository" | "binskips" | "fillrate";
+type ReportTab = "notfound" | "overall" | "detailed" | "repository" | "binskips" | "fillrate";
 
 const TABS: { id: ReportTab; label: string }[] = [
   { id: "notfound", label: "Not-Found Summary" },
   { id: "overall", label: "Overall Report" },
+  { id: "detailed", label: "Overall Report — Detailed" },
   { id: "repository", label: "Picklist Repository" },
   { id: "binskips", label: "Bin Skip Report" },
   { id: "fillrate", label: "Fill Rate" },
@@ -49,6 +51,7 @@ export function Reports() {
 
       {tab === "notfound" && <NotFoundSummary tasks={filtered} />}
       {tab === "overall" && <OverallReport tasks={filtered} />}
+      {tab === "detailed" && <DetailedReport tasks={filtered} />}
       {tab === "repository" && <PicklistRepository tasks={filtered} />}
       {tab === "binskips" && <BinSkipReport tasks={filtered} />}
       {tab === "fillrate" && <FillRateReport tasks={filtered} />}
