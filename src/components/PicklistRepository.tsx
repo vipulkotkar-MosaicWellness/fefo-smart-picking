@@ -8,7 +8,7 @@ import { gatePassBulkCsv, uniwareCsv } from "../lib/uniwareExport";
 import { Button, Card, Tag } from "./Ui";
 
 function timeLabel(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 function roundLabel(round: number): string {
