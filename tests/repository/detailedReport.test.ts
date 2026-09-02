@@ -10,6 +10,7 @@ function task(overrides: Partial<PickingTask> = {}): PickingTask {
   return {
     no: "TASK-1",
     channel: "Blinkit",
+    // (channel is asserted directly in the tests below)
     demand: [],
     shortfall: [],
     createdAt: "2026-08-25T04:00:00.000Z",
@@ -32,6 +33,8 @@ describe("detailedReport", () => {
     const [row] = detailedReport([t]);
     expect(row.status).toBe("Picklist completed");
     expect(row.reportDate).toBe("2026-08-25");
+    expect(row.channel).toBe("Blinkit");
+    expect(row.taskNo).toBe("TASK-1");
     expect(row.gatePassNo).toBe("GPSLMH1001");
   });
 

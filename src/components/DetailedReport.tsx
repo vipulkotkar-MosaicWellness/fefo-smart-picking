@@ -11,10 +11,10 @@ const STATUS_TONE: Record<DetailedReportStatus, "ok" | "warn" | "bad"> = {
 };
 
 function toCsv(rows: DetailedReportRow[]): string {
-  const header = "Report Date,Gate Pass,Facility,SKU,SKU Name,Instructed Bin,Instructed Batch,Instructed Qty,Status";
+  const header = "Report Date,Task No,Channel,Gate Pass,Facility,SKU,SKU Name,Instructed Bin,Instructed Batch,Instructed Qty,Status";
   const cell = (v: string | number) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
   const body = rows.map((r) =>
-    [r.reportDate, r.gatePassNo ?? "Pending", r.facility, r.sku, r.name, r.bin, r.batch, r.qty, r.status].map(cell).join(","),
+    [r.reportDate, r.taskNo, r.channel, r.gatePassNo ?? "Pending", r.facility, r.sku, r.name, r.bin, r.batch, r.qty, r.status].map(cell).join(","),
   );
   return header + "\n" + body.join("\n") + "\n";
 }
@@ -53,6 +53,7 @@ export function DetailedReport({ tasks: tasksProp }: { tasks?: PickingTask[] } =
           <thead className="sticky top-0 bg-slate-50 dark:bg-slate-900">
             <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Report Date</th>
+              <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Channel</th>
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Gate Pass</th>
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Facility</th>
               <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">SKU</th>
@@ -66,6 +67,7 @@ export function DetailedReport({ tasks: tasksProp }: { tasks?: PickingTask[] } =
             {rows.map((r, i) => (
               <tr key={`${r.taskNo}-${r.facility}-${r.bin}-${r.batch}-${i}`} className="text-slate-700 dark:text-slate-200">
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{r.reportDate}</td>
+                <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{r.channel}</td>
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
                   {r.gatePassNo ?? <span className="text-amber-700 dark:text-amber-400">Pending</span>}{" "}
                   <span className="text-slate-400">· {r.taskNo}</span>

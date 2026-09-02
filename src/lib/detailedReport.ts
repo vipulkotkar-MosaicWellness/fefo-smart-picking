@@ -6,6 +6,7 @@ export type DetailedReportStatus = "Picklist completed" | "Not found" | "Picking
 /** One instructed line, in the exact shape asked for: full end-to-end trace of a single bin+batch pick instruction. */
 export interface DetailedReportRow {
   taskNo: string;
+  channel: string;
   reportDate: string; // YYYY-MM-DD — when this facility picklist (round) was generated
   gatePassNo?: string; // undefined if gate pass is still pending
   facility: string;
@@ -33,7 +34,7 @@ export function detailedReport(tasks: PickingTask[]): DetailedReportRow[] {
       const reportDate = (f.createdAt ?? t.createdAt).slice(0, 10);
       for (const l of f.lines) {
         const status: DetailedReportStatus = f.status !== "completed" ? "Picking pending" : (l.nf ?? 0) > 0 ? "Not found" : "Picklist completed";
-        rows.push({ taskNo: t.no, reportDate, gatePassNo, facility: f.facility, sku: l.sku, name: l.name, bin: l.bin, batch: l.batch, qty: l.qty, status });
+        rows.push({ taskNo: t.no, channel: t.channel, reportDate, gatePassNo, facility: f.facility, sku: l.sku, name: l.name, bin: l.bin, batch: l.batch, qty: l.qty, status });
       }
     }
   }
