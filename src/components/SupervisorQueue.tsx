@@ -38,8 +38,22 @@ function PicklistItem({
   gatePassNo?: string;
   queuePos?: number;
 }) {
+  // FacilityBlock renders one input + one select per line — mounting all of
+  // them for every picklist in the queue (hundreds at once, thousands of
+  // lines) is what made this page unusably heavy: 245k+ DOM nodes measured
+  // live with 355 open picklists. A closed native <details> only hides
+  // content visually; React still mounts it. Deferring the mount until this
+  // item has actually been opened once fixes that — and staying mounted
+  // afterward (not toggling back off) means a supervisor's in-progress
+  // not-found entries survive if the accordion gets collapsed again.
+  const [hasOpened, setHasOpened] = useState(false);
   return (
-    <details className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden">
+    <details
+      className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden"
+      onToggle={(e) => {
+        if (e.currentTarget.open) setHasOpened(true);
+      }}
+    >
       <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-lg p-2.5 hover:bg-slate-50 dark:hover:bg-slate-900">
         <span className="flex items-center gap-1.5 text-sm">
           {queuePos != null && <Tag tone="info">#{queuePos}</Tag>}
@@ -55,7 +69,7 @@ function PicklistItem({
         <span className="text-[11px] text-slate-500 dark:text-slate-400">{summary(f)}</span>
       </summary>
       <div className="border-t border-slate-200 p-2.5 dark:border-slate-700">
-        <FacilityBlock f={f} gatePassNo={gatePassNo} />
+        {hasOpened && <FacilityBlock f={f} gatePassNo={gatePassNo} />}
       </div>
     </details>
   );
