@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "../lib/authStore";
 import { BUCKET_LABELS, type ChannelBucket } from "../lib/channels";
-import { useStore } from "../lib/store";
+import { dueForAutoComplete, useStore } from "../lib/store";
 import { Button, Card } from "./Ui";
 
 export function AdminConfig() {
@@ -15,9 +15,15 @@ export function AdminConfig() {
     renamePicker,
     removePicker,
     logAudit,
+    tasks,
+    autoCompleteAfterDays,
+    setAutoCompleteAfterDays,
+    closeAgedWmsBlockedPicklists,
   } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
   const isSuperAdmin = useAuth((s) => s.profile?.role === "super_admin");
+  const [cutoffDate, setCutoffDate] = useState("2026-08-31");
+  const [closing, setClosing] = useState(false);
 
   const [newName, setNewName] = useState("");
   const [newBucket, setNewBucket] = useState<ChannelBucket>(BUCKET_LABELS[0]);
@@ -97,6 +103,32 @@ export function AdminConfig() {
     if (!window.confirm(`Delete channel "${name}"? Already-created picklists keep their history — this only stops it being offered for new demand going forward. This can't be undone from here (an Admin would need to re-add it).`)) return;
     void deleteChannel(name);
     logAudit(myName, `Deleted channel ${name}`);
+  }
+
+  const dueForCleanup = dueForAutoComplete(tasks, new Date(cutoffDate + "T23:59:59.999").getTime());
+
+  async function runCleanup() {
+    if (dueForCleanup.length === 0) return;
+    if (
+      !window.confirm(
+        `Close ${dueForCleanup.length} aged WMS-blocked picklist(s) created on or before ${cutoffDate} at 100% picked? Any lines a picker already resolved are left as-is — only untouched lines get backfilled to fully picked. This can't be undone from here.`,
+      )
+    ) {
+      return;
+    }
+    setClosing(true);
+    try {
+      const n = await closeAgedWmsBlockedPicklists(cutoffDate, myName);
+      logAudit(myName, `Closed ${n} aged WMS-blocked picklist(s) created on/before ${cutoffDate} at 100% picked`);
+    } finally {
+      setClosing(false);
+    }
+  }
+
+  function changeAutoCompleteDays(raw: string) {
+    const days = raw === "" ? null : Number(raw);
+    void setAutoCompleteAfterDays(days, myName);
+    logAudit(myName, days ? `Set aged-picklist auto-complete to ${days} day(s)` : "Turned off aged-picklist auto-complete");
   }
 
   return (
@@ -296,6 +328,60 @@ export function AdminConfig() {
             {pickers.length === 0 && <p className="text-[11px] text-slate-400">No pickers yet — add one above.</p>}
           </div>
         </Card>
+
+        {isSuperAdmin && (
+          <Card title="Aged WMS-blocked picklists">
+            <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
+              A picklist reaches "Gatepass Generated" once WMS has claimed its stock, but sometimes nobody ever
+              goes back to finish picking it. Closing one here marks it Picking Completed at 100% picked — any
+              lines a picker already resolved are left exactly as entered; only untouched lines are backfilled.
+            </p>
+
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-900">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                One-time cleanup
+              </p>
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="text-[11px]">
+                  <span className="block text-slate-500 dark:text-slate-400">Created on or before</span>
+                  <input
+                    type="date"
+                    value={cutoffDate}
+                    onChange={(e) => setCutoffDate(e.target.value)}
+                    className="mt-0.5 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-800"
+                  />
+                </label>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {dueForCleanup.length} picklist(s) match right now
+                </span>
+                <Button variant="sm" onClick={() => void runCleanup()} disabled={closing || dueForCleanup.length === 0}>
+                  {closing ? "Closing…" : `Close ${dueForCleanup.length || ""} picklist(s)`}
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                Ongoing — auto-complete timer
+              </p>
+              <label className="text-[11px]">
+                <span className="block text-slate-500 dark:text-slate-400">
+                  Auto-close a WMS-blocked picklist this many days after it was created
+                </span>
+                <select
+                  value={autoCompleteAfterDays ?? ""}
+                  onChange={(e) => changeAutoCompleteDays(e.target.value)}
+                  className="mt-0.5 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-800"
+                >
+                  <option value="">Off</option>
+                  <option value="1">1 day</option>
+                  <option value="2">2 days</option>
+                  <option value="3">3 days</option>
+                </select>
+              </label>
+            </div>
+          </Card>
+        )}
       </div>
     </div>
   );

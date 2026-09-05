@@ -3,6 +3,7 @@ import { holdKey } from "../../src/lib/holds";
 import {
   activeFacilityLists,
   activeTasks,
+  dueForAutoComplete,
   dueForWmsBlock,
   effectiveGatePassNo,
   gatePassGroupKey,
@@ -208,6 +209,53 @@ describe("dueForWmsBlock — keyed off creation, not assignment", () => {
       facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line] }],
     });
     expect(dueForWmsBlock([t]).map((f) => f.no)).toEqual(["F-1"]);
+  });
+});
+
+describe("dueForAutoComplete — aged WMS-blocked picklist auto-close", () => {
+  const line = { rid: 1, sku: "SKU-1", name: "Product", facility: "SL Mother Hub", bin: "A1", batch: "B1", exp: [2099, 1] as [number, number], rem: 12, qty: 20 };
+  const oldCreatedAt = "2026-08-01T00:00:00.000Z";
+  const newCreatedAt = "2026-09-05T00:00:00.000Z";
+  const cutoffMs = new Date("2026-08-31T23:59:59.999Z").getTime();
+
+  it("flags a WMS-blocked open facility created on or before the cutoff", () => {
+    const t = task({
+      createdAt: oldCreatedAt,
+      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line], wmsBlocked: true }],
+    });
+    expect(dueForAutoComplete([t], cutoffMs).map((f) => f.no)).toEqual(["F-1"]);
+  });
+
+  it("does not flag a facility created after the cutoff", () => {
+    const t = task({
+      createdAt: newCreatedAt,
+      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line], wmsBlocked: true }],
+    });
+    expect(dueForAutoComplete([t], cutoffMs)).toEqual([]);
+  });
+
+  it("does not flag a facility that was never WMS-blocked, however old", () => {
+    const t = task({
+      createdAt: oldCreatedAt,
+      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, lines: [line] }],
+    });
+    expect(dueForAutoComplete([t], cutoffMs)).toEqual([]);
+  });
+
+  it("does not flag an already-completed facility", () => {
+    const t = task({
+      createdAt: oldCreatedAt,
+      facilities: [{ no: "F-1", taskNo: "TASK-1", facility: "SL Mother Hub", status: "completed", round: 1, bad: 0, lines: [line], wmsBlocked: true }],
+    });
+    expect(dueForAutoComplete([t], cutoffMs)).toEqual([]);
+  });
+
+  it("uses the facility's own createdAt over the parent task's (round-2 alternates)", () => {
+    const t = task({
+      createdAt: oldCreatedAt,
+      facilities: [{ no: "F-1-R2", taskNo: "TASK-1", facility: "SL Mother Hub", status: "open", round: 2, bad: 0, lines: [line], wmsBlocked: true, createdAt: newCreatedAt }],
+    });
+    expect(dueForAutoComplete([t], cutoffMs)).toEqual([]);
   });
 });
 

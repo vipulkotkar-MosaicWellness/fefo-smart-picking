@@ -178,6 +178,9 @@ function Workspace() {
     flushOfflineQueue,
     checkWmsAutoBlock,
     checkHoldAutoRelease,
+    loadAutoCompleteSetting,
+    startAutoCompleteSettingRealtime,
+    checkPicklistAutoComplete,
   } = useStore();
   const { profile, signOut } = useAuth();
   const role = profile!.role as "super_admin" | "admin" | "planner" | "picker" | "inventory_planner";
@@ -202,10 +205,12 @@ function Workspace() {
     void loadHolds();
     void loadPickers();
     void loadChannelOverrides();
+    void loadAutoCompleteSetting();
     void flushOfflineQueue();
     const stop = startTasksRealtime();
     const stopPickers = startPickersRealtime();
     const stopChannelOverrides = startChannelOverridesRealtime();
+    const stopAutoCompleteSetting = startAutoCompleteSettingRealtime();
     const onOnline = () => void flushOfflineQueue();
     window.addEventListener("online", onOnline);
     // Sweeps for picklists whose 15-minute WMS-block clock has run out.
@@ -216,13 +221,20 @@ function Workspace() {
     // dueForHoldAutoRelease in lib/holds.ts.
     void checkHoldAutoRelease();
     const holdTimer = window.setInterval(() => void checkHoldAutoRelease(), 60_000);
+    // Aged-WMS-blocked-picklist auto-close — only does anything once Super
+    // Admin has turned the timer on (autoCompleteAfterDays). See
+    // dueForAutoComplete in lib/store.ts.
+    void checkPicklistAutoComplete();
+    const autoCompleteTimer = window.setInterval(() => void checkPicklistAutoComplete(), 60_000);
     return () => {
       stop();
       stopPickers();
       stopChannelOverrides();
+      stopAutoCompleteSetting();
       window.removeEventListener("online", onOnline);
       window.clearInterval(wmsTimer);
       window.clearInterval(holdTimer);
+      window.clearInterval(autoCompleteTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

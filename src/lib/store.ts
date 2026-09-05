@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { fetchSetting, subscribeSettings, upsertSetting } from "./appSettingsSupabase";
 import { bucketCode, channelCode, CHANNELS, type ChannelBucket } from "./channels";
 import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_GATE_PASS_PREFIX, FACILITY_PRIORITY, facilityCode, gatePassMatchesFacility } from "./facilities";
@@ -203,6 +204,24 @@ export function dueForWmsBlock(tasks: PickingTask[], now = Date.now()): Facility
     const created = f.createdAt ?? taskByNo.get(f.taskNo)?.createdAt;
     if (!created) return false;
     return now - new Date(created).getTime() >= WMS_BLOCK_DELAY_MS;
+  });
+}
+
+/**
+ * WMS-blocked, still-open facilities created at or before cutoffTimestampMs
+ * — shared by the one-time aged-picklist cleanup (closeAgedWmsBlockedPicklists,
+ * a fixed calendar cutoff) and the recurring auto-complete sweep
+ * (checkPicklistAutoComplete, cutoff = now - autoCompleteAfterDays). Only
+ * WMS-blocked facilities qualify — one still waiting on a picker (never
+ * WMS-blocked) is left alone either way.
+ */
+export function dueForAutoComplete(tasks: PickingTask[], cutoffTimestampMs: number): FacilityPicklist[] {
+  const taskByNo = new Map(tasks.map((t) => [t.no, t] as const));
+  return activeFacilityLists(tasks).filter((f) => {
+    if (f.status === "completed" || !f.wmsBlocked) return false;
+    const created = f.createdAt ?? taskByNo.get(f.taskNo)?.createdAt;
+    if (!created) return false;
+    return new Date(created).getTime() <= cutoffTimestampMs;
   });
 }
 
@@ -533,6 +552,10 @@ export interface AppState {
   partnerActive: Record<string, boolean>;
   partnerLogos: Record<string, PartnerLogoState>;
   auditLog: AuditEntry[];
+  // Super-Admin-configured aged-picklist auto-close timer (days since
+  // creation) — null means off. Shared across every user via app_settings,
+  // not a per-browser setting; see appSettingsSupabase.ts.
+  autoCompleteAfterDays: number | null;
 
   saveInventoryView: (v: SavedInventoryView) => void;
   deleteInventoryView: (name: string) => void;
@@ -609,6 +632,18 @@ export interface AppState {
   // emptied)") any whose lot has hit 0 current qty — see
   // dueForHoldAutoRelease. Called on the same interval as checkWmsAutoBlock.
   checkHoldAutoRelease: () => Promise<void>;
+  // Aged-WMS-blocked-picklist auto-close — shared Super Admin setting (see
+  // autoCompleteAfterDays) and the recurring/one-time actions that use it.
+  loadAutoCompleteSetting: () => Promise<void>;
+  startAutoCompleteSettingRealtime: () => () => void;
+  setAutoCompleteAfterDays: (days: number | null, updatedBy: string) => Promise<void>;
+  // One-time catch-up (Super Admin only, enforced in the UI): every
+  // WMS-blocked, still-open facility created on or before cutoffDate is
+  // force-completed at 100% picked. Returns how many it closed.
+  closeAgedWmsBlockedPicklists: (cutoffDate: string, actorName: string) => Promise<number>;
+  // Recurring version of the same close, gated on autoCompleteAfterDays
+  // being set — called on the same interval as checkWmsAutoBlock.
+  checkPicklistAutoComplete: () => Promise<void>;
 }
 
 const initialStock = rowsFromTuples(REAL_STOCK);
@@ -641,6 +676,7 @@ export const useStore = create<AppState>()(
       partnerActive: {},
       partnerLogos: {},
       auditLog: [],
+      autoCompleteAfterDays: null,
 
       saveInventoryView: (v) =>
         set({ savedInventoryViews: [...get().savedInventoryViews.filter((x) => x.name !== v.name), v] }),
@@ -1588,6 +1624,64 @@ export const useStore = create<AppState>()(
           }
         }
         await get().loadHolds();
+      },
+
+      loadAutoCompleteSetting: async () => {
+        try {
+          const v = await fetchSetting("auto_complete_after_days");
+          set({ autoCompleteAfterDays: typeof v === "number" ? v : null });
+        } catch {
+          // Leave whatever's currently in state — a transient fetch failure
+          // shouldn't silently disable an Admin-configured setting.
+        }
+      },
+
+      startAutoCompleteSettingRealtime: () => {
+        if (!isSupabaseConfigured) return () => {};
+        return subscribeSettings(() => void get().loadAutoCompleteSetting());
+      },
+
+      setAutoCompleteAfterDays: async (days, updatedBy) => {
+        set({ autoCompleteAfterDays: days });
+        if (!isSupabaseConfigured) return;
+        try {
+          await upsertSetting("auto_complete_after_days", days, updatedBy);
+        } catch (e) {
+          set({ notice: "Could not save auto-complete setting: " + (e as Error).message });
+        }
+      },
+
+      // Reuses applyPicks for every due facility — zero not-found per line
+      // means no holds/round-2 fire, stock still deducts correctly, and a
+      // line a picker already resolved for real is left exactly as entered
+      // (only picked==null lines get backfilled to 100%). Sequential, not
+      // Promise.all: each applyPicks() reads/writes the same tasks/stock
+      // state, so awaiting one at a time keeps that authoritative.
+      closeAgedWmsBlockedPicklists: async (cutoffDate, actorName) => {
+        const cutoffMs = new Date(cutoffDate + "T23:59:59.999").getTime();
+        const due = dueForAutoComplete(get().tasks, cutoffMs);
+        if (due.length === 0) return 0;
+        for (const f of due) {
+          const results: Record<number, number> = {};
+          for (const l of f.lines) if (l.picked == null) results[l.rid] = 0;
+          await get().applyPicks(f.no, results, undefined, actorName);
+        }
+        set({ notice: `${due.length} aged WMS-blocked picklist(s) closed at 100% picked.` });
+        return due.length;
+      },
+
+      // Recurring version — only runs once Super Admin has actually turned
+      // the timer on. Same interval as checkWmsAutoBlock (App.tsx).
+      checkPicklistAutoComplete: async () => {
+        const days = get().autoCompleteAfterDays;
+        if (days == null) return;
+        const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
+        const due = dueForAutoComplete(get().tasks, cutoffMs);
+        for (const f of due) {
+          const results: Record<number, number> = {};
+          for (const l of f.lines) if (l.picked == null) results[l.rid] = 0;
+          await get().applyPicks(f.no, results, undefined, "System (auto-complete)");
+        }
       },
     }),
     {
