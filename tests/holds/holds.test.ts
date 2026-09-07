@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeHoldKeys,
   AGE_BUCKETS,
+  buildAgeFacilityPivot,
   dueForHoldAutoRelease,
   groupHoldsByFacilityAndDate,
   holdAgeDays,
@@ -261,5 +262,46 @@ describe("AGE_BUCKETS / holdMatchesAgeBucket", () => {
 
   it("exposes exactly 4 buckets with their user-facing labels", () => {
     expect(AGE_BUCKETS.map((b) => b.label)).toEqual(["< 2 days", "3 to 5 days", "6 to 10 days", "> 10 days"]);
+  });
+});
+
+describe("buildAgeFacilityPivot", () => {
+  const now = new Date("2026-09-07T12:00:00.000Z");
+  const facilities = ["SL Mother Hub", "SL Ambient"];
+  function heldDaysAgo(days: number, overrides: Partial<Hold> = {}): Hold {
+    const d = new Date(now.getTime() - days * 86400000);
+    return hold({ heldAt: d.toISOString(), ...overrides });
+  }
+
+  it("sums qty (not just counts records) into the right bucket x facility cell", () => {
+    const holds = [
+      heldDaysAgo(0, { id: 1, facility: "SL Mother Hub", qty: 10 }),
+      heldDaysAgo(1, { id: 2, facility: "SL Mother Hub", qty: 25 }), // same lt2 bucket, same facility -> sums with the above
+      heldDaysAgo(4, { id: 3, facility: "SL Ambient", qty: 7 }), // 3to5 bucket, different facility
+    ];
+    const pivot = buildAgeFacilityPivot(holds, facilities, now);
+    const lt2Row = pivot.rows.find((r) => r.bucket === "lt2")!;
+    expect(lt2Row.cells.find((c) => c.facility === "SL Mother Hub")).toEqual({ facility: "SL Mother Hub", units: 35, count: 2 });
+    expect(lt2Row.cells.find((c) => c.facility === "SL Ambient")).toEqual({ facility: "SL Ambient", units: 0, count: 0 });
+    const midRow = pivot.rows.find((r) => r.bucket === "3to5")!;
+    expect(midRow.cells.find((c) => c.facility === "SL Ambient")).toEqual({ facility: "SL Ambient", units: 7, count: 1 });
+  });
+
+  it("rolls up row totals, facility (column) totals, and a grand total", () => {
+    const holds = [heldDaysAgo(0, { id: 1, facility: "SL Mother Hub", qty: 10 }), heldDaysAgo(11, { id: 2, facility: "SL Ambient", qty: 40 })];
+    const pivot = buildAgeFacilityPivot(holds, facilities, now);
+    expect(pivot.rows.find((r) => r.bucket === "lt2")!.totalUnits).toBe(10);
+    expect(pivot.rows.find((r) => r.bucket === "gt10")!.totalUnits).toBe(40);
+    expect(pivot.facilityTotals.find((f) => f.facility === "SL Mother Hub")).toEqual({ facility: "SL Mother Hub", units: 10, count: 1 });
+    expect(pivot.facilityTotals.find((f) => f.facility === "SL Ambient")).toEqual({ facility: "SL Ambient", units: 40, count: 1 });
+    expect(pivot.grandTotalUnits).toBe(50);
+    expect(pivot.grandTotalCount).toBe(2);
+  });
+
+  it("returns a zeroed pivot (not an error) when there are no holds", () => {
+    const pivot = buildAgeFacilityPivot([], facilities, now);
+    expect(pivot.rows).toHaveLength(4);
+    expect(pivot.rows.every((r) => r.totalUnits === 0)).toBe(true);
+    expect(pivot.grandTotalUnits).toBe(0);
   });
 });

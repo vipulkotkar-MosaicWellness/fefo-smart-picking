@@ -2,7 +2,17 @@ import { useState } from "react";
 import { useAuth } from "../lib/authStore";
 import { FACILITY_PRIORITY } from "../lib/facilities";
 import { downloadCsv } from "../lib/format";
-import { AGE_BUCKETS, type AgeBucketKey, groupHoldsByFacilityAndDate, holdMatchesAgeBucket, holdMatchesSearch, onHandQty, type HoldFacilityGroup } from "../lib/holds";
+import {
+  AGE_BUCKETS,
+  type AgeBucketKey,
+  type AgeFacilityPivot,
+  buildAgeFacilityPivot,
+  groupHoldsByFacilityAndDate,
+  holdMatchesAgeBucket,
+  holdMatchesSearch,
+  onHandQty,
+  type HoldFacilityGroup,
+} from "../lib/holds";
 import { useStore } from "../lib/store";
 import type { Hold, StockRow } from "../lib/types";
 import { Button, Card, Tag } from "./Ui";
@@ -167,6 +177,93 @@ function FacilityPanel({
   );
 }
 
+// The leadership view: aging (rows) x facility (columns), units on hold as
+// the value. Clicking a cell jumps straight to that facility + bucket in
+// the collapsible table below (switches the facility tab AND applies the
+// age filter) — a drill-down from summary number to the actual line items.
+// Clicking the already-selected cell again clears just the age filter.
+function AgePivotTable({
+  pivot,
+  facilities,
+  activeFacility,
+  ageFilter,
+  onSelectCell,
+}: {
+  pivot: AgeFacilityPivot;
+  facilities: string[];
+  activeFacility: string;
+  ageFilter: AgeBucketKey | null;
+  onSelectCell: (facility: string, bucket: AgeBucketKey) => void;
+}) {
+  return (
+    <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+      <table className="w-full min-w-[480px] border-collapse text-xs">
+        <caption className="border-b border-slate-200 bg-slate-50 px-2.5 py-1.5 text-left text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+          Units on hold, by age and facility — click a cell to see those holds
+        </caption>
+        <thead>
+          <tr className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <th className="border-b border-slate-200 p-2 text-left dark:border-slate-700">Age of hold</th>
+            {facilities.map((f) => (
+              <th key={f} className="border-b border-slate-200 p-2 text-right dark:border-slate-700">
+                {f}
+              </th>
+            ))}
+            <th className="border-b border-slate-200 p-2 text-right dark:border-slate-700">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pivot.rows.map((row) => (
+            <tr key={row.bucket}>
+              <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${AGE_BUCKET_STYLE[row.bucket].light}`}>{row.label}</span>
+              </td>
+              {row.cells.map((cell) => {
+                const isSelected = ageFilter === row.bucket && activeFacility === cell.facility;
+                const clickable = cell.count > 0;
+                return (
+                  <td key={cell.facility} className="border-b border-slate-100 p-1 text-right dark:border-slate-700/60">
+                    <button
+                      onClick={() => clickable && onSelectCell(cell.facility, row.bucket)}
+                      disabled={!clickable}
+                      className={`w-full rounded-md px-2 py-1 transition-colors ${
+                        isSelected
+                          ? `${AGE_BUCKET_STYLE[row.bucket].solid} ring-2 ring-teal-500 ring-offset-1 dark:ring-offset-slate-900`
+                          : clickable
+                            ? "hover:bg-slate-100 dark:hover:bg-slate-800"
+                            : "cursor-default opacity-40"
+                      }`}
+                    >
+                      <div className="text-sm font-bold">{cell.units.toLocaleString()}</div>
+                      <div className={isSelected ? "text-[10px] text-white/80" : "text-[10px] text-slate-400"}>
+                        {cell.count} hold{cell.count === 1 ? "" : "s"}
+                      </div>
+                    </button>
+                  </td>
+                );
+              })}
+              <td className="border-b border-slate-100 p-2 text-right font-semibold text-slate-600 dark:border-slate-700/60 dark:text-slate-300">
+                {row.totalUnits.toLocaleString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="border-t border-slate-200 font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200">
+            <td className="p-2">Total</td>
+            {pivot.facilityTotals.map((f) => (
+              <td key={f.facility} className="p-2 text-right">
+                {f.units.toLocaleString()}
+              </td>
+            ))}
+            <td className="p-2 text-right">{pivot.grandTotalUnits.toLocaleString()}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
 export function StockHolds() {
   const holds = useStore((s) => s.holds);
   const stock = useStore((s) => s.stock);
@@ -191,12 +288,21 @@ export function StockHolds() {
   // is already resolved, so it stays search-only.
   const active = searchedActive.filter((h) => holdMatchesAgeBucket(h, ageFilter, now));
   const released = allReleased.filter((h) => holdMatchesSearch(h, search));
-  // Bucket counts shown on the chips are scoped to the currently-open
-  // facility tab + search, so they read as "how many of what I'm already
-  // looking at fall in this age band" rather than a global count.
-  const facilityScoped = searchedActive.filter((h) => h.facility === activeFacility);
-  const ageBucketCounts = AGE_BUCKETS.map((b) => ({ ...b, count: facilityScoped.filter((h) => holdMatchesAgeBucket(h, b.key, now)).length }));
+  // The pivot is scoped to search only (not the age filter, not the active
+  // tab) — it's the summary you pick a bucket x facility cell FROM, so it
+  // has to keep showing every bucket and every facility regardless of what's
+  // currently selected.
+  const pivot = buildAgeFacilityPivot(searchedActive, FACILITY_PRIORITY, now);
   const filterDescription = [search && `"${search}"`, ageFilter && AGE_BUCKETS.find((b) => b.key === ageFilter)?.label].filter(Boolean).join(" + ");
+
+  function selectPivotCell(facility: string, bucket: AgeBucketKey) {
+    if (activeFacility === facility && ageFilter === bucket) {
+      setAgeFilter(null); // clicking the already-selected cell again clears just the age filter
+    } else {
+      setActiveFacility(facility);
+      setAgeFilter(bucket);
+    }
+  }
   // Always show all 3 facilities side by side, even one with zero matching
   // holds right now — groupHoldsByFacilityAndDate only returns facilities
   // that actually appear in `active`, so backfill any missing ones empty.
@@ -270,28 +376,15 @@ export function StockHolds() {
         </Button>
       </div>
 
-      {allActive.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Age of hold:</span>
-          {ageBucketCounts.map((b) => {
-            const isActive = ageFilter === b.key;
-            return (
-              <button
-                key={b.key}
-                onClick={() => setAgeFilter((prev) => (prev === b.key ? null : b.key))}
-                className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                  isActive ? `${AGE_BUCKET_STYLE[b.key].solid} border-transparent` : `${AGE_BUCKET_STYLE[b.key].light} border-slate-200 dark:border-slate-700`
-                }`}
-              >
-                {b.label} <span className="opacity-80">({b.count})</span>
-              </button>
-            );
-          })}
-          {ageFilter && (
-            <button onClick={() => setAgeFilter(null)} className="text-[11px] font-medium text-teal-700 underline dark:text-teal-400">
-              Clear
-            </button>
-          )}
+      {allActive.length > 0 && <AgePivotTable pivot={pivot} facilities={FACILITY_PRIORITY} activeFacility={activeFacility} ageFilter={ageFilter} onSelectCell={selectPivotCell} />}
+
+      {ageFilter && (
+        <div className="mb-3 flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+          Filtered to <span className={`rounded-full px-2 py-0.5 font-semibold ${AGE_BUCKET_STYLE[ageFilter].light}`}>{AGE_BUCKETS.find((b) => b.key === ageFilter)?.label}</span>
+          at {activeFacility}
+          <button onClick={() => setAgeFilter(null)} className="font-medium text-teal-700 underline dark:text-teal-400">
+            Clear
+          </button>
         </div>
       )}
 

@@ -123,6 +123,52 @@ export function holdMatchesAgeBucket(h: Hold, bucket: AgeBucketKey | null, now: 
   return def ? def.test(holdAgeDays(h.heldAt, now)) : true;
 }
 
+export interface AgePivotCell {
+  facility: string;
+  units: number; // sum of qty on hold — the number leadership cares about, not just line-item count
+  count: number; // how many SKU+Bin+Batch hold records make up that units figure
+}
+export interface AgePivotRow {
+  bucket: AgeBucketKey;
+  label: string;
+  cells: AgePivotCell[]; // one per facility, in the order `facilities` was given
+  totalUnits: number;
+  totalCount: number;
+}
+export interface AgeFacilityPivot {
+  rows: AgePivotRow[]; // one per AGE_BUCKETS entry, oldest last
+  facilityTotals: AgePivotCell[]; // column totals, across every bucket
+  grandTotalUnits: number;
+  grandTotalCount: number;
+}
+
+/**
+ * Cross-tab of aging bucket (row) x facility (column), summed in units on
+ * hold — the "leadership view" of stock holds: at a glance, how much stock
+ * is stuck, how old, and where. `facilities` fixes the column set/order
+ * (holds for a facility not in that list are simply not counted, matching
+ * how the facility tabs elsewhere on the page already only show these).
+ */
+export function buildAgeFacilityPivot(holds: Hold[], facilities: string[], now: Date): AgeFacilityPivot {
+  const rows: AgePivotRow[] = AGE_BUCKETS.map((b) => {
+    const cells = facilities.map((facility) => {
+      const matching = holds.filter((h) => h.facility === facility && holdMatchesAgeBucket(h, b.key, now));
+      return { facility, units: matching.reduce((s, h) => s + h.qty, 0), count: matching.length };
+    });
+    return { bucket: b.key, label: b.label, cells, totalUnits: cells.reduce((s, c) => s + c.units, 0), totalCount: cells.reduce((s, c) => s + c.count, 0) };
+  });
+  const facilityTotals: AgePivotCell[] = facilities.map((facility) => {
+    const matching = holds.filter((h) => h.facility === facility);
+    return { facility, units: matching.reduce((s, h) => s + h.qty, 0), count: matching.length };
+  });
+  return {
+    rows,
+    facilityTotals,
+    grandTotalUnits: facilityTotals.reduce((s, f) => s + f.units, 0),
+    grandTotalCount: facilityTotals.reduce((s, f) => s + f.count, 0),
+  };
+}
+
 export interface NewHoldRequest {
   sku: string;
   facility: string;
