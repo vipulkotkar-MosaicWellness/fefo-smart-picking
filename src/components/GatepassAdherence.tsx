@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { fetchGatepassAdherence, type AdherenceLine, type GatepassAdherence as GatepassAdherenceRow } from "../lib/gatepassAdherenceSupabase";
-import { Button, Card, Tag } from "./Ui";
+import { Button, Card, StatCard, Tag } from "./Ui";
 
 interface DaySummary {
   date: string;
@@ -84,34 +84,6 @@ function pctTone(pct: number): "ok" | "warn" | "bad" {
   if (pct >= 95) return "ok";
   if (pct >= 80) return "warn";
   return "bad";
-}
-
-const TONE_TEXT: Record<"ok" | "warn" | "bad" | "info", string> = {
-  ok: "text-emerald-700 dark:text-emerald-400",
-  warn: "text-amber-700 dark:text-amber-400",
-  bad: "text-rose-700 dark:text-rose-400",
-  info: "text-[var(--fefo-teal-700)] dark:text-teal-300",
-};
-const TONE_BADGE: Record<"ok" | "warn" | "bad" | "info", string> = {
-  ok: "bg-emerald-100 dark:bg-emerald-900/40",
-  warn: "bg-amber-100 dark:bg-amber-900/40",
-  bad: "bg-rose-100 dark:bg-rose-900/40",
-  info: "bg-[var(--fefo-teal-50)] dark:bg-slate-700",
-};
-
-function StatCard({ icon, tone, label, value, sub }: { icon: string; tone: "ok" | "warn" | "bad" | "info"; label: string; value: string; sub?: string }) {
-  return (
-    <div className="flex items-start gap-3 rounded-xl border border-[var(--fefo-line)] bg-white p-3.5 dark:border-slate-700 dark:bg-slate-800">
-      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-lg font-bold ${TONE_BADGE[tone]} ${TONE_TEXT[tone]}`}>
-        {icon}
-      </span>
-      <div>
-        <p className="text-sm font-semibold text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
-        <p className={`mt-0.5 text-4xl font-bold tabular-nums ${TONE_TEXT[tone]}`}>{value}</p>
-        {sub && <p className="text-sm text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
-      </div>
-    </div>
-  );
 }
 
 function TrendChart({ days }: { days: DaySummary[] }) {

@@ -36,6 +36,36 @@ const btnCls: Record<BtnVariant, string> = {
   sm: "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600",
 };
 
+export type StatTone = "ok" | "warn" | "bad" | "info";
+const STAT_TONE_TEXT: Record<StatTone, string> = {
+  ok: "text-emerald-700 dark:text-emerald-400",
+  warn: "text-amber-700 dark:text-amber-400",
+  bad: "text-rose-700 dark:text-rose-400",
+  info: "text-[var(--fefo-teal-700)] dark:text-teal-300",
+};
+const STAT_TONE_BADGE: Record<StatTone, string> = {
+  ok: "bg-emerald-100 dark:bg-emerald-900/40",
+  warn: "bg-amber-100 dark:bg-amber-900/40",
+  bad: "bg-rose-100 dark:bg-rose-900/40",
+  info: "bg-[var(--fefo-teal-50)] dark:bg-slate-700",
+};
+
+/** The app's one KPI-card shape (icon badge + label + big number + sub-line) — shared so every screen's headline stats read as one system. */
+export function StatCard({ icon, tone, label, value, sub }: { icon: string; tone: StatTone; label: string; value: string; sub?: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-[var(--fefo-line)] bg-white p-3.5 dark:border-slate-700 dark:bg-slate-800">
+      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-lg font-bold ${STAT_TONE_BADGE[tone]} ${STAT_TONE_TEXT[tone]}`}>
+        {icon}
+      </span>
+      <div>
+        <p className="text-sm font-semibold text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
+        <p className={`mt-0.5 text-4xl font-bold tabular-nums ${STAT_TONE_TEXT[tone]}`}>{value}</p>
+        {sub && <p className="text-sm text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
 export function Button({
   variant = "primary",
   onClick,

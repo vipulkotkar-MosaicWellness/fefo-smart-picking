@@ -8,6 +8,7 @@ import {
   type AgeFacilityPivot,
   buildAgeFacilityPivot,
   groupHoldsByFacilityAndDate,
+  holdAgeDays,
   holdMatchesAgeBucket,
   holdMatchesSearch,
   onHandQty,
@@ -15,7 +16,7 @@ import {
 } from "../lib/holds";
 import { useStore } from "../lib/store";
 import type { Hold, StockRow } from "../lib/types";
-import { Button, Card, Tag } from "./Ui";
+import { Button, Card, StatCard, Tag } from "./Ui";
 
 function timeLabel(iso?: string): string {
   return iso ? new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -26,17 +27,64 @@ function dateLabel(date: string): string {
 }
 
 // Aging colour cues, greenest = freshest / least urgent through reddest =
-// oldest / most urgent — a quick-scan signal on top of the day-count label.
-// Selected chip: solid colour + white text (same pattern as the active
-// facility tab). Unselected: a light tint of the same colour, dark enough
-// text for contrast rather than plain gray, so it still reads as "this
-// chip's colour" even before it's picked.
-const AGE_BUCKET_STYLE: Record<AgeBucketKey, { light: string; solid: string }> = {
-  lt2: { light: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300", solid: "bg-emerald-600 text-white" },
-  "2to5": { light: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300", solid: "bg-amber-600 text-white" },
-  "6to10": { light: "bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300", solid: "bg-orange-600 text-white" },
-  gt10: { light: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300", solid: "bg-rose-600 text-white" },
+// oldest / most urgent — a quick-scan signal that repeats across the pivot's
+// row accent, the distribution bar, and the "Filtered to" pill so the same
+// colour always means the same age everywhere on this screen.
+// - light/solid: the cell/pill treatment (solid+white when selected, same
+//   pattern as the active facility tab).
+// - rowTint: a faint full-row wash, the severity cue the leadership matrix
+//   view is built around (no side border — that reads as an AI-slop tell).
+// - bar: the flat fill used in the compact distribution bar.
+const AGE_BUCKET_STYLE: Record<AgeBucketKey, { light: string; solid: string; rowTint: string; bar: string }> = {
+  lt2: {
+    light: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+    solid: "bg-emerald-600 text-white",
+    rowTint: "bg-emerald-50/50 dark:bg-emerald-950/10",
+    bar: "bg-emerald-500",
+  },
+  "2to5": {
+    light: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+    solid: "bg-amber-600 text-white",
+    rowTint: "bg-amber-50/50 dark:bg-amber-950/10",
+    bar: "bg-amber-500",
+  },
+  "6to10": {
+    light: "bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300",
+    solid: "bg-orange-600 text-white",
+    rowTint: "bg-orange-50/50 dark:bg-orange-950/10",
+    bar: "bg-orange-500",
+  },
+  gt10: {
+    light: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300",
+    solid: "bg-rose-600 text-white",
+    rowTint: "bg-rose-50/50 dark:bg-rose-950/10",
+    bar: "bg-rose-500",
+  },
 };
+
+/** Compact stacked bar showing each bucket's share of every unit currently on hold — the "shape" of the aging problem at a glance, before the numbers. */
+function AgeDistributionBar({ pivot }: { pivot: AgeFacilityPivot }) {
+  if (pivot.grandTotalUnits === 0) return null;
+  return (
+    <div className="mt-2">
+      <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+        {pivot.rows.map((row) => {
+          const pct = (row.totalUnits / pivot.grandTotalUnits) * 100;
+          if (pct <= 0) return null;
+          return <div key={row.bucket} className={AGE_BUCKET_STYLE[row.bucket].bar} style={{ width: `${pct}%` }} title={`${row.label}: ${pct.toFixed(1)}%`} />;
+        })}
+      </div>
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+        {pivot.rows.map((row) => (
+          <span key={row.bucket} className="inline-flex items-center gap-1">
+            <span className={`h-1.5 w-1.5 rounded-full ${AGE_BUCKET_STYLE[row.bucket].bar}`} />
+            {row.label} · {((row.totalUnits / pivot.grandTotalUnits) * 100).toFixed(1)}%
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function csvFrom(header: string, rows: string[][]): string {
   const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
@@ -196,70 +244,79 @@ function AgePivotTable({
   onSelectCell: (facility: string, bucket: AgeBucketKey) => void;
 }) {
   return (
-    <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-      <table className="w-full min-w-[480px] border-collapse text-xs">
-        <caption className="border-b border-slate-200 bg-slate-50 px-2.5 py-1.5 text-left text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-          Units on hold, by age and facility — click a cell to see those holds
-        </caption>
-        <thead>
-          <tr className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            <th className="border-b border-slate-200 p-2 text-left dark:border-slate-700">Age of hold</th>
-            {facilities.map((f) => (
-              <th key={f} className="border-b border-slate-200 p-2 text-right dark:border-slate-700">
-                {f}
-              </th>
-            ))}
-            <th className="border-b border-slate-200 p-2 text-right dark:border-slate-700">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pivot.rows.map((row) => (
-            <tr key={row.bucket}>
-              <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">
-                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${AGE_BUCKET_STYLE[row.bucket].light}`}>{row.label}</span>
-              </td>
-              {row.cells.map((cell) => {
-                const isSelected = ageFilter === row.bucket && activeFacility === cell.facility;
-                const clickable = cell.count > 0;
+    <div className="mb-3 overflow-hidden rounded-xl border border-[var(--fefo-line)] bg-white dark:border-slate-700 dark:bg-slate-800">
+      <div className="border-b border-[var(--fefo-line)] px-3 py-2.5 dark:border-slate-700">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-800 dark:text-teal-300">Units on hold, by age and facility</p>
+        <p className="text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">Click a cell to see those holds</p>
+        <AgeDistributionBar pivot={pivot} />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] border-collapse text-xs tabular-nums">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+              <th className="border-b border-slate-200 p-2 text-left dark:border-slate-700">Age of hold</th>
+              {facilities.map((f) => {
+                const total = pivot.facilityTotals.find((ft) => ft.facility === f);
+                const pct = total && pivot.grandTotalUnits > 0 ? (total.units / pivot.grandTotalUnits) * 100 : 0;
                 return (
-                  <td key={cell.facility} className="border-b border-slate-100 p-1 text-right dark:border-slate-700/60">
-                    <button
-                      onClick={() => clickable && onSelectCell(cell.facility, row.bucket)}
-                      disabled={!clickable}
-                      className={`w-full rounded-md px-2 py-1 transition-colors ${
-                        isSelected
-                          ? `${AGE_BUCKET_STYLE[row.bucket].solid} ring-2 ring-teal-500 ring-offset-1 dark:ring-offset-slate-900`
-                          : clickable
-                            ? "hover:bg-slate-100 dark:hover:bg-slate-800"
-                            : "cursor-default opacity-40"
-                      }`}
-                    >
-                      <div className="text-sm font-bold">{cell.units.toLocaleString()}</div>
-                      <div className={isSelected ? "text-[10px] text-white/80" : "text-[10px] text-slate-400"}>
-                        {cell.count} hold{cell.count === 1 ? "" : "s"}
-                      </div>
-                    </button>
-                  </td>
+                  <th key={f} className="border-b border-slate-200 p-2 text-right dark:border-slate-700">
+                    <div>{f}</div>
+                    <div className="text-[9px] font-normal normal-case text-slate-400 dark:text-slate-500">{total && total.units > 0 ? `${pct.toFixed(0)}% of total` : "—"}</div>
+                  </th>
                 );
               })}
-              <td className="border-b border-slate-100 p-2 text-right font-semibold text-slate-600 dark:border-slate-700/60 dark:text-slate-300">
-                {row.totalUnits.toLocaleString()}
-              </td>
+              <th className="border-b border-slate-200 p-2 text-right dark:border-slate-700">Total</th>
             </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr className="border-t border-slate-200 font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200">
-            <td className="p-2">Total</td>
-            {pivot.facilityTotals.map((f) => (
-              <td key={f.facility} className="p-2 text-right">
-                {f.units.toLocaleString()}
-              </td>
+          </thead>
+          <tbody>
+            {pivot.rows.map((row) => (
+              <tr key={row.bucket} className={AGE_BUCKET_STYLE[row.bucket].rowTint}>
+                <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${AGE_BUCKET_STYLE[row.bucket].light}`}>{row.label}</span>
+                </td>
+                {row.cells.map((cell) => {
+                  const isSelected = ageFilter === row.bucket && activeFacility === cell.facility;
+                  const clickable = cell.count > 0;
+                  return (
+                    <td key={cell.facility} className="border-b border-slate-100 p-1 text-right dark:border-slate-700/60">
+                      <button
+                        onClick={() => clickable && onSelectCell(cell.facility, row.bucket)}
+                        disabled={!clickable}
+                        className={`w-full rounded-md px-2 py-1 transition-colors ${
+                          isSelected
+                            ? `${AGE_BUCKET_STYLE[row.bucket].solid} ring-2 ring-teal-500 ring-offset-1 dark:ring-offset-slate-900`
+                            : clickable
+                              ? "hover:bg-white dark:hover:bg-slate-900"
+                              : "cursor-default opacity-40"
+                        }`}
+                      >
+                        <div className="text-sm font-bold">{cell.units.toLocaleString()}</div>
+                        <div className={isSelected ? "text-[10px] text-white/80" : "text-[10px] text-slate-400"}>
+                          {cell.count} hold{cell.count === 1 ? "" : "s"}
+                        </div>
+                      </button>
+                    </td>
+                  );
+                })}
+                <td className="border-b border-slate-100 p-2 text-right font-semibold text-slate-600 dark:border-slate-700/60 dark:text-slate-300">
+                  {row.totalUnits.toLocaleString()}
+                </td>
+              </tr>
             ))}
-            <td className="p-2 text-right">{pivot.grandTotalUnits.toLocaleString()}</td>
-          </tr>
-        </tfoot>
-      </table>
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-slate-200 bg-slate-50 font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+              <td className="p-2">Total</td>
+              {pivot.facilityTotals.map((f) => (
+                <td key={f.facility} className="p-2 text-right">
+                  {f.units.toLocaleString()}
+                </td>
+              ))}
+              <td className="p-2 text-right">{pivot.grandTotalUnits.toLocaleString()}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </div>
   );
 }
@@ -294,6 +351,17 @@ export function StockHolds() {
   // currently selected.
   const pivot = buildAgeFacilityPivot(searchedActive, FACILITY_PRIORITY, now);
   const filterDescription = [search && `"${search}"`, ageFilter && AGE_BUCKETS.find((b) => b.key === ageFilter)?.label].filter(Boolean).join(" + ");
+
+  // Headline stats above the matrix — distinct from the matrix's own detail,
+  // this is the "read it in 5 seconds" version: how much is stuck, how much
+  // of that is genuinely overdue, how bad is the worst single case, and
+  // where is it concentrated.
+  const urgentRows = pivot.rows.filter((r) => r.bucket === "6to10" || r.bucket === "gt10");
+  const urgentUnits = urgentRows.reduce((s, r) => s + r.totalUnits, 0);
+  const urgentCount = urgentRows.reduce((s, r) => s + r.totalCount, 0);
+  const oldestAgeDays = searchedActive.length > 0 ? Math.max(...searchedActive.map((h) => holdAgeDays(h.heldAt, now))) : 0;
+  const topFacility = pivot.facilityTotals.reduce((a, b) => (b.units > a.units ? b : a), pivot.facilityTotals[0]);
+  const topFacilityPct = topFacility && pivot.grandTotalUnits > 0 ? Math.round((topFacility.units / pivot.grandTotalUnits) * 100) : 0;
 
   function selectPivotCell(facility: string, bucket: AgeBucketKey) {
     if (activeFacility === facility && ageFilter === bucket) {
@@ -375,6 +443,27 @@ export function StockHolds() {
           Export CSV
         </Button>
       </div>
+
+      {allActive.length > 0 && (
+        <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <StatCard icon="Σ" tone="info" label="Units on hold" value={pivot.grandTotalUnits.toLocaleString()} sub={`${pivot.grandTotalCount} hold${pivot.grandTotalCount === 1 ? "" : "s"}`} />
+          <StatCard
+            icon="!"
+            tone={urgentUnits > 0 ? "bad" : "ok"}
+            label="Aging > 6 days"
+            value={urgentUnits.toLocaleString()}
+            sub={urgentCount > 0 ? `${urgentCount} hold${urgentCount === 1 ? "" : "s"} need review` : "none right now"}
+          />
+          <StatCard
+            icon="Δ"
+            tone={oldestAgeDays > 10 ? "bad" : oldestAgeDays >= 6 ? "warn" : "ok"}
+            label="Oldest hold"
+            value={searchedActive.length > 0 ? `${oldestAgeDays} day${oldestAgeDays === 1 ? "" : "s"}` : "—"}
+            sub="since it was placed"
+          />
+          <StatCard icon="%" tone="info" label="Top concentration" value={topFacility?.units ? topFacility.facility : "—"} sub={topFacility?.units ? `${topFacilityPct}% · ${topFacility.units.toLocaleString()} units` : undefined} />
+        </div>
+      )}
 
       {allActive.length > 0 && <AgePivotTable pivot={pivot} facilities={FACILITY_PRIORITY} activeFacility={activeFacility} ageFilter={ageFilter} onSelectCell={selectPivotCell} />}
 
