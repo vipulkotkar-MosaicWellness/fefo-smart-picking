@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeHoldKeys, dueForHoldAutoRelease, holdKey, holdsToCreate, onHandQty } from "../../src/lib/holds";
+import { activeHoldKeys, dueForHoldAutoRelease, groupHoldsByFacilityAndDate, holdKey, holdMatchesSearch, holdsToCreate, onHandQty } from "../../src/lib/holds";
 import type { Hold, StockRow } from "../../src/lib/types";
 
 function stockRow(overrides: Partial<StockRow> = {}): StockRow {
@@ -142,5 +142,55 @@ describe("onHandQty", () => {
   it("sums quantity across multiple rows that share the same identity", () => {
     const stock = [stockRow({ rid: 1, qty: 5 }), stockRow({ rid: 2, qty: 7 })];
     expect(onHandQty(stock, "SKU-1", "SL Mother Hub", "A1", "B1")).toBe(12);
+  });
+});
+
+describe("holdMatchesSearch", () => {
+  it("matches on sku, bin, or batch, case-insensitively", () => {
+    const h = hold({ sku: "MWBWSKP.00206.B0_N", bin: "R13-C11-001", batch: "BA029520" });
+    expect(holdMatchesSearch(h, "mwbwskp")).toBe(true);
+    expect(holdMatchesSearch(h, "R13-C11")).toBe(true);
+    expect(holdMatchesSearch(h, "ba029520")).toBe(true);
+  });
+
+  it("does not match a field it wasn't asked about", () => {
+    const h = hold({ sku: "SKU-1", bin: "A1", batch: "B1", facility: "SL Mother Hub" });
+    expect(holdMatchesSearch(h, "mother hub")).toBe(false);
+  });
+
+  it("an empty search matches everything", () => {
+    expect(holdMatchesSearch(hold(), "")).toBe(true);
+    expect(holdMatchesSearch(hold(), "   ")).toBe(true);
+  });
+});
+
+describe("groupHoldsByFacilityAndDate", () => {
+  const order = ["SL Mother Hub", "SL Ambient", "SL RX"];
+
+  it("groups by facility in the given priority order, then by date newest-first within each", () => {
+    const holds = [
+      hold({ id: 1, facility: "SL Ambient", heldAt: "2026-08-01T10:00:00.000Z" }),
+      hold({ id: 2, facility: "SL Mother Hub", heldAt: "2026-08-03T10:00:00.000Z" }),
+      hold({ id: 3, facility: "SL Mother Hub", heldAt: "2026-08-01T10:00:00.000Z" }),
+    ];
+    const groups = groupHoldsByFacilityAndDate(holds, order);
+    expect(groups.map((g) => g.facility)).toEqual(["SL Mother Hub", "SL Ambient"]);
+    expect(groups[0].dates.map((d) => d.date)).toEqual(["2026-08-03", "2026-08-01"]);
+    expect(groups[0].dates[0].holds.map((h) => h.id)).toEqual([2]);
+  });
+
+  it("sorts holds within one date newest-first", () => {
+    const holds = [
+      hold({ id: 1, heldAt: "2026-08-01T09:00:00.000Z" }),
+      hold({ id: 2, heldAt: "2026-08-01T15:00:00.000Z" }),
+    ];
+    const groups = groupHoldsByFacilityAndDate(holds, order);
+    expect(groups[0].dates[0].holds.map((h) => h.id)).toEqual([2, 1]);
+  });
+
+  it("puts a facility not in the priority list after the known ones, instead of dropping it", () => {
+    const holds = [hold({ id: 1, facility: "SL Warehouse Old" }), hold({ id: 2, facility: "SL Mother Hub" })];
+    const groups = groupHoldsByFacilityAndDate(holds, order);
+    expect(groups.map((g) => g.facility)).toEqual(["SL Mother Hub", "SL Warehouse Old"]);
   });
 });

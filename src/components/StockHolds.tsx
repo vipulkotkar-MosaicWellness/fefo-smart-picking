@@ -1,13 +1,18 @@
 import { useState } from "react";
 import { useAuth } from "../lib/authStore";
+import { FACILITY_PRIORITY } from "../lib/facilities";
 import { downloadCsv } from "../lib/format";
-import { onHandQty } from "../lib/holds";
+import { groupHoldsByFacilityAndDate, holdMatchesSearch, onHandQty, type HoldFacilityGroup } from "../lib/holds";
 import { useStore } from "../lib/store";
 import type { Hold, StockRow } from "../lib/types";
 import { Button, Card, Tag } from "./Ui";
 
 function timeLabel(iso?: string): string {
   return iso ? new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+}
+
+function dateLabel(date: string): string {
+  return new Date(date + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
 }
 
 function csvFrom(header: string, rows: string[][]): string {
@@ -41,6 +46,119 @@ function releasedCsv(released: Hold[]): string {
   );
 }
 
+/** One date's worth of holds within a facility — its own collapsible level, lazy like the facility above it. */
+function DateGroup({
+  date,
+  holds,
+  stock,
+  canRelease,
+  selected,
+  onToggleOne,
+  onToggleAll,
+}: {
+  date: string;
+  holds: Hold[];
+  stock: StockRow[];
+  canRelease: boolean;
+  selected: Set<number>;
+  onToggleOne: (id: number, checked: boolean) => void;
+  onToggleAll: (ids: number[], checked: boolean) => void;
+}) {
+  const [opened, setOpened] = useState(false);
+  const ids = holds.map((h) => h.id);
+  const allSelected = ids.length > 0 && ids.every((id) => selected.has(id));
+
+  return (
+    <details className="mt-1.5 rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden" onToggle={(e) => { if (e.currentTarget.open) setOpened(true); }}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-900">
+        <span className="font-medium text-slate-700 dark:text-slate-200">{dateLabel(date)}</span>
+        <Tag tone="muted">{holds.length}</Tag>
+      </summary>
+      {opened && (
+        <div className="overflow-x-auto border-t border-slate-200 dark:border-slate-700">
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                {canRelease && (
+                  <th className="w-6 border-b border-slate-200 p-1.5 dark:border-slate-700">
+                    <input type="checkbox" checked={allSelected} onChange={(e) => onToggleAll(ids, e.target.checked)} aria-label={`Select all holds on ${dateLabel(date)}`} />
+                  </th>
+                )}
+                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">SKU</th>
+                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Bin</th>
+                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Batch</th>
+                <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Qty on hold</th>
+                <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Current shelf qty</th>
+                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Held since</th>
+                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Held by</th>
+                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Reason</th>
+                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Source picklist</th>
+              </tr>
+            </thead>
+            <tbody>
+              {holds.map((h) => (
+                <tr key={h.id} className="text-slate-700 dark:text-slate-200">
+                  {canRelease && (
+                    <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                      <input type="checkbox" checked={selected.has(h.id)} onChange={(e) => onToggleOne(h.id, e.target.checked)} aria-label={`Select hold on ${h.sku} ${h.bin}`} />
+                    </td>
+                  )}
+                  <td className="border-b border-slate-100 p-1.5 font-mono text-[10px] dark:border-slate-700/60">{h.sku}</td>
+                  <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">{h.bin}</td>
+                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.batch}</td>
+                  <td className="border-b border-slate-100 p-1.5 text-right font-semibold dark:border-slate-700/60">{h.qty}</td>
+                  <td className="border-b border-slate-100 p-1.5 text-right font-semibold text-rose-600 dark:border-slate-700/60 dark:text-rose-400">
+                    {onHandQty(stock, h.sku, h.facility, h.bin, h.batch)}
+                  </td>
+                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{timeLabel(h.heldAt)}</td>
+                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.heldBy}</td>
+                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.reason ? <Tag tone="warn">{h.reason}</Tag> : "—"}</td>
+                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.sourceTaskNo ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </details>
+  );
+}
+
+function FacilityGroup({
+  group,
+  stock,
+  canRelease,
+  selected,
+  onToggleOne,
+  onToggleAll,
+}: {
+  group: HoldFacilityGroup;
+  stock: StockRow[];
+  canRelease: boolean;
+  selected: Set<number>;
+  onToggleOne: (id: number, checked: boolean) => void;
+  onToggleAll: (ids: number[], checked: boolean) => void;
+}) {
+  const [opened, setOpened] = useState(false);
+  const total = group.dates.reduce((s, d) => s + d.holds.length, 0);
+
+  return (
+    <details className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden" onToggle={(e) => { if (e.currentTarget.open) setOpened(true); }}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm font-semibold dark:bg-slate-900">
+        <span>{group.facility}</span>
+        <Tag tone="info">{total}</Tag>
+      </summary>
+      {opened && (
+        <div className="p-2">
+          {group.dates.map((d) => (
+            <DateGroup key={d.date} date={d.date} holds={d.holds} stock={stock} canRelease={canRelease} selected={selected} onToggleOne={onToggleOne} onToggleAll={onToggleAll} />
+          ))}
+        </div>
+      )}
+    </details>
+  );
+}
+
 export function StockHolds() {
   const holds = useStore((s) => s.holds);
   const stock = useStore((s) => s.stock);
@@ -48,31 +166,58 @@ export function StockHolds() {
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
   const role = useAuth((s) => s.profile?.role);
   const canRelease = role === "admin" || role === "super_admin";
-  const [releasingId, setReleasingId] = useState<number | null>(null);
+  const [bulkReleasing, setBulkReleasing] = useState(false);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
 
-  const active = holds
-    .filter((h) => !h.releasedAt)
-    .sort((a, b) => new Date(b.heldAt).getTime() - new Date(a.heldAt).getTime());
-
-  // Includes both manual releases and the auto-release sweep (releasedBy
-  // "System (shelf emptied)") — see checkHoldAutoRelease in store.ts. Newest
-  // first, so the CSV export and this list stay in the same order.
-  const released = holds
+  const allActive = holds.filter((h) => !h.releasedAt);
+  const allReleased = holds
     .filter((h) => h.releasedAt)
     .sort((a, b) => new Date(b.releasedAt ?? 0).getTime() - new Date(a.releasedAt ?? 0).getTime());
 
-  async function release(h: Hold) {
-    if (!window.confirm(`Release the hold on ${h.sku} at ${h.facility} / ${h.bin} (batch ${h.batch})? It becomes eligible for future picklists again.`)) return;
-    setReleasingId(h.id);
+  const active = allActive.filter((h) => holdMatchesSearch(h, search));
+  const released = allReleased.filter((h) => holdMatchesSearch(h, search));
+  const groups = groupHoldsByFacilityAndDate(active, FACILITY_PRIORITY);
+
+  function toggleOne(id: number, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+  function toggleAll(ids: number[], checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  async function releaseSelected() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    if (!window.confirm(`Release ${ids.length} selected hold(s)? Each becomes eligible for future picklists again.`)) return;
+    setBulkReleasing(true);
     try {
-      await releaseHold(h.id, myName);
+      // Sequential, not Promise.all — each releaseHold() re-fetches holds
+      // from Supabase afterward (see store.ts), so awaiting one at a time
+      // keeps that re-fetch authoritative instead of racing on completion order.
+      for (const id of ids) {
+        await releaseHold(id, myName);
+      }
+      setSelected(new Set());
     } finally {
-      setReleasingId(null);
+      setBulkReleasing(false);
     }
   }
 
   return (
-    <Card title={`Stock holds (${active.length} active)`}>
+    <Card title={`Stock holds (${allActive.length} active)`}>
       <p className="mb-3 text-[11px] text-slate-500 dark:text-slate-400">
         A SKU + Facility + Bin + Batch combination lands here automatically whenever it's marked not-found during
         picking. "Qty on hold" is the shelf's stock level right after the picked amount was deducted (e.g. bin qty
@@ -82,74 +227,53 @@ export function StockHolds() {
         history below rather than just disappearing. If that same lot gets restocked and goes not-found again later,
         a fresh hold is created then.
       </p>
-      <div className="mb-2 flex items-center justify-end">
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search SKU, bin, or batch…"
+          className="min-w-[220px] flex-1 rounded-lg border border-slate-300 p-1.5 text-xs dark:border-slate-600 dark:bg-slate-900"
+        />
+        {canRelease && selected.size > 0 && (
+          <Button variant="sm" onClick={() => void releaseSelected()} disabled={bulkReleasing}>
+            {bulkReleasing ? "Releasing…" : `Release ${selected.size} selected`}
+          </Button>
+        )}
         <Button variant="sm" onClick={() => downloadCsv(activeCsv(active, stock), "stock_holds_pending_release.csv")} disabled={active.length === 0}>
           Export CSV
         </Button>
       </div>
-      {active.length === 0 ? (
+
+      {allActive.length === 0 ? (
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds right now.</p>
+      ) : active.length === 0 ? (
+        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds match "{search}".</p>
       ) : (
-        <div className="max-h-[32rem] overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
-          <table className="w-full border-collapse text-xs">
-            <thead className="sticky top-0 bg-slate-50 dark:bg-slate-900">
-              <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">SKU</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Facility</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Bin</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Batch</th>
-                <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Qty on hold</th>
-                <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Current shelf qty</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Held since</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Held by</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Reason</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Source picklist</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {active.map((h) => (
-                <tr key={h.id} className="text-slate-700 dark:text-slate-200">
-                  <td className="border-b border-slate-100 p-1.5 font-mono text-[10px] dark:border-slate-700/60">{h.sku}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.facility}</td>
-                  <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">{h.bin}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.batch}</td>
-                  <td className="border-b border-slate-100 p-1.5 text-right font-semibold dark:border-slate-700/60">{h.qty}</td>
-                  <td className="border-b border-slate-100 p-1.5 text-right font-semibold text-rose-600 dark:border-slate-700/60 dark:text-rose-400">
-                    {onHandQty(stock, h.sku, h.facility, h.bin, h.batch)}
-                  </td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{timeLabel(h.heldAt)}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.heldBy}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                    {h.reason ? <Tag tone="warn">{h.reason}</Tag> : "—"}
-                  </td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.sourceTaskNo ?? "—"}</td>
-                  <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
-                    {canRelease ? (
-                      <Button variant="sm" onClick={() => void release(h)} disabled={releasingId === h.id}>
-                        {releasingId === h.id ? "Releasing…" : "Release"}
-                      </Button>
-                    ) : (
-                      <span className="text-[10px] text-slate-400" title="Only Admin and Super Admin can release a hold">
-                        Admin only
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div>
+          {groups.map((g) => (
+            <FacilityGroup key={g.facility} group={g} stock={stock} canRelease={canRelease} selected={selected} onToggleOne={toggleOne} onToggleAll={toggleAll} />
+          ))}
         </div>
       )}
 
+      {!canRelease && allActive.length > 0 && (
+        <p className="mt-2 text-[10px] text-slate-400" title="Only Admin and Super Admin can release a hold">
+          Releasing a hold requires Admin or Super Admin.
+        </p>
+      )}
+
       <div className="mb-2 mt-5 flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200">Release history ({released.length})</h3>
+        <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200">Release history ({allReleased.length})</h3>
         <Button variant="sm" onClick={() => downloadCsv(releasedCsv(released), "stock_holds_released.csv")} disabled={released.length === 0}>
           Export CSV
         </Button>
       </div>
-      {released.length === 0 ? (
+      {allReleased.length === 0 ? (
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">Nothing released yet.</p>
+      ) : released.length === 0 ? (
+        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No released holds match "{search}".</p>
       ) : (
         <div className="max-h-[24rem] overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
           <table className="w-full border-collapse text-xs">

@@ -38,6 +38,56 @@ export function dueForHoldAutoRelease(holds: Hold[], stock: StockRow[]): Hold[] 
   return holds.filter((h) => !h.releasedAt && onHandQty(stock, h.sku, h.facility, h.bin, h.batch) <= 0);
 }
 
+/** Case-insensitive match against SKU, bin, or batch — the three fields a supervisor actually searches by. */
+export function holdMatchesSearch(h: Hold, search: string): boolean {
+  const q = search.trim().toLowerCase();
+  if (!q) return true;
+  return h.sku.toLowerCase().includes(q) || h.bin.toLowerCase().includes(q) || h.batch.toLowerCase().includes(q);
+}
+
+export interface HoldDateGroup {
+  date: string; // "YYYY-MM-DD", the local calendar date of heldAt
+  holds: Hold[];
+}
+export interface HoldFacilityGroup {
+  facility: string;
+  dates: HoldDateGroup[];
+}
+
+/**
+ * Facility -> date, newest first at both levels — matches the existing
+ * single flat list's sort order, just split into two collapsible tiers.
+ * Facilities not in `facilityOrder` (data from a since-renamed/removed one)
+ * sort after the known ones rather than disappearing.
+ */
+export function groupHoldsByFacilityAndDate(holds: Hold[], facilityOrder: string[]): HoldFacilityGroup[] {
+  const byFacility = new Map<string, Hold[]>();
+  for (const h of holds) {
+    (byFacility.get(h.facility) ?? byFacility.set(h.facility, []).get(h.facility)!).push(h);
+  }
+  const facilities = [...byFacility.keys()].sort((a, b) => {
+    const ia = facilityOrder.indexOf(a);
+    const ib = facilityOrder.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+
+  return facilities.map((facility) => {
+    const rows = byFacility.get(facility)!;
+    const byDate = new Map<string, Hold[]>();
+    for (const h of rows) {
+      const date = h.heldAt.slice(0, 10);
+      (byDate.get(date) ?? byDate.set(date, []).get(date)!).push(h);
+    }
+    const dates = [...byDate.keys()]
+      .sort((a, b) => b.localeCompare(a))
+      .map((date) => ({ date, holds: byDate.get(date)!.sort((a, b) => new Date(b.heldAt).getTime() - new Date(a.heldAt).getTime()) }));
+    return { facility, dates };
+  });
+}
+
 export interface NewHoldRequest {
   sku: string;
   facility: string;
