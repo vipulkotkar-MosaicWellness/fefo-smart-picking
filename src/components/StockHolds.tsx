@@ -124,7 +124,10 @@ function DateGroup({
   );
 }
 
-function FacilityGroup({
+// Only 3 facilities, ever — no reason to hide them behind a click the way
+// the (potentially many) dates within one are. Always visible, side by
+// side; the dates underneath are what actually collapse.
+function FacilityColumn({
   group,
   stock,
   canRelease,
@@ -139,23 +142,24 @@ function FacilityGroup({
   onToggleOne: (id: number, checked: boolean) => void;
   onToggleAll: (ids: number[], checked: boolean) => void;
 }) {
-  const [opened, setOpened] = useState(false);
   const total = group.dates.reduce((s, d) => s + d.holds.length, 0);
 
   return (
-    <details className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden" onToggle={(e) => { if (e.currentTarget.open) setOpened(true); }}>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm font-semibold dark:bg-slate-900">
+    <div className="rounded-lg border border-slate-200 dark:border-slate-700">
+      <div className="flex items-center justify-between gap-2 rounded-t-lg bg-slate-50 px-3 py-2 text-sm font-semibold dark:bg-slate-900">
         <span>{group.facility}</span>
         <Tag tone="info">{total}</Tag>
-      </summary>
-      {opened && (
-        <div className="p-2">
-          {group.dates.map((d) => (
+      </div>
+      <div className="p-2">
+        {group.dates.length === 0 ? (
+          <p className="py-2 text-center text-[11px] text-slate-400">No active holds here.</p>
+        ) : (
+          group.dates.map((d) => (
             <DateGroup key={d.date} date={d.date} holds={d.holds} stock={stock} canRelease={canRelease} selected={selected} onToggleOne={onToggleOne} onToggleAll={onToggleAll} />
-          ))}
-        </div>
-      )}
-    </details>
+          ))
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -177,7 +181,11 @@ export function StockHolds() {
 
   const active = allActive.filter((h) => holdMatchesSearch(h, search));
   const released = allReleased.filter((h) => holdMatchesSearch(h, search));
-  const groups = groupHoldsByFacilityAndDate(active, FACILITY_PRIORITY);
+  // Always show all 3 facilities side by side, even one with zero matching
+  // holds right now — groupHoldsByFacilityAndDate only returns facilities
+  // that actually appear in `active`, so backfill any missing ones empty.
+  const groupsByName = new Map(groupHoldsByFacilityAndDate(active, FACILITY_PRIORITY).map((g) => [g.facility, g]));
+  const groups = FACILITY_PRIORITY.map((facility) => groupsByName.get(facility) ?? { facility, dates: [] });
 
   function toggleOne(id: number, checked: boolean) {
     setSelected((prev) => {
@@ -251,9 +259,9 @@ export function StockHolds() {
       ) : active.length === 0 ? (
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds match "{search}".</p>
       ) : (
-        <div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 items-start">
           {groups.map((g) => (
-            <FacilityGroup key={g.facility} group={g} stock={stock} canRelease={canRelease} selected={selected} onToggleOne={toggleOne} onToggleAll={toggleAll} />
+            <FacilityColumn key={g.facility} group={g} stock={stock} canRelease={canRelease} selected={selected} onToggleOne={toggleOne} onToggleAll={toggleAll} />
           ))}
         </div>
       )}
@@ -264,50 +272,21 @@ export function StockHolds() {
         </p>
       )}
 
-      <div className="mb-2 mt-5 flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200">Release history ({allReleased.length})</h3>
+      <div className="mt-5 flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2.5 dark:border-slate-700">
+        <div>
+          <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200">Release history</h3>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            {allReleased.length === 0
+              ? "Nothing released yet."
+              : search
+                ? `${released.length} of ${allReleased.length} match "${search}"`
+                : `${allReleased.length} released, all time`}
+          </p>
+        </div>
         <Button variant="sm" onClick={() => downloadCsv(releasedCsv(released), "stock_holds_released.csv")} disabled={released.length === 0}>
-          Export CSV
+          Download CSV
         </Button>
       </div>
-      {allReleased.length === 0 ? (
-        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">Nothing released yet.</p>
-      ) : released.length === 0 ? (
-        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No released holds match "{search}".</p>
-      ) : (
-        <div className="max-h-[24rem] overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
-          <table className="w-full border-collapse text-xs">
-            <thead className="sticky top-0 bg-slate-50 dark:bg-slate-900">
-              <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">SKU</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Facility</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Bin</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Batch</th>
-                <th className="border-b border-slate-200 p-1.5 text-right dark:border-slate-700">Qty on hold</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Held since</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Released at</th>
-                <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Released by</th>
-              </tr>
-            </thead>
-            <tbody>
-              {released.map((h) => (
-                <tr key={h.id} className="text-slate-700 dark:text-slate-200">
-                  <td className="border-b border-slate-100 p-1.5 font-mono text-[10px] dark:border-slate-700/60">{h.sku}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.facility}</td>
-                  <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">{h.bin}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{h.batch}</td>
-                  <td className="border-b border-slate-100 p-1.5 text-right font-semibold dark:border-slate-700/60">{h.qty}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{timeLabel(h.heldAt)}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{timeLabel(h.releasedAt)}</td>
-                  <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
-                    {h.releasedBy === "System (shelf emptied)" ? <Tag tone="muted">{h.releasedBy}</Tag> : h.releasedBy}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </Card>
   );
 }
