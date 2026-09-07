@@ -88,6 +88,41 @@ export function groupHoldsByFacilityAndDate(holds: Hold[], facilityOrder: string
   });
 }
 
+/**
+ * Whole calendar days between a hold's heldAt and `now` — 0 for "held
+ * earlier today", 1 for "held yesterday", etc. Compares calendar dates (not
+ * elapsed hours) so a hold placed at 11pm yesterday reads as 1 day old at
+ * 9am today, matching how a supervisor thinks about "how old is this".
+ */
+export function holdAgeDays(heldAt: string, now: Date): number {
+  const heldMs = new Date(heldAt.slice(0, 10) + "T00:00:00Z").getTime();
+  const nowMs = new Date(now.toISOString().slice(0, 10) + "T00:00:00Z").getTime();
+  return Math.round((nowMs - heldMs) / 86400000);
+}
+
+export type AgeBucketKey = "lt2" | "3to5" | "6to10" | "gt10";
+
+export interface AgeBucketDef {
+  key: AgeBucketKey;
+  label: string;
+  test: (days: number) => boolean;
+}
+
+/** The 4 aging bands a supervisor triages stuck holds by, oldest = most urgent to release or investigate. */
+export const AGE_BUCKETS: AgeBucketDef[] = [
+  { key: "lt2", label: "< 2 days", test: (d) => d < 2 },
+  { key: "3to5", label: "3 to 5 days", test: (d) => d >= 3 && d <= 5 },
+  { key: "6to10", label: "6 to 10 days", test: (d) => d >= 6 && d <= 10 },
+  { key: "gt10", label: "> 10 days", test: (d) => d > 10 },
+];
+
+/** A null bucket (no filter selected) matches every hold. */
+export function holdMatchesAgeBucket(h: Hold, bucket: AgeBucketKey | null, now: Date): boolean {
+  if (!bucket) return true;
+  const def = AGE_BUCKETS.find((b) => b.key === bucket);
+  return def ? def.test(holdAgeDays(h.heldAt, now)) : true;
+}
+
 export interface NewHoldRequest {
   sku: string;
   facility: string;

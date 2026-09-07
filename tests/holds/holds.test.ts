@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { activeHoldKeys, dueForHoldAutoRelease, groupHoldsByFacilityAndDate, holdKey, holdMatchesSearch, holdsToCreate, onHandQty } from "../../src/lib/holds";
+import {
+  activeHoldKeys,
+  AGE_BUCKETS,
+  dueForHoldAutoRelease,
+  groupHoldsByFacilityAndDate,
+  holdAgeDays,
+  holdKey,
+  holdMatchesAgeBucket,
+  holdMatchesSearch,
+  holdsToCreate,
+  onHandQty,
+} from "../../src/lib/holds";
 import type { Hold, StockRow } from "../../src/lib/types";
 
 function stockRow(overrides: Partial<StockRow> = {}): StockRow {
@@ -192,5 +203,63 @@ describe("groupHoldsByFacilityAndDate", () => {
     const holds = [hold({ id: 1, facility: "SL Warehouse Old" }), hold({ id: 2, facility: "SL Mother Hub" })];
     const groups = groupHoldsByFacilityAndDate(holds, order);
     expect(groups.map((g) => g.facility)).toEqual(["SL Mother Hub", "SL Warehouse Old"]);
+  });
+});
+
+describe("holdAgeDays", () => {
+  const now = new Date("2026-09-07T18:00:00.000Z");
+
+  it("is 0 for a hold placed earlier today", () => {
+    expect(holdAgeDays("2026-09-07T09:00:00.000Z", now)).toBe(0);
+  });
+
+  it("counts whole calendar days, not elapsed hours", () => {
+    // Placed 15:00 yesterday, "now" is 18:00 today — only 1 calendar day apart.
+    expect(holdAgeDays("2026-09-06T15:00:00.000Z", now)).toBe(1);
+  });
+
+  it("counts a hold from 11 days ago as 11", () => {
+    expect(holdAgeDays("2026-08-27T10:00:00.000Z", now)).toBe(11);
+  });
+});
+
+describe("AGE_BUCKETS / holdMatchesAgeBucket", () => {
+  const now = new Date("2026-09-07T12:00:00.000Z");
+  function heldDaysAgo(days: number): Hold {
+    const d = new Date(now.getTime() - days * 86400000);
+    return hold({ heldAt: d.toISOString() });
+  }
+
+  it("buckets < 2 days as lt2", () => {
+    expect(holdMatchesAgeBucket(heldDaysAgo(0), "lt2", now)).toBe(true);
+    expect(holdMatchesAgeBucket(heldDaysAgo(1), "lt2", now)).toBe(true);
+    expect(holdMatchesAgeBucket(heldDaysAgo(2), "lt2", now)).toBe(false);
+  });
+
+  it("buckets 3-5 days as 3to5", () => {
+    expect(holdMatchesAgeBucket(heldDaysAgo(2), "3to5", now)).toBe(false);
+    expect(holdMatchesAgeBucket(heldDaysAgo(3), "3to5", now)).toBe(true);
+    expect(holdMatchesAgeBucket(heldDaysAgo(5), "3to5", now)).toBe(true);
+    expect(holdMatchesAgeBucket(heldDaysAgo(6), "3to5", now)).toBe(false);
+  });
+
+  it("buckets 6-10 days as 6to10", () => {
+    expect(holdMatchesAgeBucket(heldDaysAgo(6), "6to10", now)).toBe(true);
+    expect(holdMatchesAgeBucket(heldDaysAgo(10), "6to10", now)).toBe(true);
+    expect(holdMatchesAgeBucket(heldDaysAgo(11), "6to10", now)).toBe(false);
+  });
+
+  it("buckets > 10 days as gt10", () => {
+    expect(holdMatchesAgeBucket(heldDaysAgo(10), "gt10", now)).toBe(false);
+    expect(holdMatchesAgeBucket(heldDaysAgo(11), "gt10", now)).toBe(true);
+    expect(holdMatchesAgeBucket(heldDaysAgo(30), "gt10", now)).toBe(true);
+  });
+
+  it("a null bucket matches everything", () => {
+    expect(holdMatchesAgeBucket(heldDaysAgo(30), null, now)).toBe(true);
+  });
+
+  it("exposes exactly 4 buckets with their user-facing labels", () => {
+    expect(AGE_BUCKETS.map((b) => b.label)).toEqual(["< 2 days", "3 to 5 days", "6 to 10 days", "> 10 days"]);
   });
 });

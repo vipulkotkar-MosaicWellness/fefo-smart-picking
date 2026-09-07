@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuth } from "../lib/authStore";
 import { FACILITY_PRIORITY } from "../lib/facilities";
 import { downloadCsv } from "../lib/format";
-import { groupHoldsByFacilityAndDate, holdMatchesSearch, onHandQty, type HoldFacilityGroup } from "../lib/holds";
+import { AGE_BUCKETS, type AgeBucketKey, groupHoldsByFacilityAndDate, holdMatchesAgeBucket, holdMatchesSearch, onHandQty, type HoldFacilityGroup } from "../lib/holds";
 import { useStore } from "../lib/store";
 import type { Hold, StockRow } from "../lib/types";
 import { Button, Card, Tag } from "./Ui";
@@ -14,6 +14,19 @@ function timeLabel(iso?: string): string {
 function dateLabel(date: string): string {
   return new Date(date + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
 }
+
+// Aging colour cues, greenest = freshest / least urgent through reddest =
+// oldest / most urgent — a quick-scan signal on top of the day-count label.
+// Selected chip: solid colour + white text (same pattern as the active
+// facility tab). Unselected: a light tint of the same colour, dark enough
+// text for contrast rather than plain gray, so it still reads as "this
+// chip's colour" even before it's picked.
+const AGE_BUCKET_STYLE: Record<AgeBucketKey, { light: string; solid: string }> = {
+  lt2: { light: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300", solid: "bg-emerald-600 text-white" },
+  "3to5": { light: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300", solid: "bg-amber-600 text-white" },
+  "6to10": { light: "bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300", solid: "bg-orange-600 text-white" },
+  gt10: { light: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300", solid: "bg-rose-600 text-white" },
+};
 
 function csvFrom(header: string, rows: string[][]): string {
   const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
@@ -165,14 +178,25 @@ export function StockHolds() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [activeFacility, setActiveFacility] = useState<string>(FACILITY_PRIORITY[0]);
+  const [ageFilter, setAgeFilter] = useState<AgeBucketKey | null>(null);
+  const now = new Date();
 
   const allActive = holds.filter((h) => !h.releasedAt);
   const allReleased = holds
     .filter((h) => h.releasedAt)
     .sort((a, b) => new Date(b.releasedAt ?? 0).getTime() - new Date(a.releasedAt ?? 0).getTime());
 
-  const active = allActive.filter((h) => holdMatchesSearch(h, search));
+  const searchedActive = allActive.filter((h) => holdMatchesSearch(h, search));
+  // Aging only applies to still-open holds needing triage — release history
+  // is already resolved, so it stays search-only.
+  const active = searchedActive.filter((h) => holdMatchesAgeBucket(h, ageFilter, now));
   const released = allReleased.filter((h) => holdMatchesSearch(h, search));
+  // Bucket counts shown on the chips are scoped to the currently-open
+  // facility tab + search, so they read as "how many of what I'm already
+  // looking at fall in this age band" rather than a global count.
+  const facilityScoped = searchedActive.filter((h) => h.facility === activeFacility);
+  const ageBucketCounts = AGE_BUCKETS.map((b) => ({ ...b, count: facilityScoped.filter((h) => holdMatchesAgeBucket(h, b.key, now)).length }));
+  const filterDescription = [search && `"${search}"`, ageFilter && AGE_BUCKETS.find((b) => b.key === ageFilter)?.label].filter(Boolean).join(" + ");
   // Always show all 3 facilities side by side, even one with zero matching
   // holds right now — groupHoldsByFacilityAndDate only returns facilities
   // that actually appear in `active`, so backfill any missing ones empty.
@@ -246,6 +270,31 @@ export function StockHolds() {
         </Button>
       </div>
 
+      {allActive.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Age of hold:</span>
+          {ageBucketCounts.map((b) => {
+            const isActive = ageFilter === b.key;
+            return (
+              <button
+                key={b.key}
+                onClick={() => setAgeFilter((prev) => (prev === b.key ? null : b.key))}
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                  isActive ? `${AGE_BUCKET_STYLE[b.key].solid} border-transparent` : `${AGE_BUCKET_STYLE[b.key].light} border-slate-200 dark:border-slate-700`
+                }`}
+              >
+                {b.label} <span className="opacity-80">({b.count})</span>
+              </button>
+            );
+          })}
+          {ageFilter && (
+            <button onClick={() => setAgeFilter(null)} className="text-[11px] font-medium text-teal-700 underline dark:text-teal-400">
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
       {allActive.length === 0 ? (
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds right now.</p>
       ) : (
@@ -273,7 +322,7 @@ export function StockHolds() {
           </div>
 
           {active.length === 0 ? (
-            <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds match "{search}".</p>
+            <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds match {filterDescription || "the current filter"}.</p>
           ) : (
             (() => {
               const g = groups.find((x) => x.facility === activeFacility) ?? groups[0];
