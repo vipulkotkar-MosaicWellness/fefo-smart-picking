@@ -124,10 +124,10 @@ function DateGroup({
   );
 }
 
-// Only 3 facilities, ever — no reason to hide them behind a click the way
-// the (potentially many) dates within one are. Always visible, side by
-// side; the dates underneath are what actually collapse.
-function FacilityColumn({
+// All 3 facilities are always clickable (the tab row), but only the
+// selected one's holds render — full width, uninterrupted, not squeezed
+// into a shared column. Switching tabs replaces this, it never stacks.
+function FacilityPanel({
   group,
   stock,
   canRelease,
@@ -142,23 +142,14 @@ function FacilityColumn({
   onToggleOne: (id: number, checked: boolean) => void;
   onToggleAll: (ids: number[], checked: boolean) => void;
 }) {
-  const total = group.dates.reduce((s, d) => s + d.holds.length, 0);
-
+  if (group.dates.length === 0) {
+    return <p className="py-4 text-center text-xs text-slate-400">No active holds at {group.facility} right now.</p>;
+  }
   return (
-    <div className="rounded-lg border border-slate-200 dark:border-slate-700">
-      <div className="flex items-center justify-between gap-2 rounded-t-lg bg-slate-50 px-3 py-2 text-sm font-semibold dark:bg-slate-900">
-        <span>{group.facility}</span>
-        <Tag tone="info">{total}</Tag>
-      </div>
-      <div className="p-2">
-        {group.dates.length === 0 ? (
-          <p className="py-2 text-center text-[11px] text-slate-400">No active holds here.</p>
-        ) : (
-          group.dates.map((d) => (
-            <DateGroup key={d.date} date={d.date} holds={d.holds} stock={stock} canRelease={canRelease} selected={selected} onToggleOne={onToggleOne} onToggleAll={onToggleAll} />
-          ))
-        )}
-      </div>
+    <div>
+      {group.dates.map((d) => (
+        <DateGroup key={d.date} date={d.date} holds={d.holds} stock={stock} canRelease={canRelease} selected={selected} onToggleOne={onToggleOne} onToggleAll={onToggleAll} />
+      ))}
     </div>
   );
 }
@@ -173,6 +164,7 @@ export function StockHolds() {
   const [bulkReleasing, setBulkReleasing] = useState(false);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [activeFacility, setActiveFacility] = useState<string>(FACILITY_PRIORITY[0]);
 
   const allActive = holds.filter((h) => !h.releasedAt);
   const allReleased = holds
@@ -256,13 +248,38 @@ export function StockHolds() {
 
       {allActive.length === 0 ? (
         <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds right now.</p>
-      ) : active.length === 0 ? (
-        <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds match "{search}".</p>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 items-start">
-          {groups.map((g) => (
-            <FacilityColumn key={g.facility} group={g} stock={stock} canRelease={canRelease} selected={selected} onToggleOne={toggleOne} onToggleAll={toggleAll} />
-          ))}
+        <div>
+          {/* Always visible and clickable, every facility, at any time — only the
+              active one's holds render below; picking a different tab replaces
+              it rather than opening alongside, so the view stays uninterrupted. */}
+          <div className="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900">
+            {groups.map((g) => {
+              const total = g.dates.reduce((s, d) => s + d.holds.length, 0);
+              const isActive = g.facility === activeFacility;
+              return (
+                <button
+                  key={g.facility}
+                  onClick={() => setActiveFacility(g.facility)}
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    isActive ? "bg-teal-700 text-white" : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  {g.facility}
+                  <span className={`rounded-full px-1.5 text-[10px] ${isActive ? "bg-white/20" : "bg-slate-200 dark:bg-slate-700"}`}>{total}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {active.length === 0 ? (
+            <p className="py-3 text-center text-xs text-slate-500 dark:text-slate-400">No active holds match "{search}".</p>
+          ) : (
+            (() => {
+              const g = groups.find((x) => x.facility === activeFacility) ?? groups[0];
+              return <FacilityPanel group={g} stock={stock} canRelease={canRelease} selected={selected} onToggleOne={toggleOne} onToggleAll={toggleAll} />;
+            })()
+          )}
         </div>
       )}
 
