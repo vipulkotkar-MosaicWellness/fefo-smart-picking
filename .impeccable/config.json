@@ -11,6 +11,15 @@
         ],
         "createdAt": "2026-09-02T13:37:11.828Z",
         "reason": "pre-existing tab-button pattern, unchanged: identical text-slate-600/hover:bg-slate-100 ternary already used for all 5 other tabs in this file before this edit; only added a 6th tab using the same existing styling"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/StockHolds.tsx"
+        ],
+        "createdAt": "2026-09-07T16:57:07.332Z",
+        "reason": "Agent: facility-tab ternary at line ~496 — active state is bg-teal-700 text-white, inactive state is text-slate-600/300 on the tab bar's own slate-50/900 background; the two never render on the same element. Verified live in the browser across 4+ redesign iterations this session; detector keeps matching both branches of the same template-literal ternary as if combined."
       }
     ]
   }
