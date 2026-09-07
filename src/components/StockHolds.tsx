@@ -33,7 +33,7 @@ function dateLabel(date: string): string {
 // chip's colour" even before it's picked.
 const AGE_BUCKET_STYLE: Record<AgeBucketKey, { light: string; solid: string }> = {
   lt2: { light: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300", solid: "bg-emerald-600 text-white" },
-  "3to5": { light: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300", solid: "bg-amber-600 text-white" },
+  "2to5": { light: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300", solid: "bg-amber-600 text-white" },
   "6to10": { light: "bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300", solid: "bg-orange-600 text-white" },
   gt10: { light: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300", solid: "bg-rose-600 text-white" },
 };

@@ -100,7 +100,7 @@ export function holdAgeDays(heldAt: string, now: Date): number {
   return Math.round((nowMs - heldMs) / 86400000);
 }
 
-export type AgeBucketKey = "lt2" | "3to5" | "6to10" | "gt10";
+export type AgeBucketKey = "lt2" | "2to5" | "6to10" | "gt10";
 
 export interface AgeBucketDef {
   key: AgeBucketKey;
@@ -108,10 +108,17 @@ export interface AgeBucketDef {
   test: (days: number) => boolean;
 }
 
-/** The 4 aging bands a supervisor triages stuck holds by, oldest = most urgent to release or investigate. */
+/**
+ * The 4 aging bands a supervisor triages stuck holds by, oldest = most
+ * urgent to release or investigate. Must stay a continuous, non-overlapping
+ * partition over every whole day (0, 1, 2, 3, ...) — the pivot's "Total" row
+ * is summed from ALL of a facility's holds, not from these rows, so any gap
+ * (a day matched by no bucket) makes that total exceed the sum of the rows
+ * shown above it. See the "partitions every age" test.
+ */
 export const AGE_BUCKETS: AgeBucketDef[] = [
   { key: "lt2", label: "< 2 days", test: (d) => d < 2 },
-  { key: "3to5", label: "3 to 5 days", test: (d) => d >= 3 && d <= 5 },
+  { key: "2to5", label: "2 to 5 days", test: (d) => d >= 2 && d <= 5 },
   { key: "6to10", label: "6 to 10 days", test: (d) => d >= 6 && d <= 10 },
   { key: "gt10", label: "> 10 days", test: (d) => d > 10 },
 ];

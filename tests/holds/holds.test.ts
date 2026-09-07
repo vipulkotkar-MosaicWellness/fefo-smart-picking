@@ -237,11 +237,11 @@ describe("AGE_BUCKETS / holdMatchesAgeBucket", () => {
     expect(holdMatchesAgeBucket(heldDaysAgo(2), "lt2", now)).toBe(false);
   });
 
-  it("buckets 3-5 days as 3to5", () => {
-    expect(holdMatchesAgeBucket(heldDaysAgo(2), "3to5", now)).toBe(false);
-    expect(holdMatchesAgeBucket(heldDaysAgo(3), "3to5", now)).toBe(true);
-    expect(holdMatchesAgeBucket(heldDaysAgo(5), "3to5", now)).toBe(true);
-    expect(holdMatchesAgeBucket(heldDaysAgo(6), "3to5", now)).toBe(false);
+  it("buckets 2-5 days as 2to5", () => {
+    expect(holdMatchesAgeBucket(heldDaysAgo(1), "2to5", now)).toBe(false);
+    expect(holdMatchesAgeBucket(heldDaysAgo(2), "2to5", now)).toBe(true);
+    expect(holdMatchesAgeBucket(heldDaysAgo(5), "2to5", now)).toBe(true);
+    expect(holdMatchesAgeBucket(heldDaysAgo(6), "2to5", now)).toBe(false);
   });
 
   it("buckets 6-10 days as 6to10", () => {
@@ -261,7 +261,18 @@ describe("AGE_BUCKETS / holdMatchesAgeBucket", () => {
   });
 
   it("exposes exactly 4 buckets with their user-facing labels", () => {
-    expect(AGE_BUCKETS.map((b) => b.label)).toEqual(["< 2 days", "3 to 5 days", "6 to 10 days", "> 10 days"]);
+    expect(AGE_BUCKETS.map((b) => b.label)).toEqual(["< 2 days", "2 to 5 days", "6 to 10 days", "> 10 days"]);
+  });
+
+  // Regression: buckets used to be < 2 / 3-5 / 6-10 / > 10, which silently
+  // skipped day 2 — a hold exactly 2 days old matched no row, so the pivot's
+  // "Total" (summed from all holds, not from the rows) didn't equal the sum
+  // of its own rows. Every day must land in exactly one bucket.
+  it("partitions every age with no gaps and no overlaps", () => {
+    for (let d = 0; d <= 40; d++) {
+      const matches = AGE_BUCKETS.filter((b) => b.test(d));
+      expect(matches.length, `day ${d} matched ${matches.map((b) => b.key).join(",") || "nothing"}`).toBe(1);
+    }
   });
 });
 
@@ -277,13 +288,13 @@ describe("buildAgeFacilityPivot", () => {
     const holds = [
       heldDaysAgo(0, { id: 1, facility: "SL Mother Hub", qty: 10 }),
       heldDaysAgo(1, { id: 2, facility: "SL Mother Hub", qty: 25 }), // same lt2 bucket, same facility -> sums with the above
-      heldDaysAgo(4, { id: 3, facility: "SL Ambient", qty: 7 }), // 3to5 bucket, different facility
+      heldDaysAgo(4, { id: 3, facility: "SL Ambient", qty: 7 }), // 2to5 bucket, different facility
     ];
     const pivot = buildAgeFacilityPivot(holds, facilities, now);
     const lt2Row = pivot.rows.find((r) => r.bucket === "lt2")!;
     expect(lt2Row.cells.find((c) => c.facility === "SL Mother Hub")).toEqual({ facility: "SL Mother Hub", units: 35, count: 2 });
     expect(lt2Row.cells.find((c) => c.facility === "SL Ambient")).toEqual({ facility: "SL Ambient", units: 0, count: 0 });
-    const midRow = pivot.rows.find((r) => r.bucket === "3to5")!;
+    const midRow = pivot.rows.find((r) => r.bucket === "2to5")!;
     expect(midRow.cells.find((c) => c.facility === "SL Ambient")).toEqual({ facility: "SL Ambient", units: 7, count: 1 });
   });
 
@@ -303,5 +314,18 @@ describe("buildAgeFacilityPivot", () => {
     expect(pivot.rows).toHaveLength(4);
     expect(pivot.rows.every((r) => r.totalUnits === 0)).toBe(true);
     expect(pivot.grandTotalUnits).toBe(0);
+  });
+
+  // Regression: with the old gap at day 2, a facility's column total (summed
+  // from ALL its holds) could exceed the sum of its own bucket-row cells —
+  // exactly the mismatch a leadership-facing total must never show.
+  it("every hold is counted in exactly one row, so row totals sum to the grand total", () => {
+    const holds = Array.from({ length: 15 }, (_, i) => heldDaysAgo(i, { id: i, facility: i % 2 === 0 ? "SL Mother Hub" : "SL Ambient", qty: 10 }));
+    const pivot = buildAgeFacilityPivot(holds, facilities, now);
+    const sumOfRowTotals = pivot.rows.reduce((s, r) => s + r.totalUnits, 0);
+    const sumOfFacilityTotals = pivot.facilityTotals.reduce((s, f) => s + f.units, 0);
+    expect(sumOfRowTotals).toBe(sumOfFacilityTotals);
+    expect(sumOfRowTotals).toBe(pivot.grandTotalUnits);
+    expect(pivot.grandTotalUnits).toBe(150); // 15 holds x 10 units, every single one landed somewhere
   });
 });
