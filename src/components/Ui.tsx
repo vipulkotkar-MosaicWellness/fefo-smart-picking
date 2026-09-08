@@ -69,12 +69,14 @@ export function StatCard({ icon, tone, label, value, sub, highlight }: { icon: s
         {icon}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-semibold text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
+        <p className="text-xs font-semibold text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
         {/* min-h reserves room for 2 lines at this size, so a long text value
             (a facility name, say) wrapping once doesn't make this card taller
-            than its numeric siblings sitting next to it in the same row. */}
+            than its numeric siblings sitting next to it in the same row. Not
+            truncated — a cut-off label ("Overall adherence" -> "Over...") is
+            worse than one that wraps. */}
         <p className={`mt-0.5 min-h-[2.25rem] text-2xl leading-tight font-bold tabular-nums ${STAT_TONE_TEXT[tone]}`}>{value}</p>
-        {sub && <p className="truncate text-xs text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
+        {sub && <p className="text-xs text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
       </div>
     </div>
   );
