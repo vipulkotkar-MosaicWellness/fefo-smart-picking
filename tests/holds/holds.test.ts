@@ -6,6 +6,7 @@ import {
   dueForHoldAutoRelease,
   groupHoldsByFacilityAndDate,
   holdAgeDays,
+  holdAgeStatusBadge,
   holdKey,
   holdMatchesAgeBucket,
   holdMatchesSearch,
@@ -327,5 +328,37 @@ describe("buildAgeFacilityPivot", () => {
     expect(sumOfRowTotals).toBe(sumOfFacilityTotals);
     expect(sumOfRowTotals).toBe(pivot.grandTotalUnits);
     expect(pivot.grandTotalUnits).toBe(150); // 15 holds x 10 units, every single one landed somewhere
+  });
+});
+
+describe("holdAgeStatusBadge", () => {
+  it("labels same-day and 1-day holds as normal, distinguishing the exact day count", () => {
+    expect(holdAgeStatusBadge(0)).toEqual({ label: "Normal SLA (<24h)", tone: "ok" });
+    expect(holdAgeStatusBadge(1)).toEqual({ label: "Normal SLA (1d)", tone: "ok" });
+  });
+
+  it("labels 2-5 days as the review window", () => {
+    expect(holdAgeStatusBadge(2)).toEqual({ label: "Review window (2d)", tone: "warn" });
+    expect(holdAgeStatusBadge(5)).toEqual({ label: "Review window (5d)", tone: "warn" });
+  });
+
+  it("labels 6-10 days as critical aging", () => {
+    expect(holdAgeStatusBadge(6)).toEqual({ label: "Critical aging (6d)", tone: "bad" });
+    expect(holdAgeStatusBadge(10)).toEqual({ label: "Critical aging (10d)", tone: "bad" });
+  });
+
+  it("labels anything past 10 days as SLA breached", () => {
+    expect(holdAgeStatusBadge(11)).toEqual({ label: "SLA breached (11d)", tone: "bad" });
+    expect(holdAgeStatusBadge(40)).toEqual({ label: "SLA breached (40d)", tone: "bad" });
+  });
+
+  it("stays consistent with which AGE_BUCKETS row the same day count falls into", () => {
+    for (let d = 0; d <= 30; d++) {
+      const badge = holdAgeStatusBadge(d);
+      const bucket = AGE_BUCKETS.find((b) => b.test(d))!;
+      if (bucket.key === "lt2") expect(badge.tone).toBe("ok");
+      if (bucket.key === "2to5") expect(badge.tone).toBe("warn");
+      if (bucket.key === "6to10" || bucket.key === "gt10") expect(badge.tone).toBe("bad");
+    }
   });
 });

@@ -9,6 +9,7 @@ import {
   buildAgeFacilityPivot,
   groupHoldsByFacilityAndDate,
   holdAgeDays,
+  holdAgeStatusBadge,
   holdMatchesAgeBucket,
   holdMatchesSearch,
   onHandQty,
@@ -35,32 +36,51 @@ function dateLabel(date: string): string {
 // - rowTint: a faint full-row wash, the severity cue the leadership matrix
 //   view is built around (no side border — that reads as an AI-slop tell).
 // - bar: the flat fill used in the compact distribution bar.
-const AGE_BUCKET_STYLE: Record<AgeBucketKey, { light: string; solid: string; rowTint: string; bar: string }> = {
+// - subLabel: the SLA-stage caption under each bucket's pill.
+// - heat: 4 steps (none/faint/medium/strong) of the SAME hue, from a cell
+//   with little volume up to the busiest cell in its row — the "heat map"
+//   read, done in one colour language instead of stacking a second one.
+const AGE_BUCKET_STYLE: Record<AgeBucketKey, { light: string; solid: string; rowTint: string; bar: string; subLabel: string; heat: string[] }> = {
   lt2: {
     light: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
     solid: "bg-emerald-600 text-white",
     rowTint: "bg-emerald-50/50 dark:bg-emerald-950/10",
     bar: "bg-emerald-500",
+    subLabel: "Standard SLA",
+    heat: ["", "bg-emerald-50 dark:bg-emerald-950/20", "bg-emerald-100 dark:bg-emerald-900/30", "bg-emerald-200 dark:bg-emerald-900/50"],
   },
   "2to5": {
     light: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
     solid: "bg-amber-600 text-white",
     rowTint: "bg-amber-50/50 dark:bg-amber-950/10",
     bar: "bg-amber-500",
+    subLabel: "Review window",
+    heat: ["", "bg-amber-50 dark:bg-amber-950/20", "bg-amber-100 dark:bg-amber-900/30", "bg-amber-200 dark:bg-amber-900/50"],
   },
   "6to10": {
     light: "bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300",
     solid: "bg-orange-600 text-white",
     rowTint: "bg-orange-50/50 dark:bg-orange-950/10",
     bar: "bg-orange-500",
+    subLabel: "Critical aging",
+    heat: ["", "bg-orange-50 dark:bg-orange-950/20", "bg-orange-100 dark:bg-orange-900/30", "bg-orange-200 dark:bg-orange-900/50"],
   },
   gt10: {
     light: "bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300",
     solid: "bg-rose-600 text-white",
     rowTint: "bg-rose-50/50 dark:bg-rose-950/10",
     bar: "bg-rose-500",
+    subLabel: "SLA breached",
+    heat: ["", "bg-rose-50 dark:bg-rose-950/20", "bg-rose-100 dark:bg-rose-900/30", "bg-rose-200 dark:bg-rose-900/50"],
   },
 };
+
+/** Which of a bucket's 4 heat steps (index 0-3) a cell earns, relative to the busiest cell in its own row. */
+function heatStepIndex(units: number, rowMax: number): number {
+  if (rowMax <= 0 || units <= 0) return 0;
+  const ratio = units / rowMax;
+  return ratio >= 0.75 ? 3 : ratio >= 0.4 ? 2 : ratio >= 0.05 ? 1 : 0;
+}
 
 /** Compact stacked bar showing each bucket's share of every unit currently on hold — the "shape" of the aging problem at a glance, before the numbers. */
 function AgeDistributionBar({ pivot }: { pivot: AgeFacilityPivot }) {
@@ -126,6 +146,10 @@ function DateGroup({
   selected,
   onToggleOne,
   onToggleAll,
+  onReleaseIds,
+  bulkReleasing,
+  now,
+  maxCount,
 }: {
   date: string;
   holds: Hold[];
@@ -134,17 +158,57 @@ function DateGroup({
   selected: Set<number>;
   onToggleOne: (id: number, checked: boolean) => void;
   onToggleAll: (ids: number[], checked: boolean) => void;
+  onReleaseIds: (ids: number[]) => void;
+  bulkReleasing: boolean;
+  now: Date;
+  maxCount: number;
 }) {
+  // Plain state instead of native <details>/<summary> — the summary row now
+  // carries real buttons (Inspect, Release all), and a <button> nested
+  // inside a <summary> (itself interactive content) is invalid HTML even
+  // though browsers tolerate it; a controlled row sidesteps that cleanly.
   const [opened, setOpened] = useState(false);
   const ids = holds.map((h) => h.id);
   const allSelected = ids.length > 0 && ids.every((id) => selected.has(id));
+  // `date` is already "YYYY-MM-DD" — holdAgeDays reads just the first 10
+  // chars of whatever string it's given, so it works unchanged here.
+  const badge = holdAgeStatusBadge(holdAgeDays(date, now));
+  const loadPct = maxCount > 0 ? (holds.length / maxCount) * 100 : 0;
 
   return (
-    <details className="mt-1.5 rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden" onToggle={(e) => { if (e.currentTarget.open) setOpened(true); }}>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-900">
-        <span className="font-medium text-slate-700 dark:text-slate-200">{dateLabel(date)}</span>
-        <Tag tone="muted">{holds.length}</Tag>
-      </summary>
+    <div className="mt-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+      <div className="flex flex-wrap items-center gap-2 px-2.5 py-2">
+        <button type="button" onClick={() => setOpened((o) => !o)} className="flex flex-1 items-center gap-2 text-left text-xs">
+          <span className={`inline-block w-3 text-[var(--fefo-muted)] transition-transform ${opened ? "rotate-90" : ""}`}>▸</span>
+          <span className="font-medium text-slate-700 dark:text-slate-200">{dateLabel(date)}</span>
+          <Tag tone={badge.tone}>{badge.label}</Tag>
+        </button>
+        <div className="hidden min-w-[70px] max-w-[120px] flex-1 sm:block" title={`${holds.length} of the busiest date's ${maxCount} holds in this facility`}>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+            <div className="h-full rounded-full bg-teal-500" style={{ width: `${loadPct}%` }} />
+          </div>
+        </div>
+        <Tag tone="muted">
+          {holds.length} hold{holds.length === 1 ? "" : "s"}
+        </Tag>
+        <button
+          type="button"
+          onClick={() => setOpened((o) => !o)}
+          className="rounded-md border border-slate-300 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-900"
+        >
+          {opened ? "Collapse" : "Inspect"}
+        </button>
+        {canRelease && (
+          <button
+            type="button"
+            onClick={() => onReleaseIds(ids)}
+            disabled={bulkReleasing}
+            className="rounded-md bg-emerald-700 px-2 py-1 text-[10px] font-semibold text-white transition-colors hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Release all
+          </button>
+        )}
+      </div>
       {opened && (
         <div className="overflow-x-auto border-t border-slate-200 dark:border-slate-700">
           <table className="w-full border-collapse text-xs">
@@ -191,7 +255,7 @@ function DateGroup({
           </table>
         </div>
       )}
-    </details>
+    </div>
   );
 }
 
@@ -205,6 +269,9 @@ function FacilityPanel({
   selected,
   onToggleOne,
   onToggleAll,
+  onReleaseIds,
+  bulkReleasing,
+  now,
 }: {
   group: HoldFacilityGroup;
   stock: StockRow[];
@@ -212,14 +279,34 @@ function FacilityPanel({
   selected: Set<number>;
   onToggleOne: (id: number, checked: boolean) => void;
   onToggleAll: (ids: number[], checked: boolean) => void;
+  onReleaseIds: (ids: number[]) => void;
+  bulkReleasing: boolean;
+  now: Date;
 }) {
   if (group.dates.length === 0) {
     return <p className="py-4 text-center text-xs text-slate-400">No active holds at {group.facility} right now.</p>;
   }
+  // The busiest single date in this facility — every other date's load bar
+  // is drawn relative to it, so the bars compare within the facility you're
+  // actually looking at rather than against some unrelated global max.
+  const maxCount = Math.max(0, ...group.dates.map((d) => d.holds.length));
   return (
     <div>
       {group.dates.map((d) => (
-        <DateGroup key={d.date} date={d.date} holds={d.holds} stock={stock} canRelease={canRelease} selected={selected} onToggleOne={onToggleOne} onToggleAll={onToggleAll} />
+        <DateGroup
+          key={d.date}
+          date={d.date}
+          holds={d.holds}
+          stock={stock}
+          canRelease={canRelease}
+          selected={selected}
+          onToggleOne={onToggleOne}
+          onToggleAll={onToggleAll}
+          onReleaseIds={onReleaseIds}
+          bulkReleasing={bulkReleasing}
+          now={now}
+          maxCount={maxCount}
+        />
       ))}
     </div>
   );
@@ -245,9 +332,20 @@ function AgePivotTable({
 }) {
   return (
     <div className="mb-3 overflow-hidden rounded-xl border border-[var(--fefo-line)] bg-white dark:border-slate-700 dark:bg-slate-800">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--fefo-line)] px-3 py-2.5 dark:border-slate-700">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-800 dark:text-teal-300">Units on hold, by age and facility</p>
+          <p className="text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">Click a cell to see those holds</p>
+        </div>
+        <div className="flex items-center gap-1.5 text-[10px] text-[var(--fefo-muted)] dark:text-slate-400">
+          <span className="mr-0.5 font-medium">Heat:</span>
+          <span className="h-2.5 w-2.5 rounded-sm bg-slate-100 dark:bg-slate-700" />
+          <span className="h-2.5 w-2.5 rounded-sm bg-slate-300 dark:bg-slate-500" />
+          <span className="h-2.5 w-2.5 rounded-sm bg-slate-500 dark:bg-slate-300" />
+          <span>low → busiest cell in its row</span>
+        </div>
+      </div>
       <div className="border-b border-[var(--fefo-line)] px-3 py-2.5 dark:border-slate-700">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-800 dark:text-teal-300">Units on hold, by age and facility</p>
-        <p className="text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">Click a cell to see those holds</p>
         <AgeDistributionBar pivot={pivot} />
       </div>
       <div className="overflow-x-auto">
@@ -261,7 +359,7 @@ function AgePivotTable({
                 return (
                   <th key={f} className="border-b border-slate-200 p-2 text-right dark:border-slate-700">
                     <div>{f}</div>
-                    <div className="text-[9px] font-normal normal-case text-slate-400 dark:text-slate-500">{total && total.units > 0 ? `${pct.toFixed(0)}% of total` : "—"}</div>
+                    <div className="text-[9px] font-normal normal-case text-slate-400 dark:text-slate-500">{total && total.units > 0 ? `Cap. ${pct.toFixed(1)}%` : "—"}</div>
                   </th>
                 );
               })}
@@ -269,44 +367,52 @@ function AgePivotTable({
             </tr>
           </thead>
           <tbody>
-            {pivot.rows.map((row) => (
-              <tr key={row.bucket} className={AGE_BUCKET_STYLE[row.bucket].rowTint}>
-                <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${AGE_BUCKET_STYLE[row.bucket].light}`}>{row.label}</span>
-                </td>
-                {row.cells.map((cell) => {
-                  const isSelected = ageFilter === row.bucket && activeFacility === cell.facility;
-                  const clickable = cell.count > 0;
-                  return (
-                    <td key={cell.facility} className="border-b border-slate-100 p-1 text-right dark:border-slate-700/60">
-                      <button
-                        onClick={() => clickable && onSelectCell(cell.facility, row.bucket)}
-                        disabled={!clickable}
-                        className={`w-full rounded-md px-2 py-1 transition-colors ${
-                          isSelected
-                            ? `${AGE_BUCKET_STYLE[row.bucket].solid} ring-2 ring-teal-500 ring-offset-1 dark:ring-offset-slate-900`
-                            : clickable
-                              ? "hover:bg-white dark:hover:bg-slate-900"
-                              : "cursor-default opacity-40"
-                        }`}
-                      >
-                        <div className="text-sm font-bold">{cell.units.toLocaleString()}</div>
-                        <div className={isSelected ? "text-[10px] text-white/80" : "text-[10px] text-slate-400"}>
-                          {cell.count} hold{cell.count === 1 ? "" : "s"}
-                        </div>
-                      </button>
-                    </td>
-                  );
-                })}
-                <td className="border-b border-slate-100 p-2 text-right font-semibold text-slate-600 dark:border-slate-700/60 dark:text-slate-300">
-                  {row.totalUnits.toLocaleString()}
-                </td>
-              </tr>
-            ))}
+            {pivot.rows.map((row) => {
+              const rowMax = Math.max(0, ...row.cells.map((c) => c.units));
+              return (
+                <tr key={row.bucket} className={AGE_BUCKET_STYLE[row.bucket].rowTint}>
+                  <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${AGE_BUCKET_STYLE[row.bucket].light}`}>{row.label}</span>
+                    <div className="mt-0.5 text-[9px] text-slate-400 dark:text-slate-500">{AGE_BUCKET_STYLE[row.bucket].subLabel}</div>
+                  </td>
+                  {row.cells.map((cell) => {
+                    const isSelected = ageFilter === row.bucket && activeFacility === cell.facility;
+                    const clickable = cell.count > 0;
+                    const heat = AGE_BUCKET_STYLE[row.bucket].heat[heatStepIndex(cell.units, rowMax)];
+                    return (
+                      <td key={cell.facility} className={`border-b border-slate-100 p-1 text-right dark:border-slate-700/60 ${isSelected ? "" : heat}`}>
+                        <button
+                          onClick={() => clickable && onSelectCell(cell.facility, row.bucket)}
+                          disabled={!clickable}
+                          className={`w-full rounded-md px-2 py-1 transition-colors ${
+                            isSelected
+                              ? `${AGE_BUCKET_STYLE[row.bucket].solid} ring-2 ring-teal-500 ring-offset-1 dark:ring-offset-slate-900`
+                              : clickable
+                                ? "hover:bg-white/70 dark:hover:bg-slate-900/60"
+                                : "cursor-default opacity-40"
+                          }`}
+                        >
+                          <div className="text-sm font-bold">{cell.units.toLocaleString()}</div>
+                          <div className={isSelected ? "text-[10px] text-white/80" : "text-[10px] text-slate-400"}>
+                            {cell.count} hold{cell.count === 1 ? "" : "s"}
+                          </div>
+                        </button>
+                      </td>
+                    );
+                  })}
+                  <td className="border-b border-slate-100 p-2 text-right font-semibold text-slate-600 dark:border-slate-700/60 dark:text-slate-300">
+                    {row.totalUnits.toLocaleString()}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
           <tfoot>
             <tr className="border-t border-slate-200 bg-slate-50 font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-              <td className="p-2">Total</td>
+              <td className="p-2">
+                <div>Facility totals</div>
+                <div className="text-[9px] font-normal normal-case text-slate-400 dark:text-slate-500">Active hold load</div>
+              </td>
               {pivot.facilityTotals.map((f) => (
                 <td key={f.facility} className="p-2 text-right">
                   {f.units.toLocaleString()}
@@ -396,10 +502,12 @@ export function StockHolds() {
     });
   }
 
-  async function releaseSelected() {
-    const ids = [...selected];
+  // Shared by the top "Release N selected" button and each date row's own
+  // "Release all" button — same confirm, same sequential release, same
+  // busy-state, just a different source for which ids.
+  async function releaseIds(ids: number[]) {
     if (ids.length === 0) return;
-    if (!window.confirm(`Release ${ids.length} selected hold(s)? Each becomes eligible for future picklists again.`)) return;
+    if (!window.confirm(`Release ${ids.length} hold(s)? Each becomes eligible for future picklists again.`)) return;
     setBulkReleasing(true);
     try {
       // Sequential, not Promise.all — each releaseHold() re-fetches holds
@@ -408,10 +516,17 @@ export function StockHolds() {
       for (const id of ids) {
         await releaseHold(id, myName);
       }
-      setSelected(new Set());
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.delete(id);
+        return next;
+      });
     } finally {
       setBulkReleasing(false);
     }
+  }
+  async function releaseSelected() {
+    await releaseIds([...selected]);
   }
 
   return (
@@ -453,6 +568,7 @@ export function StockHolds() {
             label="Aging > 6 days"
             value={urgentUnits.toLocaleString()}
             sub={urgentCount > 0 ? `${urgentCount} hold${urgentCount === 1 ? "" : "s"} need review` : "none right now"}
+            highlight={urgentUnits > 0}
           />
           <StatCard
             icon="Δ"
@@ -508,7 +624,19 @@ export function StockHolds() {
           ) : (
             (() => {
               const g = groups.find((x) => x.facility === activeFacility) ?? groups[0];
-              return <FacilityPanel group={g} stock={stock} canRelease={canRelease} selected={selected} onToggleOne={toggleOne} onToggleAll={toggleAll} />;
+              return (
+                <FacilityPanel
+                  group={g}
+                  stock={stock}
+                  canRelease={canRelease}
+                  selected={selected}
+                  onToggleOne={toggleOne}
+                  onToggleAll={toggleAll}
+                  onReleaseIds={(ids) => void releaseIds(ids)}
+                  bulkReleasing={bulkReleasing}
+                  now={now}
+                />
+              );
             })()
           )}
         </div>

@@ -49,11 +49,22 @@ const STAT_TONE_BADGE: Record<StatTone, string> = {
   bad: "bg-rose-100 dark:bg-rose-900/40",
   info: "bg-[var(--fefo-teal-50)] dark:bg-slate-700",
 };
+const STAT_TONE_RING: Record<StatTone, string> = {
+  ok: "ring-2 ring-emerald-300 dark:ring-emerald-700",
+  warn: "ring-2 ring-amber-300 dark:ring-amber-700",
+  bad: "ring-2 ring-rose-300 dark:ring-rose-700",
+  info: "ring-2 ring-teal-300 dark:ring-teal-700",
+};
 
-/** The app's one KPI-card shape (icon badge + label + big number + sub-line) — shared so every screen's headline stats read as one system. */
-export function StatCard({ icon, tone, label, value, sub }: { icon: string; tone: StatTone; label: string; value: string; sub?: string }) {
+/**
+ * The app's one KPI-card shape (icon badge + label + big number + sub-line)
+ * — shared so every screen's headline stats read as one system.
+ * `highlight` adds a colour-matched ring — reserve it for the one card on a
+ * row that genuinely needs a second look, not every card.
+ */
+export function StatCard({ icon, tone, label, value, sub, highlight }: { icon: string; tone: StatTone; label: string; value: string; sub?: string; highlight?: boolean }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-[var(--fefo-line)] bg-white p-3.5 dark:border-slate-700 dark:bg-slate-800">
+    <div className={`flex items-start gap-3 rounded-xl border border-[var(--fefo-line)] bg-white p-3.5 dark:border-slate-700 dark:bg-slate-800 ${highlight ? STAT_TONE_RING[tone] : ""}`}>
       <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-lg font-bold ${STAT_TONE_BADGE[tone]} ${STAT_TONE_TEXT[tone]}`}>
         {icon}
       </span>

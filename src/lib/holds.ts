@@ -130,6 +130,26 @@ export function holdMatchesAgeBucket(h: Hold, bucket: AgeBucketKey | null, now: 
   return def ? def.test(holdAgeDays(h.heldAt, now)) : true;
 }
 
+export interface HoldAgeStatusBadge {
+  label: string;
+  tone: "ok" | "warn" | "bad";
+}
+
+/**
+ * A per-date-cohort status badge, keyed off the same day-count AGE_BUCKETS
+ * uses — same 4 severities, just phrased as a status label ("Review
+ * window (3d)") instead of a range ("2 to 5 days") for a single row that
+ * already knows its own age. Kept in lockstep with AGE_BUCKETS by the
+ * "stays consistent" test rather than duplicating the day-range logic.
+ */
+export function holdAgeStatusBadge(days: number): HoldAgeStatusBadge {
+  if (days < 1) return { label: "Normal SLA (<24h)", tone: "ok" };
+  if (days < 2) return { label: `Normal SLA (${days}d)`, tone: "ok" };
+  if (days <= 5) return { label: `Review window (${days}d)`, tone: "warn" };
+  if (days <= 10) return { label: `Critical aging (${days}d)`, tone: "bad" };
+  return { label: `SLA breached (${days}d)`, tone: "bad" };
+}
+
 export interface AgePivotCell {
   facility: string;
   units: number; // sum of qty on hold — the number leadership cares about, not just line-item count
