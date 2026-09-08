@@ -332,7 +332,7 @@ function AgePivotTable({
 }) {
   return (
     <div className="mb-3 overflow-hidden rounded-xl border border-[var(--fefo-line)] bg-white dark:border-slate-700 dark:bg-slate-800">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--fefo-line)] px-3 py-2.5 dark:border-slate-700">
+      <div className="flex flex-col items-center gap-1.5 border-b border-[var(--fefo-line)] px-3 py-2.5 text-center dark:border-slate-700">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-800 dark:text-teal-300">Units on hold, by age and facility</p>
           <p className="text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">Click a cell to see those holds</p>
