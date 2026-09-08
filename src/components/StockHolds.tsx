@@ -349,21 +349,32 @@ function AgePivotTable({
         <AgeDistributionBar pivot={pivot} />
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] border-collapse text-xs tabular-nums">
+        {/* table-fixed + colgroup: every row's cells line up in strict
+            columns regardless of content length (a button vs. a header's
+            two lines vs. a plain total) — auto layout let columns drift
+            row to row, which read as "misaligned". */}
+        <table className="w-full min-w-[560px] table-fixed border-collapse text-sm tabular-nums">
+          <colgroup>
+            <col style={{ width: "24%" }} />
+            {facilities.map((f) => (
+              <col key={f} style={{ width: `${64 / facilities.length}%` }} />
+            ))}
+            <col style={{ width: "12%" }} />
+          </colgroup>
           <thead>
-            <tr className="text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
-              <th className="border-b border-slate-200 p-2 text-left dark:border-slate-700">Age of hold</th>
+            <tr className="text-[11px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+              <th className="border-b border-slate-200 p-2.5 text-left dark:border-slate-700">Age of hold</th>
               {facilities.map((f) => {
                 const total = pivot.facilityTotals.find((ft) => ft.facility === f);
                 const pct = total && pivot.grandTotalUnits > 0 ? (total.units / pivot.grandTotalUnits) * 100 : 0;
                 return (
-                  <th key={f} className="border-b border-slate-200 p-2 text-right dark:border-slate-700">
-                    <div>{f}</div>
-                    <div className="text-[9px] font-normal normal-case text-slate-400 dark:text-slate-500">{total && total.units > 0 ? `Cap. ${pct.toFixed(1)}%` : "—"}</div>
+                  <th key={f} className="border-b border-slate-200 p-2.5 text-right dark:border-slate-700">
+                    <div className="truncate">{f}</div>
+                    <div className="text-[10px] font-normal normal-case text-slate-400 dark:text-slate-500">{total && total.units > 0 ? `Cap. ${pct.toFixed(1)}%` : "—"}</div>
                   </th>
                 );
               })}
-              <th className="border-b border-slate-200 p-2 text-right dark:border-slate-700">Total</th>
+              <th className="border-b border-slate-200 p-2.5 text-right dark:border-slate-700">Total</th>
             </tr>
           </thead>
           <tbody>
@@ -371,20 +382,20 @@ function AgePivotTable({
               const rowMax = Math.max(0, ...row.cells.map((c) => c.units));
               return (
                 <tr key={row.bucket} className={AGE_BUCKET_STYLE[row.bucket].rowTint}>
-                  <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${AGE_BUCKET_STYLE[row.bucket].light}`}>{row.label}</span>
-                    <div className="mt-0.5 text-[9px] text-slate-400 dark:text-slate-500">{AGE_BUCKET_STYLE[row.bucket].subLabel}</div>
+                  <td className="border-b border-slate-100 p-2.5 dark:border-slate-700/60">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${AGE_BUCKET_STYLE[row.bucket].light}`}>{row.label}</span>
+                    <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">{AGE_BUCKET_STYLE[row.bucket].subLabel}</div>
                   </td>
                   {row.cells.map((cell) => {
                     const isSelected = ageFilter === row.bucket && activeFacility === cell.facility;
                     const clickable = cell.count > 0;
                     const heat = AGE_BUCKET_STYLE[row.bucket].heat[heatStepIndex(cell.units, rowMax)];
                     return (
-                      <td key={cell.facility} className={`border-b border-slate-100 p-1 text-right dark:border-slate-700/60 ${isSelected ? "" : heat}`}>
+                      <td key={cell.facility} className={`border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60 ${isSelected ? "" : heat}`}>
                         <button
                           onClick={() => clickable && onSelectCell(cell.facility, row.bucket)}
                           disabled={!clickable}
-                          className={`w-full rounded-md px-2 py-1 transition-colors ${
+                          className={`w-full rounded-md px-2 py-1.5 transition-colors ${
                             isSelected
                               ? `${AGE_BUCKET_STYLE[row.bucket].solid} ring-2 ring-teal-500 ring-offset-1 dark:ring-offset-slate-900`
                               : clickable
@@ -392,15 +403,15 @@ function AgePivotTable({
                                 : "cursor-default opacity-40"
                           }`}
                         >
-                          <div className="text-sm font-bold">{cell.units.toLocaleString()}</div>
-                          <div className={isSelected ? "text-[10px] text-white/80" : "text-[10px] text-slate-400"}>
+                          <div className="text-lg font-bold">{cell.units.toLocaleString()}</div>
+                          <div className={isSelected ? "text-[11px] text-white/80" : "text-[11px] text-slate-400"}>
                             {cell.count} hold{cell.count === 1 ? "" : "s"}
                           </div>
                         </button>
                       </td>
                     );
                   })}
-                  <td className="border-b border-slate-100 p-2 text-right font-semibold text-slate-600 dark:border-slate-700/60 dark:text-slate-300">
+                  <td className="border-b border-slate-100 p-2.5 text-right font-semibold text-slate-600 dark:border-slate-700/60 dark:text-slate-300">
                     {row.totalUnits.toLocaleString()}
                   </td>
                 </tr>
@@ -409,16 +420,16 @@ function AgePivotTable({
           </tbody>
           <tfoot>
             <tr className="border-t border-slate-200 bg-slate-50 font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-              <td className="p-2">
+              <td className="p-2.5">
                 <div>Facility totals</div>
-                <div className="text-[9px] font-normal normal-case text-slate-400 dark:text-slate-500">Active hold load</div>
+                <div className="text-[10px] font-normal normal-case text-slate-400 dark:text-slate-500">Active hold load</div>
               </td>
               {pivot.facilityTotals.map((f) => (
-                <td key={f.facility} className="p-2 text-right">
+                <td key={f.facility} className="p-2.5 text-right">
                   {f.units.toLocaleString()}
                 </td>
               ))}
-              <td className="p-2 text-right">{pivot.grandTotalUnits.toLocaleString()}</td>
+              <td className="p-2.5 text-right">{pivot.grandTotalUnits.toLocaleString()}</td>
             </tr>
           </tfoot>
         </table>

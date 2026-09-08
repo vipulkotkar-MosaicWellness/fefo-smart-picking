@@ -64,14 +64,17 @@ const STAT_TONE_RING: Record<StatTone, string> = {
  */
 export function StatCard({ icon, tone, label, value, sub, highlight }: { icon: string; tone: StatTone; label: string; value: string; sub?: string; highlight?: boolean }) {
   return (
-    <div className={`flex items-start gap-3 rounded-xl border border-[var(--fefo-line)] bg-white p-3.5 dark:border-slate-700 dark:bg-slate-800 ${highlight ? STAT_TONE_RING[tone] : ""}`}>
-      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-lg font-bold ${STAT_TONE_BADGE[tone]} ${STAT_TONE_TEXT[tone]}`}>
+    <div className={`flex items-start gap-2.5 rounded-xl border border-[var(--fefo-line)] bg-white p-3 dark:border-slate-700 dark:bg-slate-800 ${highlight ? STAT_TONE_RING[tone] : ""}`}>
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ${STAT_TONE_BADGE[tone]} ${STAT_TONE_TEXT[tone]}`}>
         {icon}
       </span>
-      <div>
-        <p className="text-sm font-semibold text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
-        <p className={`mt-0.5 text-4xl font-bold tabular-nums ${STAT_TONE_TEXT[tone]}`}>{value}</p>
-        {sub && <p className="text-sm text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-semibold text-[var(--fefo-muted)] dark:text-slate-400">{label}</p>
+        {/* min-h reserves room for 2 lines at this size, so a long text value
+            (a facility name, say) wrapping once doesn't make this card taller
+            than its numeric siblings sitting next to it in the same row. */}
+        <p className={`mt-0.5 min-h-[2.25rem] text-2xl leading-tight font-bold tabular-nums ${STAT_TONE_TEXT[tone]}`}>{value}</p>
+        {sub && <p className="truncate text-xs text-[var(--fefo-muted)] dark:text-slate-400">{sub}</p>}
       </div>
     </div>
   );
