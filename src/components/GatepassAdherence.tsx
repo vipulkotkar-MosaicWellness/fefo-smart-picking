@@ -98,6 +98,13 @@ function statusColor(pct: number): string {
   return ADHERENCE_STATUS.find((s) => pct >= s.min)!.color;
 }
 
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "2026-09-02" -> "02 Sep" — day-then-month, fixed regardless of browser locale (unlike toLocaleDateString, which can flip the order). */
+function shortDateLabel(dateStr: string): string {
+  const [, m, day] = dateStr.split("-");
+  return `${day} ${MONTH_ABBR[Number(m) - 1]}`;
+}
+
 function TrendChart({ days, selectedDate, onSelectDate }: { days: DaySummary[]; selectedDate: string | null; onSelectDate: (date: string) => void }) {
   const [hovered, setHovered] = useState<DaySummary | null>(null);
 
@@ -105,13 +112,17 @@ function TrendChart({ days, selectedDate, onSelectDate }: { days: DaySummary[]; 
   const padL = 40;
   const padR = 12;
   const padB = 30;
-  const padT = 16;
+  // Extra headroom vs. before — the value label sits above the bar tip now,
+  // so a day at/near 100% still needs clear room above it, not just above
+  // the gridline.
+  const padT = 26;
   const chartH = h - padT - padB;
   // A bar never gets thinner than this even when there are many days — past
   // that point the chart scrolls horizontally instead of shrinking bars to
-  // unreadable slivers. slot = bar + the 2px surface gap on each side.
-  const slot = 30;
-  const barW = 22;
+  // unreadable slivers. slot = bar + the 2px surface gap on each side. Wider
+  // than before to give the "01 Sep" date labels room without colliding.
+  const slot = 36;
+  const barW = 24;
   const chartW = Math.max(480 - padL - padR, days.length * slot);
   const w = padL + chartW + padR;
 
@@ -152,8 +163,12 @@ function TrendChart({ days, selectedDate, onSelectDate }: { days: DaySummary[]; 
                 {/* Value bar */}
                 <rect x={barX} y={y} width={barW} height={barH} rx={3} fill={statusColor(d.pct)} opacity={isHovered ? 1 : 0.88} />
                 {isSelected && <rect x={barX - 2} y={y - 2} width={barW + 4} height={barH + 2} rx={4} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-teal-700 dark:text-teal-300" />}
-                <text x={slotX + slot / 2} y={h - 9} textAnchor="middle" fontSize="11.5" fill="currentColor" opacity={isHovered || isSelected ? 0.95 : 0.6} fontWeight={isSelected ? 700 : 400}>
-                  {d.date.slice(5)}
+                {/* Value at the tip — text token colour, never the bar's own hue, so it stays legible over any status colour. */}
+                <text x={slotX + slot / 2} y={y - 6} textAnchor="middle" fontSize="11" fontWeight={700} fill="currentColor" opacity={isHovered || isSelected ? 1 : 0.85}>
+                  {d.pct}%
+                </text>
+                <text x={slotX + slot / 2} y={h - 9} textAnchor="middle" fontSize="11" fill="currentColor" opacity={isHovered || isSelected ? 0.95 : 0.6} fontWeight={isSelected ? 700 : 400}>
+                  {shortDateLabel(d.date)}
                 </text>
                 {/* Hit target: the whole slot, taller than the bar, so a short bar (a bad day) is just as easy to hover/click as a tall one. */}
                 <rect
