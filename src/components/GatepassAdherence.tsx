@@ -321,10 +321,11 @@ export function GatepassAdherence() {
         </div>
 
         <div className="rounded-lg border border-[var(--fefo-line)] bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
-          <p className="mb-1 text-base font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+          <p className="mb-0.5 text-base font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
             Daily adherence trend
           </p>
-          <TrendChart days={days} selectedDate={expandedDate} onSelectDate={selectDate} />
+          <p className="mb-1.5 text-sm text-[var(--fefo-muted)] dark:text-slate-400">Last 14 days — the report table covers the full range.</p>
+          <TrendChart days={days.slice(-14)} selectedDate={expandedDate} onSelectDate={selectDate} />
         </div>
       </div>
 
