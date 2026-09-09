@@ -284,7 +284,7 @@ function ddBuildChart_(points) {
   if (!points.length) return { blob: null };
   try {
     var table = Charts.newDataTable().addColumn(Charts.ColumnType.STRING, 'Date').addColumn(Charts.ColumnType.NUMBER, 'Adherence %');
-    points.forEach(function (p) { table.addRow(ddShortDate_(p.date), Math.round(p.pct * 100) / 100); });
+    points.forEach(function (p) { table.addRow([ddShortDate_(p.date), Math.round(p.pct * 100) / 100]); });
     var chart = Charts.newColumnChart()
       .setDataTable(table.build())
       .setDimensions(650, 260)
