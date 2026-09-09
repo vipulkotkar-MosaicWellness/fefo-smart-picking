@@ -19,12 +19,16 @@
  * All names below are DD_-prefixed to avoid colliding with the other two
  * files' globals in the same project.
  *
- * The 14-day trend is a REAL chart image (Apps Script's built-in Charts
- * service, rendered server-side and attached inline via cid:) — not a link
- * out to a separate page. This works here even though the same trick failed
- * over Claude's Gmail send tool earlier, because GmailApp.sendEmail builds
- * its own MIME message directly — it isn't passing through that tool's
- * separate content sanitizer, which was what stripped images/SVG/etc there.
+ * The 14-day trend is a REAL chart image (rendered via QuickChart.io —
+ * Apps Script's own built-in Charts service was tried first, but doesn't
+ * reliably support per-bar value labels or a set fill color — and attached
+ * inline via cid:), not a link out to a separate page. Attaching an inline
+ * image works here even though the same trick failed over Claude's Gmail
+ * send tool earlier, because GmailApp.sendEmail builds its own MIME message
+ * directly — it isn't passing through that tool's separate content
+ * sanitizer, which was what stripped images/SVG/etc there. Only the 14
+ * (date, percentage) points plotted in the chart are sent to QuickChart —
+ * no SKU, gate pass, or facility-level detail.
  *
  * ── ONE-TIME SETUP ──────────────────────────────────────────────────────
  * 1. Edit DD_RECIPIENTS / DD_CC below if the distribution list changes.
@@ -278,24 +282,50 @@ function ddBuildQueues_(taskRows, now) {
   };
 }
 
-// ── Chart (real inline image via Apps Script's built-in Charts service) ──
+// ── Chart (real inline image via QuickChart.io) ──────────────────────
+//
+// Tried Apps Script's own built-in `Charts` service first (Google's native
+// server-side chart renderer, zero external dependency) — but it doesn't
+// reliably support per-bar value labels, and in testing rendered the bars
+// without the requested fill color. QuickChart.io is a plain chart-image
+// API: give it a Chart.js config as a URL parameter, get back a PNG. What
+// it's sent is exactly the 14 (date, percentage) pairs plotted below —
+// no SKU, gate pass, or facility-level detail ever leaves Supabase/Gmail.
 
 function ddBuildChart_(points) {
   if (!points.length) return { blob: null };
   try {
-    var table = Charts.newDataTable().addColumn(Charts.ColumnType.STRING, 'Date').addColumn(Charts.ColumnType.NUMBER, 'Adherence %');
-    points.forEach(function (p) { table.addRow([ddShortDate_(p.date), Math.round(p.pct * 100) / 100]); });
-    var chart = Charts.newColumnChart()
-      .setDataTable(table.build())
-      .setDimensions(650, 260)
-      .setColors(['#087f6d'])
-      .setOption('legend', { position: 'none' })
-      .setOption('backgroundColor', '#ffffff')
-      .setOption('vAxis', { minValue: 0, maxValue: 100, format: '#\'%\'' })
-      .setOption('hAxis', { slantedText: true, slantedTextAngle: 45 })
-      .setOption('title', 'Gate Pass Adherence — last ' + points.length + ' days')
-      .build();
-    return { blob: chart.getBlob().setName('trendchart.png') };
+    var labels = points.map(function (p) { return ddShortDate_(p.date); });
+    // Whole-number percentages — QuickChart's GET endpoint doesn't evaluate
+    // JS-callback strings (tried a %-suffix formatter first; it errored with
+    // "is not a function" instead of being eval'd), so labels are plain
+    // numbers rather than "79%" — the chart title states the unit instead.
+    var values = points.map(function (p) { return Math.round(p.pct); });
+    var config = {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Adherence %',
+          data: values,
+          backgroundColor: '#087f6d',
+          datalabels: { anchor: 'end', align: 'top', color: '#063a33', font: { weight: 'bold', size: 11 } },
+        }],
+      },
+      options: {
+        title: { display: true, text: 'Gate Pass Adherence % — last ' + points.length + ' days', fontColor: '#063a33' },
+        legend: { display: false },
+        scales: { yAxes: [{ ticks: { min: 0, max: 100 } }] },
+        plugins: { datalabels: { anchor: 'end', align: 'top' } },
+      },
+    };
+    var url = 'https://quickchart.io/chart?width=650&height=280&backgroundColor=white&c=' + encodeURIComponent(JSON.stringify(config));
+    var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    if (resp.getResponseCode() !== 200) {
+      Logger.log('QuickChart returned ' + resp.getResponseCode() + ', falling back to link-only.');
+      return { blob: null };
+    }
+    return { blob: resp.getBlob().setName('trendchart.png') };
   } catch (err) {
     Logger.log('Chart build failed, falling back to link-only: ' + err);
     return { blob: null };
