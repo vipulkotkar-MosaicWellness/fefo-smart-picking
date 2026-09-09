@@ -58,3 +58,31 @@ this app instructed it to pick — no file upload, runs entirely on its own sche
      time of day **9am to 10am** (after your 9 AM "Gatepass All Facility" email lands).
 
 That's it — results show up under **Reports → Gate Pass Adherence** in the app the next time it loads.
+
+---
+
+## Step 6 — Daily Ops Digest email (daily, unattended, zero AI cost)
+
+Sends the team a single HTML email every morning: Gate Pass Adherence (14-day
+trend chart + yesterday's breach drivers), Stock Holds aging, and Picking
+Pending / Gate Pass Allocation Pending — built and sent entirely by this
+script, no AI involved at send time.
+
+1. In the **same** Apps Script project from Step 3 — **File → New → Script file**, name it
+   `DailyDigestEmail`, paste in [`DailyDigestEmail.gs`](DailyDigestEmail.gs).
+   It reuses the `SUPABASE_URL` / `SERVICE_KEY` script properties already set — nothing new there.
+2. Open the file and check the **"EDIT THESE"** block near the top — the team's email
+   addresses are already filled in; change them there if the distribution list changes.
+3. Select function **`sendDailyDigestTest`** (top dropdown) → **Run**. First run asks you to
+   approve Gmail access — approve it. Check your inbox — a `[TEST]` email should land within
+   a few seconds. `DD_TEST_MODE = true` at the top of the file means this function (and even
+   the real daily trigger, for now) only ever sends to you, never the team.
+4. Happy with how it looks? **Triggers** → **Add Trigger**:
+   - Function: `sendDailyDigest` · Event source: **Time-driven** · Type: **Day timer** ·
+     time of day **9am to 10am**.
+5. When you're ready for the whole team to start getting it automatically, open the file,
+   set `DD_TEST_MODE = false`, and save. No trigger changes needed — the same daily trigger
+   now sends to the real list + CC instead of just you.
+
+To stop the daily email entirely without deleting anything, either delete the trigger for
+`sendDailyDigest`, or set `DD_TEST_MODE` back to `true`.
