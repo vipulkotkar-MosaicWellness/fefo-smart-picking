@@ -45,7 +45,7 @@
  */
 
 // ── EDIT THESE ─────────────────────────────────────────────────────────
-var DD_TEST_MODE = true; // true = every send (incl. the daily trigger) goes ONLY to DD_TEST_RECIPIENT
+var DD_TEST_MODE = false; // true = every send (incl. the daily trigger) goes ONLY to DD_TEST_RECIPIENT
 var DD_TEST_RECIPIENT = 'vipul.kotkar@mosaicwellness.in';
 
 var DD_RECIPIENTS = [
