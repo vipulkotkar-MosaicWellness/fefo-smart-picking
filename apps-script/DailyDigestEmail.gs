@@ -292,6 +292,26 @@ function ddBuildQueues_(taskRows, now) {
 // it's sent is exactly the 14 (date, percentage) pairs plotted below —
 // no SKU, gate pass, or facility-level detail ever leaves Supabase/Gmail.
 
+/** Same 3 thresholds/colors as ADHERENCE_STATUS in src/components/GatepassAdherence.tsx — keep in lockstep with that file if it ever changes. */
+function ddStatusColor_(pct) {
+  if (pct >= 95) return '#10b981';
+  if (pct >= 80) return '#f59e0b';
+  return '#e11d48';
+}
+
+function ddChartLegend_() {
+  var items = [
+    { color: '#10b981', label: 'On target (≥95%)' },
+    { color: '#f59e0b', label: 'Watch (80–94%)' },
+    { color: '#e11d48', label: 'Below target (<80%)' },
+  ];
+  return '<div style="margin:-0.9rem 0 1.25rem;font-size:0.72rem;color:#516b62;">'
+    + items.map(function (i) {
+        return '<span style="display:inline-block;margin-right:14px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background-color:' + i.color + ';margin-right:5px;"></span>' + i.label + '</span>';
+      }).join('')
+    + '</div>';
+}
+
 function ddBuildChart_(points) {
   if (!points.length) return { blob: null };
   try {
@@ -301,6 +321,11 @@ function ddBuildChart_(points) {
     // "is not a function" instead of being eval'd), so labels are plain
     // numbers rather than "79%" — the chart title states the unit instead.
     var values = points.map(function (p) { return Math.round(p.pct); });
+    // Per-bar status color, not one flat color — matches the live app's own
+    // TrendChart (ADHERENCE_STATUS in GatepassAdherence.tsx exactly): color
+    // here means "how far from target", not "which day". Legend for these
+    // goes under the image in the HTML (see ddChartLegend_).
+    var colors = values.map(ddStatusColor_);
     var config = {
       type: 'bar',
       data: {
@@ -308,7 +333,7 @@ function ddBuildChart_(points) {
         datasets: [{
           label: 'Adherence %',
           data: values,
-          backgroundColor: '#087f6d',
+          backgroundColor: colors,
           datalabels: { anchor: 'end', align: 'top', color: '#063a33', font: { weight: 'bold', size: 11 } },
         }],
       },
@@ -340,7 +365,7 @@ function ddBuildHtml_(now, yesterdayIso, trend, breach, holds, queues, chart, fo
     : '';
 
   var chartBlock = chart.blob
-    ? '<img src="cid:trendchart" alt="Gate Pass Adherence trend" style="max-width:100%;display:block;margin:0 0 1.25rem;border:1px solid #d7e3de;border-radius:10px;">'
+    ? '<img src="cid:trendchart" alt="Gate Pass Adherence trend" style="max-width:100%;display:block;margin:0 0 0.4rem;border:1px solid #d7e3de;border-radius:10px;">' + ddChartLegend_()
     : '<div style="margin:0 0 1.25rem;padding:0.75rem 0.9rem;background-color:#fbfdfc;border:1px solid #d7e3de;border-radius:10px;font-size:0.8rem;color:#516b62;"><b style="color:#10241f;">14-day trend chart:</b> could not be generated this run. See the live app: <a href="' + DD_APP_URL + '" style="color:#087f6d;">' + DD_APP_URL.replace('https://', '') + '</a></div>';
 
   var html = '<div style="max-width:720px;margin:0 auto;padding:1.25rem 1.5rem 1rem;font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#10241f;">'
