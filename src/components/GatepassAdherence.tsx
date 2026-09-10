@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { fetchGatepassAdherence, type AdherenceLine, type GatepassAdherence as GatepassAdherenceRow } from "../lib/gatepassAdherenceSupabase";
+import {
+  fetchGatepassAdherence,
+  lineBreach,
+  lineReason,
+  lineTone,
+  type GatepassAdherence as GatepassAdherenceRow,
+} from "../lib/gatepassAdherenceSupabase";
 import { Button, Card, StatCard, Tag } from "./Ui";
 
 interface DaySummary {
@@ -61,7 +67,9 @@ function exportWorkbook(rows: GatepassAdherenceRow[]) {
         "Instructed Qty": l.instructed_qty,
         "Actual Qty": l.actual_qty,
         "Compliant Qty": l.compliant_qty,
-        Status: l.status,
+        "FEFO Breach": lineBreach(l),
+        Reason: lineReason(l),
+        "Bin Match": l.bin_match ?? "",
         "Actually Picked Bin/Batch (Qty)": l.picked_bin_batch ?? "",
         "Vendor Batch #": l.vendor_batch ?? "",
       })),
@@ -72,12 +80,6 @@ function exportWorkbook(rows: GatepassAdherenceRow[]) {
   XLSX.utils.book_append_sheet(wb, summarySheet, "Gate Pass Summary");
   XLSX.utils.book_append_sheet(wb, detailSheet, "Line Detail");
   XLSX.writeFile(wb, "gatepass_adherence.xlsx");
-}
-
-function lineTone(status: AdherenceLine["status"]): "ok" | "warn" | "bad" {
-  if (status === "OK") return "ok";
-  if (status === "PARTIAL") return "warn";
-  return "bad";
 }
 
 function pctTone(pct: number): "ok" | "warn" | "bad" {
@@ -393,7 +395,7 @@ export function GatepassAdherence() {
             Line detail for {expandedGp.gatepass_code}
           </p>
           <div className="max-h-96 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
-            <table className="w-full min-w-[720px] border-collapse text-base">
+            <table className="w-full min-w-[960px] border-collapse text-base">
               <thead className="sticky top-0 z-10">
                 <tr className="text-left text-sm uppercase tracking-wide text-teal-800 dark:text-teal-300">
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">SKU</th>
@@ -403,7 +405,9 @@ export function GatepassAdherence() {
                   <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Actual Qty</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
-                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Status</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">FEFO Breach</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Reason</th>
+                  <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Bin Match</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Actually Picked Bin/Batch (Qty)</th>
                   <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Vendor Batch #</th>
                 </tr>
@@ -419,8 +423,12 @@ export function GatepassAdherence() {
                     <td className="border-b border-slate-100 p-2 text-right tabular-nums dark:border-slate-700/60">{l.actual_qty}</td>
                     <td className="border-b border-slate-100 p-2 text-right tabular-nums dark:border-slate-700/60">{l.compliant_qty}</td>
                     <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">
-                      <Tag tone={lineTone(l.status)}>{l.status}</Tag>
+                      <Tag tone={lineBreach(l) === "Yes" ? "bad" : "ok"}>{lineBreach(l)}</Tag>
                     </td>
+                    <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">
+                      <Tag tone={lineTone(l)}>{lineReason(l)}</Tag>
+                    </td>
+                    <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">{l.bin_match ?? "—"}</td>
                     <td className="border-b border-slate-100 p-2 font-mono dark:border-slate-700/60">{l.picked_bin_batch || "—"}</td>
                     <td className="border-b border-slate-100 p-2 font-mono dark:border-slate-700/60">{l.vendor_batch || "—"}</td>
                   </tr>

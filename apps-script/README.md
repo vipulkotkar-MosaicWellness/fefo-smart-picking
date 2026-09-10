@@ -59,6 +59,16 @@ this app instructed it to pick — no file upload, runs entirely on its own sche
 
 That's it — results show up under **Reports → Gate Pass Adherence** in the app the next time it loads.
 
+**Scoring:** FEFO adherence is judged on **batch only** — picking the instructed batch from a
+different shelf still counts as compliant. A line lowers the number only when a *different batch*
+was picked, *nothing* was picked, or the correct batch was *short-picked* (only the picked units
+count). Non-expiry SKUs (hardcoded `GPA_NON_EXPIRY_SKUS` list in the script — accessories, cards,
+toys, innerwear, manuals) always score 100%. Each line carries `fefo_breach` (Yes/No) + `reason`.
+
+**After editing the scoring logic** (or the non-expiry list), re-score history: select
+**`backfillAllGatepassAdherence`** → **Run**. It re-scores every date already in the table from
+the current export email in one pass. Check the log for the new overall %.
+
 ---
 
 ## Step 6 — Daily Ops Digest email (daily, unattended, zero AI cost)

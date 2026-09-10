@@ -146,7 +146,14 @@ function ddBuildBreach_(gpaRows, yesterdayIso) {
   var byFacility = {};
   var skuShort = {};
   var gpShort = {};
-  var binBreachUnits = 0, binBreachLines = 0, shortPickUnits = 0, shortPickLines = 0;
+  // Buckets under the new batch-only rule: a "breach" is only a wrong batch
+  // or nothing picked. A partial pick of the correct batch still costs units
+  // but is NOT a breach. Shelf mismatch (right batch, wrong bin) costs
+  // nothing and is tracked only as a count.
+  var batchMismatchUnits = 0, batchMismatchLines = 0;
+  var notPickedUnits = 0, notPickedLines = 0;
+  var partialUnits = 0, partialLines = 0;
+  var shelfMismatchLines = 0;
 
   yRows.forEach(function (r) {
     yInstructed += r.instructed_qty; yCompliant += r.compliant_qty;
@@ -160,10 +167,14 @@ function ddBuildBreach_(gpaRows, yesterdayIso) {
     gpShort[r.gatepass_code].compliant += r.compliant_qty;
 
     (r.lines || []).forEach(function (l) {
-      if (l.status === 'OK') return;
+      var reason = ddLineReason_(l);
+      if (reason === 'Bin & batch match' || reason === 'Non-expiry SKU') return;
       var short = l.instructed_qty - l.compliant_qty;
-      if (l.status === 'BIN BREACH') { binBreachUnits += short; binBreachLines++; }
-      else if (l.status === 'PARTIAL') { shortPickUnits += short; shortPickLines++; }
+      if (reason === 'Batch mismatch') { batchMismatchUnits += short; batchMismatchLines++; }
+      else if (reason === 'Not picked') { notPickedUnits += short; notPickedLines++; }
+      else if (reason === 'Partial pick — correct batch') { partialUnits += short; partialLines++; }
+      else if (reason === 'Batch match, bin mismatch') { shelfMismatchLines++; return; }
+      if (short <= 0) return;
       var key = l.sku + '|' + (l.name || l.sku);
       skuShort[key] = skuShort[key] || { sku: l.sku, name: l.name || l.sku, short: 0, lines: 0, instructed: 0, compliant: 0 };
       skuShort[key].short += short;
@@ -187,8 +198,21 @@ function ddBuildBreach_(gpaRows, yesterdayIso) {
   return {
     instructed: yInstructed, compliant: yCompliant, pct: yInstructed > 0 ? (yCompliant / yInstructed) * 100 : 0,
     gpCount: yRows.length, facilityRows: facilityRows, topSkus: topSkus, topGps: topGps,
-    binBreachUnits: binBreachUnits, binBreachLines: binBreachLines, shortPickUnits: shortPickUnits, shortPickLines: shortPickLines,
+    batchMismatchUnits: batchMismatchUnits, batchMismatchLines: batchMismatchLines,
+    notPickedUnits: notPickedUnits, notPickedLines: notPickedLines,
+    partialUnits: partialUnits, partialLines: partialLines,
+    shelfMismatchLines: shelfMismatchLines,
+    breachUnits: batchMismatchUnits + notPickedUnits, breachLines: batchMismatchLines + notPickedLines,
   };
+}
+
+/** Reason from a gatepass_adherence line of either shape — new (`reason`) or a pre-Sep-2026 row still on `status`. */
+function ddLineReason_(l) {
+  if (l.reason) return l.reason;
+  if (l.status === 'OK') return 'Bin & batch match';
+  if (l.status === 'PARTIAL') return 'Partial pick — correct batch';
+  if (l.status === 'BIN BREACH') return 'Batch mismatch';
+  return 'Bin & batch match';
 }
 
 function ddBuildHolds_(holdRows, now) {
@@ -383,20 +407,22 @@ function ddBuildHtml_(now, yesterdayIso, trend, breach, holds, queues, chart, fo
     + chartBlock
 
     + ddSectionHeader_('2 · Breach Drivers — Yesterday (' + ddLongDateIso_(yesterdayIso) + ')', false)
-    + '<p style="font-size:0.8rem;color:#516b62;margin:-0.4rem 0 0.9rem;line-height:1.5;">Scoped to yesterday\'s closed gate passes only, not the rolling window above — facility-wise adherence, then the top 5 SKUs and gate passes by units short.</p>'
+    + '<p style="font-size:0.8rem;color:#516b62;margin:-0.4rem 0 0.9rem;line-height:1.5;">Scoped to yesterday\'s closed gate passes only, not the rolling window above. A FEFO breach = a different batch was picked, or nothing was picked. Right batch / wrong shelf is not a breach.</p>'
     + ddCardRow_([
         ddCard_('Yesterday\'s adherence', ddPct_(breach.pct), ddNum_(breach.compliant) + ' / ' + ddNum_(breach.instructed) + ' units', breach.pct >= 80 ? 'good' : 'bad'),
         ddCard_('Gate passes', String(breach.gpCount), 'closed ' + ddLongDateIso_(yesterdayIso), 'neutral'),
-        ddCard2_('Breach type', ddNum_(breach.binBreachUnits) + ' bin breach · ' + ddNum_(breach.shortPickUnits) + ' short pick', breach.binBreachLines + ' vs ' + breach.shortPickLines + ' lines'),
+        ddCard2_('FEFO breaches', ddNum_(breach.breachUnits) + ' units · ' + breach.breachLines + ' lines', ddNum_(breach.batchMismatchUnits) + ' wrong batch · ' + ddNum_(breach.notPickedUnits) + ' not picked'),
       ])
     + (breach.facilityRows.length ? ddFacilityAdherenceTable_(breach.facilityRows) : ddNote_('No gate passes closed yesterday — nothing to score.'))
     + (breach.topSkus.length ? ddTopSkusTable_(breach.topSkus) : '')
     + (breach.topGps.length ? ddTopGpsTable_(breach.topGps) : '')
     + (breach.topSkus.length
-        ? '<p style="font-size:0.8rem;color:#516b62;margin:-0.5rem 0 0.9rem;line-height:1.5;">Breach type, yesterday only: '
-          + ddPill_('Bin breach — ' + ddNum_(breach.binBreachUnits) + ' units · ' + breach.binBreachLines + ' lines', 'bad')
-          + '&nbsp; ' + ddPill_('Short pick — ' + ddNum_(breach.shortPickUnits) + ' units · ' + breach.shortPickLines + ' lines', 'warn')
-          + '. A bin breach is a wrong bin/batch picked; a short pick is the right bin with less than the instructed qty.</p>'
+        ? '<p style="font-size:0.8rem;color:#516b62;margin:-0.5rem 0 0.9rem;line-height:1.5;">Yesterday, units short by reason: '
+          + ddPill_('Wrong batch — ' + ddNum_(breach.batchMismatchUnits) + ' units · ' + breach.batchMismatchLines + ' lines', 'bad')
+          + '&nbsp; ' + ddPill_('Not picked — ' + ddNum_(breach.notPickedUnits) + ' units · ' + breach.notPickedLines + ' lines', 'bad')
+          + '&nbsp; ' + ddPill_('Partial pick, correct batch — ' + ddNum_(breach.partialUnits) + ' units · ' + breach.partialLines + ' lines', 'warn')
+          + '. Wrong batch and not picked are FEFO breaches; a partial pick of the correct batch is a fill-rate gap, not a breach. '
+          + 'Right batch from a different shelf: ' + breach.shelfMismatchLines + ' lines (not counted — separate shelf report later).</p>'
         : '')
 
     + ddSectionHeader_('3 · Inventory on Hold', false)
@@ -493,7 +519,7 @@ function ddTopSkusTable_(rows) {
     return '<tr>' + ddTd_(String(i + 1), 'center', 'font-weight:700;color:#087f6d;') + ddTd_(r.name + ' (' + r.sku + ')') + ddTd_(ddNum_(r.short), 'right') + ddTd_(String(r.lines), 'right') + ddTd_(ddPct_(linePct), 'right') + '</tr>';
   }).join('');
   return '<table style="width:100%;border-collapse:collapse;font-size:0.78rem;margin-bottom:1rem;"><tr>'
-    + ddTh_('#', 'center') + ddTh_('Top 5 SKUs by units short') + ddTh_('Shortfall', 'right') + ddTh_('Breach lines', 'right') + ddTh_('Line adherence', 'right')
+    + ddTh_('#', 'center') + ddTh_('Top 5 SKUs by units short') + ddTh_('Shortfall', 'right') + ddTh_('Lines', 'right') + ddTh_('Line adherence', 'right')
     + '</tr>' + body + '</table>';
 }
 

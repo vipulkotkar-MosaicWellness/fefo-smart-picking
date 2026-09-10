@@ -1,5 +1,14 @@
 import { supabase } from "./supabaseClient";
 
+/** Reasons emitted by apps-script/GatepassAdherenceCheck.gs — see its SCORING RULES header. */
+export type AdherenceReason =
+  | "Bin & batch match"
+  | "Batch match, bin mismatch"
+  | "Partial pick — correct batch"
+  | "Non-expiry SKU"
+  | "Batch mismatch"
+  | "Not picked";
+
 export interface AdherenceLine {
   sku: string;
   name?: string;
@@ -8,11 +17,40 @@ export interface AdherenceLine {
   instructed_qty: number;
   actual_qty: number;
   compliant_qty: number;
-  status: "OK" | "PARTIAL" | "BIN BREACH";
+  /** "Yes" = FEFO was broken (wrong batch, or nothing picked). "No" = the instructed batch was picked (any shelf), or a non-expiry SKU. Shelf/bin mismatch alone is NOT a breach. */
+  fefo_breach: "Yes" | "No";
+  /** Why — shown even when fefo_breach is "No", so shelf mismatches and partial picks stay visible. */
+  reason: AdherenceReason;
+  /** Was any of the instructed batch picked from the instructed bin — for the (later) shelf-level adherence report. */
+  bin_match?: "Yes" | "No";
   /** Every bin/batch this SKU was actually picked from in this gate pass — where the picker really went. */
   picked_bin_batch?: string;
   /** Manufacturer's vendor batch number(s) for whatever was actually picked — distinct from the Uniware batch code. */
   vendor_batch?: string;
+  /** @deprecated pre-Sep-2026 rows only (bin+batch scoring). Use `fefo_breach` + `reason`. */
+  status?: "OK" | "PARTIAL" | "BIN BREACH";
+}
+
+/** Breach flag from a line of either shape — new (`fefo_breach`) or a pre-Sep-2026 row still on `status`. */
+export function lineBreach(line: AdherenceLine): "Yes" | "No" {
+  if (line.fefo_breach) return line.fefo_breach;
+  return line.status === "OK" || line.status === "PARTIAL" ? "No" : "Yes";
+}
+
+/** Reason from a line of either shape. Old `status` maps: OK→match, PARTIAL→partial pick, BIN BREACH→batch mismatch. */
+export function lineReason(line: AdherenceLine): string {
+  if (line.reason) return line.reason;
+  if (line.status === "PARTIAL") return "Partial pick — correct batch";
+  if (line.status === "BIN BREACH") return "Batch mismatch";
+  return "Bin & batch match";
+}
+
+/** Row tint: a breach is "bad"; a partial pick or shelf mismatch is "warn"; otherwise "ok". */
+export function lineTone(line: AdherenceLine): "ok" | "warn" | "bad" {
+  if (lineBreach(line) === "Yes") return "bad";
+  const reason = lineReason(line);
+  if (reason === "Partial pick — correct batch" || reason === "Batch match, bin mismatch") return "warn";
+  return "ok";
 }
 
 export interface GatepassAdherence {

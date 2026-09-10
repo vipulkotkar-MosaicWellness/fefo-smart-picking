@@ -5,11 +5,14 @@
 -- Populated by apps-script/GatepassAdherenceCheck.gs on a daily trigger — it
 -- compares what each gate pass was INSTRUCTED to pick (from this app's own
 -- `tasks` data) against what Uniware's "Gatepass All Facility" export says
--- was actually picked, keyed on gate pass + batch + bin. A line with no
--- matching bin in the actual data means the picker took the SKU from a
--- different bin than instructed — FEFO non-compliance. Over-picking from the
--- correct bin is not penalized (see `lines` breakdown for the per-line
--- reasoning); only under-picking or wrong-bin picking lowers adherence_pct.
+-- was actually picked. Scored on BATCH only: picking the instructed batch
+-- from a different shelf is still FEFO compliance. A line lowers
+-- adherence_pct only when a different batch was picked, nothing was picked,
+-- or the correct batch was short-picked (only the picked units are
+-- credited). Over-picking the correct batch is capped, not rewarded.
+-- Non-expiry SKUs (hardcoded list in the script) always score 100%.
+-- See the script's SCORING RULES header and the `lines` breakdown
+-- (fefo_breach / reason / bin_match per line) for the per-line reasoning.
 
 create table if not exists gatepass_adherence (
   id              bigint generated always as identity primary key,
@@ -19,7 +22,7 @@ create table if not exists gatepass_adherence (
   instructed_qty  integer not null,
   compliant_qty   integer not null,
   adherence_pct   numeric(5,2) not null,
-  lines           jsonb not null,       -- [{sku, bin, batch, instructed_qty, actual_qty, compliant_qty, status}]
+  lines           jsonb not null,       -- [{sku, name, bin, batch, instructed_qty, actual_qty, compliant_qty, fefo_breach, reason, bin_match, picked_bin_batch, vendor_batch}]  (pre-Sep-2026 rows: `status` instead of fefo_breach/reason, until re-scored by backfillAllGatepassAdherence())
   created_at      timestamptz not null default now(),
   unique (gatepass_code, report_date)
 );
