@@ -147,6 +147,53 @@ function backfillGatepassAdherenceDate(reportDate) {
   return gpaScoreDates_(ctx, [reportDate]);
 }
 
+/**
+ * Diagnostic — tallies every line in `gatepass_adherence` by `reason`, so
+ * you can see the actual mix (bin & batch match / shelf mismatch / partial
+ * / wrong batch / not picked / non-expiry) instead of just the headline %.
+ * Useful right after a backfill to sanity-check the new scoring is doing
+ * what's expected — in particular, that "Batch match, bin mismatch" is a
+ * real, non-trivial bucket (that's the shelf-only carve-out actually firing).
+ * Pass a report_date to scope to one day, or omit for everything scored.
+ */
+function diagAdherenceReasonBreakdown(reportDate) {
+  var props = PropertiesService.getScriptProperties();
+  var url = (props.getProperty('SUPABASE_URL') || '').trim().replace(/\/+$/, '');
+  var key = (props.getProperty('SERVICE_KEY') || '').trim();
+  var path = '/rest/v1/gatepass_adherence?select=report_date,lines' + (reportDate ? '&report_date=eq.' + reportDate : '');
+  var rows = [];
+  var offset = 0, pageSize = 1000;
+  while (true) {
+    var resp = gpaSupa_(url, key, 'GET', path, null, { Range: offset + '-' + (offset + pageSize - 1) });
+    if (resp.getResponseCode() >= 300) throw new Error('Fetch failed ' + resp.getResponseCode() + ': ' + resp.getContentText());
+    var page = JSON.parse(resp.getContentText());
+    rows = rows.concat(page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  var byReason = {}; // reason -> {lines, instructed, compliant}
+  var oldShapeLines = 0, newShapeLines = 0;
+  rows.forEach(function (r) {
+    (r.lines || []).forEach(function (l) {
+      var isNewShape = !!l.reason;
+      if (isNewShape) newShapeLines++; else oldShapeLines++;
+      var reason = isNewShape ? l.reason : (l.status === 'OK' ? 'Bin & batch match (old-shape row)' : l.status === 'PARTIAL' ? 'Partial pick (old-shape row)' : 'Batch/bin mismatch (old-shape row)');
+      var b = byReason[reason] || (byReason[reason] = { lines: 0, instructed: 0, compliant: 0 });
+      b.lines++;
+      b.instructed += l.instructed_qty || 0;
+      b.compliant += l.compliant_qty || 0;
+    });
+  });
+
+  var summary = Object.keys(byReason).sort(function (a, b) { return byReason[b].instructed - byReason[a].instructed; }).map(function (reason) {
+    var b = byReason[reason];
+    return reason + ': ' + b.lines + ' lines, ' + b.instructed + ' instructed units, ' + b.compliant + ' compliant units';
+  });
+  Logger.log('Rows: ' + rows.length + ' (' + newShapeLines + ' lines new-shape, ' + oldShapeLines + ' lines old-shape)\n' + summary.join('\n'));
+  return { rowCount: rows.length, newShapeLines: newShapeLines, oldShapeLines: oldShapeLines, byReason: byReason };
+}
+
 // ── Load-once context (export CSV + tasks) ────────────────────────────
 
 function gpaLoadContext_() {
