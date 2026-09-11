@@ -672,7 +672,63 @@ function cleanupDuplicatePerformanceFlags() {
   return { ok: true, dupGroups: dupGroups, flipped: toFlip.length };
 }
 
-/** Pages through every column needed to re-upsert a row (for cleanupDuplicatePerformanceFlags). */
+/**
+ * Repairs a stale (old-shape) anchor row by borrowing the scored data from
+ * a SIBLING row of the same gate pass that HAS already been rescored with
+ * the new batch-only engine — needed because an anchor's own date can fall
+ * out of what's currently exportable (Uniware's export reflects a rolling
+ * window, not a permanent ledger), even when a later touch's data is still
+ * fetchable and simply re-scores it fine.
+ *
+ * Safe because the physical pick doesn't change between a gate pass's
+ * touches — same batch/bin/qty either way (verified earlier: ~97% of
+ * duplicate touch-pairs have byte-identical instructed/compliant figures).
+ * The anchor's own report_date and used_for_performance stay exactly as
+ * they are — only lines/instructed_qty/compliant_qty/adherence_pct get
+ * replaced with the sibling's already-correct values. Run this AFTER
+ * cleanupDuplicatePerformanceFlags and any backfill; safe to re-run.
+ */
+function repairStaleAnchorsFromSiblings() {
+  var props = PropertiesService.getScriptProperties();
+  var url = (props.getProperty('SUPABASE_URL') || '').trim().replace(/\/+$/, '');
+  var key = (props.getProperty('SERVICE_KEY') || '').trim();
+  if (!url || !key) throw new Error('Set SUPABASE_URL and SERVICE_KEY in Script Properties.');
+
+  var all = gpaFetchAllAdherenceRows_(url, key);
+  var byGp = {};
+  all.forEach(function (r) { (byGp[r.gatepass_code] = byGp[r.gatepass_code] || []).push(r); });
+
+  var toRepair = [];
+  var unrecoverable = [];
+  Object.keys(byGp).forEach(function (gp) {
+    var list = byGp[gp];
+    var anchor = list.filter(function (r) { return r.used_for_performance; })[0];
+    if (!anchor) return;
+    var isOld = anchor.lines.length > 0 && !anchor.lines[0].reason;
+    if (!isOld) return;
+    var sibling = list.filter(function (r) { return !r.used_for_performance && r.lines.length > 0 && r.lines[0].reason; })[0];
+    if (!sibling) { unrecoverable.push(gp); return; }
+    toRepair.push({
+      gatepass_code: anchor.gatepass_code, facility: anchor.facility, report_date: anchor.report_date,
+      instructed_qty: sibling.instructed_qty, compliant_qty: sibling.compliant_qty, adherence_pct: sibling.adherence_pct,
+      lines: sibling.lines, used_for_performance: true,
+    });
+  });
+
+  Logger.log(toRepair.length + ' stale anchor(s) repaired from a rescored sibling. '
+    + unrecoverable.length + ' genuinely unrecoverable (no rescored sibling exists yet): ' + unrecoverable.join(', '));
+  if (!toRepair.length) return { ok: true, repaired: 0, unrecoverable: unrecoverable };
+
+  for (var b = 0; b < toRepair.length; b += 500) {
+    var resp = gpaSupa_(url, key, 'POST', '/rest/v1/gatepass_adherence?on_conflict=gatepass_code,report_date',
+      toRepair.slice(b, b + 500), { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    if (resp.getResponseCode() >= 300) throw new Error('Repair failed ' + resp.getResponseCode() + ': ' + resp.getContentText());
+  }
+  Logger.log('Done — repaired ' + toRepair.length + ' stale anchor(s).');
+  return { ok: true, repaired: toRepair.length, unrecoverable: unrecoverable };
+}
+
+/** Pages through every column needed to re-upsert a row (for cleanupDuplicatePerformanceFlags and repairStaleAnchorsFromSiblings). */
 function gpaFetchAllAdherenceRows_(url, key) {
   var out = [];
   var offset = 0, pageSize = 1000;
