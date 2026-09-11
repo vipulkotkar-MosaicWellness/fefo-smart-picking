@@ -673,20 +673,30 @@ function cleanupDuplicatePerformanceFlags() {
 }
 
 /**
- * Repairs a stale (old-shape) anchor row by borrowing the scored data from
- * a SIBLING row of the same gate pass that HAS already been rescored with
- * the new batch-only engine — needed because an anchor's own date can fall
- * out of what's currently exportable (Uniware's export reflects a rolling
- * window, not a permanent ledger), even when a later touch's data is still
- * fetchable and simply re-scores it fine.
+ * Repairs a stale (old-shape) anchor row two ways, in order:
  *
- * Safe because the physical pick doesn't change between a gate pass's
- * touches — same batch/bin/qty either way (verified earlier: ~97% of
- * duplicate touch-pairs have byte-identical instructed/compliant figures).
- * The anchor's own report_date and used_for_performance stay exactly as
- * they are — only lines/instructed_qty/compliant_qty/adherence_pct get
- * replaced with the sibling's already-correct values. Run this AFTER
- * cleanupDuplicatePerformanceFlags and any backfill; safe to re-run.
+ * 1. Borrow from a SIBLING row of the same gate pass that HAS already been
+ *    rescored with the new batch-only engine — needed because an anchor's
+ *    own date can fall out of what's currently exportable (Uniware's
+ *    export reflects a rolling window, not a permanent ledger), even when
+ *    a later touch's data is still fetchable and simply re-scores it fine.
+ *    Safe because the physical pick doesn't change between a gate pass's
+ *    touches — same batch/bin/qty either way (verified earlier: ~97% of
+ *    duplicate touch-pairs have byte-identical instructed/compliant
+ *    figures). The anchor's own report_date and used_for_performance stay
+ *    exactly as they are — only lines/instructed_qty/compliant_qty/
+ *    adherence_pct get replaced with the sibling's already-correct values.
+ *
+ * 2. For anchors with NO rescorable sibling at all: patch just their
+ *    non-expiry-SKU lines in place, using nothing but GPA_NON_EXPIRY_SKUS
+ *    — no export data needed, since that rule never depended on what was
+ *    actually picked. Every other line on that row is left exactly as it
+ *    was (old rules) — this only ever raises compliant_qty, never lowers
+ *    it, and the row stays old-shape for its non-non-expiry lines because
+ *    there's genuinely no way to know what was picked for them anymore.
+ *
+ * Run this AFTER cleanupDuplicatePerformanceFlags and any backfill; safe
+ * to re-run any time (a no-op once nothing's left to fix either way).
  */
 function repairStaleAnchorsFromSiblings() {
   var props = PropertiesService.getScriptProperties();
@@ -699,33 +709,62 @@ function repairStaleAnchorsFromSiblings() {
   all.forEach(function (r) { (byGp[r.gatepass_code] = byGp[r.gatepass_code] || []).push(r); });
 
   var toRepair = [];
-  var unrecoverable = [];
+  var toPartiallyPatch = [];
+  var stillUnrecoverable = [];
   Object.keys(byGp).forEach(function (gp) {
     var list = byGp[gp];
     var anchor = list.filter(function (r) { return r.used_for_performance; })[0];
     if (!anchor) return;
     var isOld = anchor.lines.length > 0 && !anchor.lines[0].reason;
     if (!isOld) return;
+
     var sibling = list.filter(function (r) { return !r.used_for_performance && r.lines.length > 0 && r.lines[0].reason; })[0];
-    if (!sibling) { unrecoverable.push(gp); return; }
-    toRepair.push({
+    if (sibling) {
+      toRepair.push({
+        gatepass_code: anchor.gatepass_code, facility: anchor.facility, report_date: anchor.report_date,
+        instructed_qty: sibling.instructed_qty, compliant_qty: sibling.compliant_qty, adherence_pct: sibling.adherence_pct,
+        lines: sibling.lines, used_for_performance: true,
+      });
+      return;
+    }
+
+    // No sibling — the SKU code (and so GPA_NON_EXPIRY_SKUS membership) is
+    // already sitting right there in the old-shape line, no export needed.
+    var patched = false;
+    var newInstructedTotal = 0, newCompliantTotal = 0;
+    var newLines = anchor.lines.map(function (l) {
+      newInstructedTotal += l.instructed_qty;
+      if (GPA_NON_EXPIRY_SET[l.sku] === true && l.compliant_qty !== l.instructed_qty) {
+        patched = true;
+        newCompliantTotal += l.instructed_qty;
+        return Object.assign({}, l, { compliant_qty: l.instructed_qty, fefo_breach: 'No', reason: 'Non-expiry SKU' });
+      }
+      newCompliantTotal += l.compliant_qty;
+      return l;
+    });
+    if (!patched) { stillUnrecoverable.push(gp); return; }
+    toPartiallyPatch.push({
       gatepass_code: anchor.gatepass_code, facility: anchor.facility, report_date: anchor.report_date,
-      instructed_qty: sibling.instructed_qty, compliant_qty: sibling.compliant_qty, adherence_pct: sibling.adherence_pct,
-      lines: sibling.lines, used_for_performance: true,
+      instructed_qty: newInstructedTotal, compliant_qty: newCompliantTotal,
+      adherence_pct: newInstructedTotal > 0 ? Math.round((newCompliantTotal / newInstructedTotal) * 10000) / 100 : 0,
+      lines: newLines, used_for_performance: true,
     });
   });
 
   Logger.log(toRepair.length + ' stale anchor(s) repaired from a rescored sibling. '
-    + unrecoverable.length + ' genuinely unrecoverable (no rescored sibling exists yet): ' + unrecoverable.join(', '));
-  if (!toRepair.length) return { ok: true, repaired: 0, unrecoverable: unrecoverable };
+    + toPartiallyPatch.length + ' more partially patched (non-expiry SKU lines only, no sibling available). '
+    + stillUnrecoverable.length + ' still genuinely unrecoverable: ' + stillUnrecoverable.join(', '));
 
-  for (var b = 0; b < toRepair.length; b += 500) {
+  var toWrite = toRepair.concat(toPartiallyPatch);
+  if (!toWrite.length) return { ok: true, repaired: 0, partiallyPatched: 0, unrecoverable: stillUnrecoverable };
+
+  for (var b = 0; b < toWrite.length; b += 500) {
     var resp = gpaSupa_(url, key, 'POST', '/rest/v1/gatepass_adherence?on_conflict=gatepass_code,report_date',
-      toRepair.slice(b, b + 500), { Prefer: 'resolution=merge-duplicates,return=minimal' });
+      toWrite.slice(b, b + 500), { Prefer: 'resolution=merge-duplicates,return=minimal' });
     if (resp.getResponseCode() >= 300) throw new Error('Repair failed ' + resp.getResponseCode() + ': ' + resp.getContentText());
   }
-  Logger.log('Done — repaired ' + toRepair.length + ' stale anchor(s).');
-  return { ok: true, repaired: toRepair.length, unrecoverable: unrecoverable };
+  Logger.log('Done — repaired ' + toRepair.length + ', partially patched ' + toPartiallyPatch.length + '.');
+  return { ok: true, repaired: toRepair.length, partiallyPatched: toPartiallyPatch.length, unrecoverable: stillUnrecoverable };
 }
 
 /** Pages through every column needed to re-upsert a row (for cleanupDuplicatePerformanceFlags and repairStaleAnchorsFromSiblings). */
