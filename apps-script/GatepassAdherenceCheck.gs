@@ -68,7 +68,8 @@
  */
 
 var GPA_TARGET_FACILITIES = ['SL Mother Hub', 'SL Ambient', 'SL RX'];
-var GPA_EMAIL_QUERY = 'subject:"Export Job Complete - Gatepass All Facility" newer_than:2d';
+var GPA_EMAIL_QUERY_BASE = 'subject:"Export Job Complete - Gatepass All Facility"';
+var GPA_EMAIL_QUERY = GPA_EMAIL_QUERY_BASE + ' newer_than:2d';
 // CLOSED = fully done. RETURN_AWAITED = the pick itself is done and the item
 // is in transit, only the destination-side return confirmation is pending —
 // still a completed pick as far as FEFO adherence is concerned. CREATED is
@@ -210,9 +211,18 @@ function gpaLoadContext_() {
   if (!m) { Logger.log('No CSV link in email.'); return { error: { ok: true, status: 'no_csv_link' } }; }
 
   var fetchRes = UrlFetchApp.fetch(m[0], { muteHttpExceptions: true });
-  var rows = Utilities.parseCsv(fetchRes.getContentText());
-  if (!rows.length) { Logger.log('Empty CSV (HTTP ' + fetchRes.getResponseCode() + ').'); return { error: { ok: true, status: 'empty_csv' } }; }
+  var parsed = gpaParseCsvText_(fetchRes.getContentText());
+  if (!parsed) { Logger.log('Empty CSV (HTTP ' + fetchRes.getResponseCode() + ').'); return { error: { ok: true, status: 'empty_csv' } }; }
 
+  var tasks = gpaFetchAllTasks_(url, key);
+  Logger.log('Loaded ' + (parsed.rows.length - 1) + ' export rows, ' + tasks.length + ' tasks.');
+  return { url: url, key: key, csvRows: parsed.rows, col: parsed.col, tasks: tasks };
+}
+
+/** Parses one export CSV's text into {rows, col} — shared by gpaLoadContext_ and the archive backfill below. */
+function gpaParseCsvText_(text) {
+  var rows = Utilities.parseCsv(text);
+  if (!rows.length) return null;
   var header = rows[0];
   var col = {};
   ['Gatepass Code', 'Item SkuCode', 'Shelf', 'Quantity', 'Uniware Batch Code', 'Vendor Batch No', 'Gatepass Item Status', 'From Party', 'Gatepass Updated At'].forEach(function (name) {
@@ -220,10 +230,74 @@ function gpaLoadContext_() {
     if (pos < 0) throw new Error('Expected column "' + name + '" not found in gatepass export header.');
     col[name] = pos;
   });
+  return { rows: rows, col: col };
+}
+
+/**
+ * Re-scores dates the LATEST export can't reach — its CSV only carries a
+ * rolling window of recent history, so a date backfillAllGatepassAdherence()
+ * reports as "noData" has simply aged out of it. This instead fetches the
+ * archived export email closest to (on or shortly after) each date — one
+ * gets sent daily, so there's usually one sitting in Gmail from right
+ * around any past date — and scores from THAT CSV instead.
+ *
+ * Pass an array of 'yyyy-MM-dd' strings, e.g.:
+ *   backfillGatepassAdherenceFromArchive(['2026-08-20','2026-08-23'])
+ */
+function backfillGatepassAdherenceFromArchive(reportDates) {
+  var props = PropertiesService.getScriptProperties();
+  var url = (props.getProperty('SUPABASE_URL') || '').trim().replace(/\/+$/, '');
+  var key = (props.getProperty('SERVICE_KEY') || '').trim();
+  if (!url || !key) throw new Error('Set SUPABASE_URL and SERVICE_KEY in Script Properties.');
 
   var tasks = gpaFetchAllTasks_(url, key);
-  Logger.log('Loaded ' + (rows.length - 1) + ' export rows, ' + tasks.length + ' tasks.');
-  return { url: url, key: key, csvRows: rows, col: col, tasks: tasks };
+  var results = {};
+  reportDates.forEach(function (reportDate) {
+    var found = gpaFindArchivedCsv_(reportDate);
+    if (!found) { results[reportDate] = { ok: false, status: 'no_export_email_found_nearby' }; Logger.log(reportDate + ': no export email found nearby — skipped.'); return; }
+    var parsed = gpaParseCsvText_(found.csvText);
+    if (!parsed) { results[reportDate] = { ok: false, status: 'empty_csv' }; Logger.log(reportDate + ': found an export (dated ' + found.usedMessageDate + ') but its CSV was empty.'); return; }
+    var ctx = { url: url, key: key, csvRows: parsed.rows, col: parsed.col, tasks: tasks };
+    var res = gpaScoreDates_(ctx, [reportDate]);
+    results[reportDate] = res.perDate[reportDate];
+    Logger.log(reportDate + ' (from export dated ' + found.usedMessageDate + '): ' + JSON.stringify(results[reportDate]));
+  });
+  return results;
+}
+
+/** The 6 dates backfillAllGatepassAdherence() couldn't reach on 2026-09-11 — convenience wrapper, no args needed from the Run dropdown. */
+function backfillTheSixMissingDates() {
+  return backfillGatepassAdherenceFromArchive(['2026-08-20', '2026-08-23', '2026-08-24', '2026-08-25', '2026-08-30', '2026-09-02']);
+}
+
+/**
+ * Finds the export email generated soonest ON OR AFTER reportDate (within a
+ * few days) and downloads its CSV. Picking the EARLIEST available export
+ * after the date — rather than the latest overall — maximizes the chance
+ * that date is still inside that export's own lookback window.
+ */
+function gpaFindArchivedCsv_(reportDate) {
+  var start = new Date(reportDate + 'T00:00:00Z');
+  var searchEnd = new Date(start.getTime() + 4 * 24 * 60 * 60 * 1000);
+  var query = GPA_EMAIL_QUERY_BASE
+    + ' after:' + Utilities.formatDate(start, 'UTC', 'yyyy/MM/dd')
+    + ' before:' + Utilities.formatDate(searchEnd, 'UTC', 'yyyy/MM/dd');
+  var threads = GmailApp.search(query, 0, 15);
+  var candidates = [];
+  threads.forEach(function (t) {
+    t.getMessages().forEach(function (m) {
+      if (m.getDate().getTime() >= start.getTime()) candidates.push(m);
+    });
+  });
+  if (!candidates.length) return null;
+  candidates.sort(function (a, b) { return a.getDate().getTime() - b.getDate().getTime(); });
+  var msg = candidates[0];
+  var body = msg.getPlainBody();
+  var m2 = body.match(/https?:\/\/\S+?\.csv/i);
+  if (!m2) return null;
+  var res = UrlFetchApp.fetch(m2[0], { muteHttpExceptions: true });
+  if (res.getResponseCode() >= 300) return null;
+  return { csvText: res.getContentText(), usedMessageDate: msg.getDate() };
 }
 
 // ── Scoring ──────────────────────────────────────────────────────────
