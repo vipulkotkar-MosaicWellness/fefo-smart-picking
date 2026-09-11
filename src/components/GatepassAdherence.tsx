@@ -88,6 +88,11 @@ function pctTone(pct: number): "ok" | "warn" | "bad" {
   return "bad";
 }
 
+/** Whole-number percentage for display — the underlying figures (adherence_pct, etc.) carry 2 decimals for calculation, but reading a whole number is faster than reading "77.51%". */
+function pctDisplay(pct: number): string {
+  return `${Math.round(pct)}%`;
+}
+
 /** Facility with the highest adherence % that day — the "(SL Hub)"-style detail under Best/Worst day. */
 function topFacility(day: DaySummary): string | null {
   const byFac = new Map<string, { instr: number; comp: number }>();
@@ -209,7 +214,7 @@ function TrendChart({ days, selectedDate, onSelectDate }: { days: DaySummary[]; 
                 {isSelected && <rect x={barX - 2} y={y - 2} width={barW + 4} height={barH + 2} rx={4} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-teal-700 dark:text-teal-300" />}
                 {/* Value at the tip — text token colour, never the bar's own hue, so it stays legible over any status colour. */}
                 <text x={slotX + slot / 2} y={y - 6} textAnchor="middle" fontSize="11" fontWeight={700} fill="currentColor" opacity={isHovered || isSelected ? 1 : 0.85}>
-                  {d.pct}%
+                  {pctDisplay(d.pct)}
                 </text>
                 <text x={slotX + slot / 2} y={h - 9} textAnchor="middle" fontSize="11" fill="currentColor" opacity={isHovered || isSelected ? 0.95 : 0.6} fontWeight={isSelected ? 700 : 400}>
                   {shortDateLabel(d.date)}
@@ -223,7 +228,7 @@ function TrendChart({ days, selectedDate, onSelectDate }: { days: DaySummary[]; 
                   fill="transparent"
                   tabIndex={0}
                   role="button"
-                  aria-label={`${d.date}: ${d.pct}% adherence, ${d.gatepassCount} gate pass${d.gatepassCount === 1 ? "" : "es"}, ${d.compliantQty.toLocaleString()} of ${d.instructedQty.toLocaleString()} units compliant`}
+                  aria-label={`${d.date}: ${pctDisplay(d.pct)} adherence, ${d.gatepassCount} gate pass${d.gatepassCount === 1 ? "" : "es"}, ${d.compliantQty.toLocaleString()} of ${d.instructedQty.toLocaleString()} units compliant`}
                   className="cursor-pointer outline-none"
                   onMouseEnter={() => setHovered(d)}
                   onMouseLeave={() => setHovered((cur) => (cur?.date === d.date ? null : cur))}
@@ -243,7 +248,7 @@ function TrendChart({ days, selectedDate, onSelectDate }: { days: DaySummary[]; 
             className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm shadow-lg dark:border-slate-600 dark:bg-slate-800"
             style={{ left: padL + slot * (days.findIndex((d) => d.date === hovered.date) + 0.5), top: padT + chartH - (hovered.pct / 100) * chartH - 8 }}
           >
-            <p className="font-bold text-slate-800 dark:text-slate-100">{hovered.pct}% adherence</p>
+            <p className="font-bold text-slate-800 dark:text-slate-100">{pctDisplay(hovered.pct)} adherence</p>
             <p className="text-[var(--fefo-muted)] dark:text-slate-400">{hovered.date}</p>
             <p className="text-[var(--fefo-muted)] dark:text-slate-400">
               {hovered.compliantQty.toLocaleString()} / {hovered.instructedQty.toLocaleString()} units · {hovered.gatepassCount} gate pass{hovered.gatepassCount === 1 ? "" : "es"}
@@ -348,13 +353,13 @@ export function GatepassAdherence() {
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        <StatCard icon="%" tone={pctTone(overallPct)} label="Overall adherence" value={`${overallPct}%`} sub={`${totalCompliant.toLocaleString()} / ${totalInstructed.toLocaleString()} units`} />
+        <StatCard icon="%" tone={pctTone(overallPct)} label="Overall adherence" value={pctDisplay(overallPct)} sub={`${totalCompliant.toLocaleString()} / ${totalInstructed.toLocaleString()} units`} />
         <StatCard icon="Σ" tone="info" label="Gate passes audited" value={String(rows.length)} sub={`across ${days.length} day${days.length === 1 ? "" : "s"}`} />
-        <StatCard icon="↑" tone="ok" label="Best day" value={shortDateLabel(bestDay.date)} sub={`${bestDay.pct}%${bestDayFacility ? ` · ${bestDayFacility}` : ""}`} />
-        <StatCard icon="↓" tone="bad" label="Worst day" value={shortDateLabel(worstDay.date)} sub={`${worstDay.pct}%${worstDayReason ? ` · ${worstDayReason}` : ""}`} />
+        <StatCard icon="↑" tone="ok" label="Best day" value={shortDateLabel(bestDay.date)} sub={`${pctDisplay(bestDay.pct)}${bestDayFacility ? ` · ${bestDayFacility}` : ""}`} />
+        <StatCard icon="↓" tone="bad" label="Worst day" value={shortDateLabel(worstDay.date)} sub={`${pctDisplay(worstDay.pct)}${worstDayReason ? ` · ${worstDayReason}` : ""}`} />
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[3fr_2fr]">
+      <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
         <div id="gpa-daily-log">
           <div className="mb-1.5 flex items-center justify-between">
             <p className="text-sm font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Daily log breakdown</p>
@@ -390,7 +395,7 @@ export function GatepassAdherence() {
                   <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{d.instructedQty.toLocaleString()}</td>
                   <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{d.compliantQty.toLocaleString()}</td>
                   <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">
-                    <Tag tone={pctTone(d.pct)}>{d.pct}%</Tag>
+                    <Tag tone={pctTone(d.pct)}>{pctDisplay(d.pct)}</Tag>
                   </td>
                 </tr>
               ))}
@@ -400,7 +405,7 @@ export function GatepassAdherence() {
                 <td className="p-2 text-right">{totalInstructed.toLocaleString()}</td>
                 <td className="p-2 text-right">{totalCompliant.toLocaleString()}</td>
                 <td className="p-2 text-right">
-                  <Tag tone={pctTone(overallPct)}>{overallPct}%</Tag>
+                  <Tag tone={pctTone(overallPct)}>{pctDisplay(overallPct)}</Tag>
                 </td>
               </tr>
             </tbody>
@@ -463,7 +468,7 @@ export function GatepassAdherence() {
                     <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{r.instructed_qty.toLocaleString()}</td>
                     <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{r.compliant_qty.toLocaleString()}</td>
                     <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">
-                      <Tag tone={pctTone(r.adherence_pct)}>{r.adherence_pct}%</Tag>
+                      <Tag tone={pctTone(r.adherence_pct)}>{pctDisplay(r.adherence_pct)}</Tag>
                     </td>
                   </tr>
                 ))}
