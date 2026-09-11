@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "../lib/authStore";
 import { BUCKET_LABELS, type ChannelBucket } from "../lib/channels";
-import { dueForAutoComplete, useStore } from "../lib/store";
+import { dueForAutoComplete, oneTimeCloseCutoffMs, useStore } from "../lib/store";
 import { Button, Card } from "./Ui";
 
 export function AdminConfig() {
@@ -105,13 +105,17 @@ export function AdminConfig() {
     logAudit(myName, `Deleted channel ${name}`);
   }
 
-  const dueForCleanup = dueForAutoComplete(tasks, new Date(cutoffDate + "T23:59:59.999").getTime());
+  // oneTimeCloseCutoffMs clamps the chosen date so it never reaches less
+  // than a day back, regardless of what's picked — see its own doc comment.
+  // Computed the same way here as inside closeAgedWmsBlockedPicklists, so
+  // this preview count is exactly what will actually close, never more.
+  const dueForCleanup = dueForAutoComplete(tasks, oneTimeCloseCutoffMs(cutoffDate));
 
   async function runCleanup() {
     if (dueForCleanup.length === 0) return;
     if (
       !window.confirm(
-        `Close ${dueForCleanup.length} aged WMS-blocked picklist(s) created on or before ${cutoffDate} at 100% picked? Any lines a picker already resolved are left as-is — only untouched lines get backfilled to fully picked. This can't be undone from here.`,
+        `Close ${dueForCleanup.length} aged WMS-blocked picklist(s) created on or before ${cutoffDate} (and at least 24h old) at 100% picked? Any lines a picker already resolved are left as-is — only untouched lines get backfilled to fully picked. This can't be undone from here.`,
       )
     ) {
       return;
@@ -358,6 +362,10 @@ export function AdminConfig() {
                   {closing ? "Closing…" : `Close ${dueForCleanup.length || ""} picklist(s)`}
                 </Button>
               </div>
+              <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                Never touches anything created less than 24h ago, even if it falls on or before the date above — a
+                picklist that young (a fresh round-2 re-offer, say) hasn't had a fair chance to be picked yet.
+              </p>
             </div>
 
             <div>

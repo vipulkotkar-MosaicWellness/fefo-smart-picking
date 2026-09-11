@@ -170,6 +170,35 @@ export function facilityDone(f: FacilityPicklist): boolean {
 export const WMS_BLOCK_DELAY_MS = 15 * 60 * 1000;
 
 /**
+ * Safety floor for closeAgedWmsBlockedPicklists (the one-time, admin-picked-
+ * cutoff-DATE cleanup) — it never force-completes anything created less than
+ * this long ago, no matter what cutoff date was chosen. Without this, the
+ * natural choice of "today" as a cutoff (meaning to sweep up old backlog)
+ * silently also catches a picklist — including a fresh round-2 re-offer,
+ * which inherits its facility's gate pass and can become WMS-blocked within
+ * WMS_BLOCK_DELAY_MS — created minutes earlier, before a supervisor ever got
+ * the chance to assign it. Real incident: GPSLMH10328's round 2, created
+ * 2026-09-10, force-completed 2026-09-11 with every line backfilled to
+ * "fully picked" and no picker ever recorded. The recurring day-based timer
+ * (checkPicklistAutoComplete, gated on autoCompleteAfterDays) doesn't need
+ * this — its own cutoff is already at least a day out by construction.
+ */
+export const ONE_TIME_CLOSE_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Effective cutoff timestamp for the one-time cleanup above — the admin's
+ * chosen calendar date, clamped so it's never more recent than
+ * ONE_TIME_CLOSE_MIN_AGE_MS ago. Exported so AdminConfig's live preview count
+ * (shown before the admin confirms) uses the exact same cutoff the actual
+ * close action will use — otherwise the preview could promise more than the
+ * floor actually allows it to close.
+ */
+export function oneTimeCloseCutoffMs(cutoffDate: string): number {
+  const chosenCutoffMs = new Date(cutoffDate + "T23:59:59.999").getTime();
+  return Math.min(chosenCutoffMs, Date.now() - ONE_TIME_CLOSE_MIN_AGE_MS);
+}
+
+/**
  * Every assignment action (assignAll/assignLine/uploadAssignments) calls this
  * on the facility it touches. assignedAt is stamped once, on the FIRST
  * assignment only — purely for the time-motion record (Created → Assigned →
@@ -1658,8 +1687,7 @@ export const useStore = create<AppState>()(
       // Promise.all: each applyPicks() reads/writes the same tasks/stock
       // state, so awaiting one at a time keeps that authoritative.
       closeAgedWmsBlockedPicklists: async (cutoffDate, actorName) => {
-        const cutoffMs = new Date(cutoffDate + "T23:59:59.999").getTime();
-        const due = dueForAutoComplete(get().tasks, cutoffMs);
+        const due = dueForAutoComplete(get().tasks, oneTimeCloseCutoffMs(cutoffDate));
         if (due.length === 0) return 0;
         for (const f of due) {
           const results: Record<number, number> = {};
