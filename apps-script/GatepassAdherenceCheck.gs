@@ -149,6 +149,27 @@ function backfillGatepassAdherenceDate(reportDate) {
 }
 
 /**
+ * Re-scores ONLY the given dates from the current latest export — same
+ * "latest export" data source as checkGatepassAdherence()/
+ * backfillAllGatepassAdherence(), just scoped to a specific list instead of
+ * every date in the table. Use this to pick up dates a fuller re-export
+ * now covers, without re-touching (or re-risking a timeout across) every
+ * other already-correctly-scored date.
+ */
+function backfillSpecificDatesFromLatestExport(reportDates) {
+  var ctx = gpaLoadContext_();
+  if (ctx.error) return ctx.error;
+  var res = gpaScoreDates_(ctx, reportDates);
+  Logger.log(JSON.stringify(res.perDate, null, 2));
+  return res;
+}
+
+/** The 6 dates that needed a fresh Uniware re-export — convenience wrapper, no args needed from the Run dropdown. */
+function backfillTheSixMissingDatesFromLatestExport() {
+  return backfillSpecificDatesFromLatestExport(['2026-08-20', '2026-08-23', '2026-08-24', '2026-08-25', '2026-08-30', '2026-09-02']);
+}
+
+/**
  * Diagnostic — tallies every line in `gatepass_adherence` by `reason`, so
  * you can see the actual mix (bin & batch match / shelf mismatch / partial
  * / wrong batch / not picked / non-expiry) instead of just the headline %.
