@@ -61,6 +61,16 @@ export interface GatepassAdherence {
   compliant_qty: number;
   adherence_pct: number;
   lines: AdherenceLine[];
+  /**
+   * A gate pass can be touched more than once in Uniware (RETURN_AWAITED
+   * when picking finishes, CLOSED later when the receipt is reviewed) —
+   * every touch gets its own row for a full audit trail, but only the
+   * EARLIEST is used_for_performance = true. fetchGatepassAdherence()
+   * below already filters to true-only, so every screen reading through it
+   * sees each gate pass exactly once; this field exists mainly so a future
+   * "show all touches" audit view has something to filter on.
+   */
+  used_for_performance?: boolean;
 }
 
 export interface LatestDayAdherence {
@@ -97,6 +107,7 @@ export async function fetchGatepassAdherence(days = 30): Promise<GatepassAdheren
   const { data, error } = await supabase
     .from("gatepass_adherence")
     .select("gatepass_code,facility,report_date,instructed_qty,compliant_qty,adherence_pct,lines")
+    .eq("used_for_performance", true)
     .gte("report_date", sinceIso)
     .order("report_date", { ascending: false })
     .order("adherence_pct", { ascending: true });

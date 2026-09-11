@@ -69,6 +69,22 @@ toys, innerwear, manuals) always score 100%. Each line carries `fefo_breach` (Ye
 **`backfillAllGatepassAdherence`** → **Run**. It re-scores every date already in the table from
 the current export email in one pass. Check the log for the new overall %.
 
+**Counted once, never twice:** a gate pass gets touched more than once in Uniware — marked
+RETURN_AWAITED when picking finishes and the invoice is ready, then again later when the
+receiving side reviews the receipt and it's marked CLOSED. Every touch still gets its own row
+(nothing is ever deleted — full audit trail), but only the **earliest** touch counts toward
+performance (`used_for_performance = true`); every later touch is saved but excluded from every
+%, chart, and the email. One-time setup, in order:
+
+1. Run [`../supabase/add_used_for_performance_column.sql`](../supabase/add_used_for_performance_column.sql)
+   in the Supabase SQL Editor.
+2. Update `GatepassAdherenceCheck.gs` in the Apps Script editor with the latest version.
+3. Select **`cleanupDuplicatePerformanceFlags`** → **Run**. Fixes every gate pass that already
+   has more than one row from before this existed — check the log for how many it corrected.
+
+After that, every future run (`checkGatepassAdherence`, any of the backfill functions) keeps this
+correct automatically — no further action needed.
+
 ---
 
 ## Step 6 — Daily Ops Digest email (daily, unattended, zero AI cost)
