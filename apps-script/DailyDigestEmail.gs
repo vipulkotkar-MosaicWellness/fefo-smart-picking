@@ -83,8 +83,11 @@ function ddRun_(forceTestOnly) {
   var yesterdayIso = ddIsoDaysAgo_(now, 1);
   var trendStartIso = ddIsoDaysAgo_(now, DD_TREND_DAYS);
 
+  // used_for_performance=eq.true — a gate pass can be touched more than
+  // once in Uniware (RETURN_AWAITED, then CLOSED later); only its earliest
+  // touch counts, everything else is excluded so it's never counted twice.
   var gpaRows = ddFetchAll_(SUPABASE_URL, SERVICE_KEY,
-    '/rest/v1/gatepass_adherence?select=report_date,facility,gatepass_code,instructed_qty,compliant_qty,lines&report_date=gte.' + trendStartIso);
+    '/rest/v1/gatepass_adherence?select=report_date,facility,gatepass_code,instructed_qty,compliant_qty,lines&used_for_performance=eq.true&report_date=gte.' + trendStartIso);
   var trend = ddBuildTrend_(gpaRows);
   var breach = ddBuildBreach_(gpaRows, yesterdayIso);
 

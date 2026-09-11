@@ -15,9 +15,25 @@
  *      here — picking the right batch from a different shelf is still FEFO
  *      compliance (that's the whole point of FEFO: the earliest-expiry
  *      batch went out). See "SCORING RULES" below for the exact logic.
- *   4. Writes one row per gate pass into `gatepass_adherence` (see
- *      ../supabase/add_gatepass_adherence_table.sql) — the app's Reports
- *      screen reads straight from that table.
+ *   4. Writes one row per gate pass PER TOUCH into `gatepass_adherence`
+ *      (see ../supabase/add_gatepass_adherence_table.sql) — but a gate pass
+ *      only counts toward performance ONCE. See "COUNTED ONCE" below.
+ *
+ * ── COUNTED ONCE, NEVER TWICE ────────────────────────────────────────────
+ *   A gate pass gets touched more than once in Uniware: marked
+ *   RETURN_AWAITED when the invoice is generated (ready for dispatch —
+ *   this is the moment the FEFO decision was actually made), then again
+ *   later when the receiving side reviews the receipt and it's marked
+ *   CLOSED (a downstream admin step, reflects nothing about picking).
+ *   Every touch still gets its own row — nothing is ever deleted, full
+ *   audit trail stays available — but exactly ONE row per gate pass, the
+ *   EARLIEST, is flagged `used_for_performance = true`. Every later touch
+ *   is flagged `false`: saved, but excluded from every % / chart / email.
+ *   See ../supabase/add_used_for_performance_column.sql (run once, first),
+ *   gpaAssignUsedForPerformance_ (the go-forward rule, runs automatically
+ *   on every score/backfill from here on), and
+ *   cleanupDuplicatePerformanceFlags (the one-time fix for gate passes
+ *   that already have more than one row from before this existed).
  *
  * ── SCORING RULES (per instructed line) ─────────────────────────────────
  *   Two outputs: `fefo_breach` ("Yes" | "No") and `reason`.
@@ -449,13 +465,25 @@ function gpaScoreDates_(ctx, reportDates) {
     perDate[reportDate] = { ok: true, status: upserts.length ? 'scored' : 'nothing_to_score', reportDate: reportDate, count: upserts.length, skippedNoInstruction: skippedNoInstruction };
   });
 
+  gpaAssignUsedForPerformance_(ctx.url, ctx.key, allUpserts);
+
   for (var b = 0; b < allUpserts.length; b += 500) {
     var resp = gpaSupa_(ctx.url, ctx.key, 'POST', '/rest/v1/gatepass_adherence?on_conflict=gatepass_code,report_date',
       allUpserts.slice(b, b + 500), { Prefer: 'resolution=merge-duplicates,return=minimal' });
     if (resp.getResponseCode() >= 300) throw new Error('Upsert failed ' + resp.getResponseCode() + ': ' + resp.getContentText());
   }
-  summary.overallPct = summary.instructed > 0 ? Math.round((summary.compliant / summary.instructed) * 10000) / 100 : 0;
-  Logger.log('Scored ' + summary.gatePasses + ' gate pass(es) across ' + summary.dates + ' date(s). Overall ' + summary.overallPct + '%.');
+  // summary.instructed/compliant above include EVERY touch written this run
+  // (for reference); the numbers that actually matter — what counts toward
+  // performance after deduping — are these, computed only from rows this
+  // run marked used_for_performance = true.
+  var countedUpserts = allUpserts.filter(function (u) { return u.used_for_performance; });
+  summary.usedForPerformance = countedUpserts.length;
+  summary.notUsedForPerformance = allUpserts.length - countedUpserts.length;
+  summary.instructedCounted = countedUpserts.reduce(function (s, u) { return s + u.instructed_qty; }, 0);
+  summary.compliantCounted = countedUpserts.reduce(function (s, u) { return s + u.compliant_qty; }, 0);
+  summary.overallPct = summary.instructedCounted > 0 ? Math.round((summary.compliantCounted / summary.instructedCounted) * 10000) / 100 : 0;
+  Logger.log('Scored ' + summary.gatePasses + ' gate pass(es) across ' + summary.dates + ' date(s) — '
+    + summary.usedForPerformance + ' counted, ' + summary.notUsedForPerformance + ' were repeat touches (excluded). Overall ' + summary.overallPct + '%.');
   return { ok: true, perDate: perDate, summary: summary };
 }
 
@@ -530,6 +558,122 @@ function gpaScoreGatePass_(gp, lines, d) {
   });
 
   return { instructedTotal: instructedTotal, compliantTotal: compliantTotal, lineDetail: lineDetail };
+}
+
+// ── Counted once, never twice ──────────────────────────────────────────
+
+/**
+ * Sets `used_for_performance` on every entry of `upserts` (in place) so a
+ * gate pass counts toward performance at most once, ever — even though
+ * every touch still gets written as its own row.
+ *
+ * For each gate pass code being written this run:
+ *   - if it already has a row flagged used_for_performance=true anywhere
+ *     in the table, THAT row's date is the anchor — any entry in this run
+ *     matching that date stays true (re-scoring it is fine), every other
+ *     entry for that code becomes false (a later/duplicate touch).
+ *   - if it has never been flagged true before, the EARLIEST date among
+ *     this run's entries for that code becomes the new anchor (true);
+ *     any other entries in this same run become false.
+ */
+function gpaAssignUsedForPerformance_(url, key, upserts) {
+  var codes = [];
+  var seen = {};
+  upserts.forEach(function (u) { if (!seen[u.gatepass_code]) { seen[u.gatepass_code] = true; codes.push(u.gatepass_code); } });
+  if (!codes.length) return;
+
+  var anchors = {}; // gatepass_code -> report_date (existing true row, earliest if somehow more than one)
+  for (var b = 0; b < codes.length; b += 200) {
+    var batch = codes.slice(b, b + 200);
+    var path = '/rest/v1/gatepass_adherence?select=gatepass_code,report_date&used_for_performance=eq.true&gatepass_code=in.(' + batch.join(',') + ')';
+    var resp = gpaSupa_(url, key, 'GET', path);
+    if (resp.getResponseCode() >= 300) throw new Error('Fetch existing anchors failed ' + resp.getResponseCode() + ': ' + resp.getContentText());
+    JSON.parse(resp.getContentText()).forEach(function (r) {
+      if (!anchors[r.gatepass_code] || r.report_date < anchors[r.gatepass_code]) anchors[r.gatepass_code] = r.report_date;
+    });
+  }
+
+  var earliestInRun = {}; // gatepass_code -> earliest report_date among THIS run's entries, used only when no existing anchor
+  upserts.forEach(function (u) {
+    if (!earliestInRun[u.gatepass_code] || u.report_date < earliestInRun[u.gatepass_code]) earliestInRun[u.gatepass_code] = u.report_date;
+  });
+
+  upserts.forEach(function (u) {
+    var anchor = anchors[u.gatepass_code] || earliestInRun[u.gatepass_code];
+    u.used_for_performance = (u.report_date === anchor);
+  });
+}
+
+/**
+ * One-time historical fix for gate passes that already have more than one
+ * row from before used_for_performance existed. Run this ONCE, right after
+ * applying ../supabase/add_used_for_performance_column.sql — safe to
+ * re-run any time after (a no-op once nothing's left to correct).
+ *
+ * For every gate pass code with >1 row: the earliest-dated row is set
+ * used_for_performance=true, every later row is set false. Nothing is
+ * deleted or otherwise changed — same row, same data, just the flag.
+ */
+function cleanupDuplicatePerformanceFlags() {
+  var props = PropertiesService.getScriptProperties();
+  var url = (props.getProperty('SUPABASE_URL') || '').trim().replace(/\/+$/, '');
+  var key = (props.getProperty('SERVICE_KEY') || '').trim();
+  if (!url || !key) throw new Error('Set SUPABASE_URL and SERVICE_KEY in Script Properties.');
+
+  var all = gpaFetchAllAdherenceRows_(url, key);
+  var byGp = {};
+  all.forEach(function (r) { (byGp[r.gatepass_code] = byGp[r.gatepass_code] || []).push(r); });
+
+  var toFlip = [];
+  var dupGroups = 0;
+  Object.keys(byGp).forEach(function (gp) {
+    var list = byGp[gp];
+    if (list.length < 2) return;
+    dupGroups++;
+    list.sort(function (a, b) { return a.report_date < b.report_date ? -1 : 1; });
+    list.forEach(function (row, i) {
+      var shouldBeTrue = (i === 0);
+      if (row.used_for_performance !== shouldBeTrue) {
+        row.used_for_performance = shouldBeTrue;
+        toFlip.push(row);
+      }
+    });
+  });
+
+  Logger.log(dupGroups + ' gate pass(es) with more than one row found. ' + toFlip.length + ' row(s) need their flag corrected.');
+  if (!toFlip.length) return { ok: true, dupGroups: dupGroups, flipped: 0 };
+
+  for (var b = 0; b < toFlip.length; b += 500) {
+    var batch = toFlip.slice(b, b + 500).map(function (r) {
+      return {
+        gatepass_code: r.gatepass_code, facility: r.facility, report_date: r.report_date,
+        instructed_qty: r.instructed_qty, compliant_qty: r.compliant_qty, adherence_pct: r.adherence_pct,
+        lines: r.lines, used_for_performance: r.used_for_performance,
+      };
+    });
+    var resp = gpaSupa_(url, key, 'POST', '/rest/v1/gatepass_adherence?on_conflict=gatepass_code,report_date',
+      batch, { Prefer: 'resolution=merge-duplicates,return=minimal' });
+    if (resp.getResponseCode() >= 300) throw new Error('Flag correction failed ' + resp.getResponseCode() + ': ' + resp.getContentText());
+  }
+  Logger.log('Done — corrected ' + toFlip.length + ' row(s) across ' + dupGroups + ' duplicated gate pass(es).');
+  return { ok: true, dupGroups: dupGroups, flipped: toFlip.length };
+}
+
+/** Pages through every column needed to re-upsert a row (for cleanupDuplicatePerformanceFlags). */
+function gpaFetchAllAdherenceRows_(url, key) {
+  var out = [];
+  var offset = 0, pageSize = 1000;
+  while (true) {
+    var resp = gpaSupa_(url, key, 'GET',
+      '/rest/v1/gatepass_adherence?select=gatepass_code,facility,report_date,instructed_qty,compliant_qty,adherence_pct,lines,used_for_performance&order=gatepass_code.asc',
+      null, { Range: offset + '-' + (offset + pageSize - 1) });
+    if (resp.getResponseCode() >= 300) throw new Error('Fetch all adherence rows failed ' + resp.getResponseCode() + ': ' + resp.getContentText());
+    var page = JSON.parse(resp.getContentText());
+    out = out.concat(page);
+    if (page.length < pageSize) break;
+    offset += pageSize;
+  }
+  return out;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
