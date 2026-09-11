@@ -7,7 +7,7 @@ import {
   lineTone,
   type GatepassAdherence as GatepassAdherenceRow,
 } from "../lib/gatepassAdherenceSupabase";
-import { Button, Card, StatCard, Tag } from "./Ui";
+import { Button, StatCard, Tag } from "./Ui";
 
 interface DaySummary {
   date: string;
@@ -86,6 +86,48 @@ function pctTone(pct: number): "ok" | "warn" | "bad" {
   if (pct >= 95) return "ok";
   if (pct >= 80) return "warn";
   return "bad";
+}
+
+/** Facility with the highest adherence % that day — the "(SL Hub)"-style detail under Best/Worst day. */
+function topFacility(day: DaySummary): string | null {
+  const byFac = new Map<string, { instr: number; comp: number }>();
+  for (const r of day.rows) {
+    const cur = byFac.get(r.facility) ?? { instr: 0, comp: 0 };
+    cur.instr += r.instructed_qty;
+    cur.comp += r.compliant_qty;
+    byFac.set(r.facility, cur);
+  }
+  let best: { facility: string; pct: number } | null = null;
+  for (const [facility, v] of byFac) {
+    const pct = v.instr ? v.comp / v.instr : 0;
+    if (!best || pct > best.pct) best = { facility, pct };
+  }
+  return best?.facility ?? null;
+}
+
+/** The single reason driving the most shortfall units that day, in a few words — a real, computed answer to "why was this the worst day", not a label. */
+function topBreachReason(day: DaySummary): string | null {
+  const tally = new Map<string, number>();
+  for (const r of day.rows) {
+    for (const l of r.lines) {
+      if (lineBreach(l) !== "Yes") continue;
+      const reason = lineReason(l);
+      tally.set(reason, (tally.get(reason) ?? 0) + (l.instructed_qty - l.compliant_qty));
+    }
+  }
+  let top: { reason: string; units: number } | null = null;
+  for (const [reason, units] of tally) if (!top || units > top.units) top = { reason, units };
+  if (!top) return null;
+  if (top.reason === "Batch mismatch") return "mostly wrong-batch picks";
+  if (top.reason === "Not picked") return "mostly unpicked lines";
+  return top.reason;
+}
+
+/** Unit-weighted adherence % across a window of days — sums first, so one big day isn't diluted by several tiny ones. */
+function windowPct(ds: DaySummary[]): number | null {
+  const instr = ds.reduce((s, d) => s + d.instructedQty, 0);
+  const comp = ds.reduce((s, d) => s + d.compliantQty, 0);
+  return instr ? (comp / instr) * 100 : null;
 }
 
 // Same 3-tier read as everywhere else adherence is scored (pctTone below) —
@@ -232,29 +274,31 @@ export function GatepassAdherence() {
 
   const days = useMemo(() => byDay(rows), [rows]);
 
+  const shellCls = "rounded-xl border border-[var(--fefo-line)] bg-[var(--fefo-surface)] p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800";
+
   if (loading) {
     return (
-      <Card title="Gate pass adherence">
+      <section className={shellCls}>
         <p className="py-3 text-center text-base text-slate-500 dark:text-slate-400">Loading…</p>
-      </Card>
+      </section>
     );
   }
 
   if (error) {
     return (
-      <Card title="Gate pass adherence">
+      <section className={shellCls}>
         <p className="py-3 text-center text-base text-rose-600 dark:text-rose-400">Could not load: {error}</p>
-      </Card>
+      </section>
     );
   }
 
   if (rows.length === 0) {
     return (
-      <Card title="Gate pass adherence">
+      <section className={shellCls}>
         <p className="py-3 text-center text-base text-slate-500 dark:text-slate-400">
           Nothing scored yet — the daily check runs automatically each morning against yesterday's closed gate passes.
         </p>
-      </Card>
+      </section>
     );
   }
 
@@ -263,8 +307,18 @@ export function GatepassAdherence() {
   const overallPct = totalInstructed ? Math.round((totalCompliant / totalInstructed) * 10000) / 100 : 0;
   const bestDay = days.reduce((a, b) => (b.pct > a.pct ? b : a), days[0]);
   const worstDay = days.reduce((a, b) => (b.pct < a.pct ? b : a), days[0]);
+  const bestDayFacility = topFacility(bestDay);
+  const worstDayReason = topBreachReason(worstDay);
   const expandedDay = days.find((d) => d.date === expandedDate) ?? null;
   const expandedGp = expandedDay?.rows.find((r) => r.gatepass_code === expandedGatepass) ?? null;
+
+  const dateRangeLabel = days.length
+    ? `${shortDateLabel(days[0].date)} – ${shortDateLabel(days[days.length - 1].date)}, ${days[days.length - 1].date.slice(0, 4)}`
+    : "";
+  const last7Pct = windowPct(days.slice(-7));
+  const prior7 = days.slice(-14, -7);
+  const prior7Pct = prior7.length >= 3 ? windowPct(prior7) : null;
+  const trendDelta = last7Pct !== null && prior7Pct !== null ? last7Pct - prior7Pct : null;
 
   function selectDate(date: string) {
     setExpandedGatepass(null);
@@ -272,27 +326,43 @@ export function GatepassAdherence() {
   }
 
   return (
-    <Card title="Gate pass adherence">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-base text-slate-500 dark:text-slate-400">
-          Was the instructed bin actually picked from, at the instructed quantity? Checked daily against yesterday's
-          closed gate passes at SL Mother Hub, SL Ambient, and SL RX. Over-picking from the right bin isn't penalized —
-          only a missing bin or a short pick is.
-        </p>
-        <Button variant="sm" onClick={() => exportWorkbook(rows)}>
-          Export Excel
-        </Button>
+    <section className={shellCls}>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-[var(--fefo-line)] pb-4 dark:border-slate-700">
+        <div className="min-w-0">
+          <h2 className="text-xl font-bold tracking-tight text-[var(--fefo-text)] dark:text-slate-100">Pick Compliance &amp; Fulfillment Accuracy</h2>
+          <p className="mt-1 max-w-2xl text-sm text-[var(--fefo-muted)] dark:text-slate-400">
+            Was the instructed batch actually picked, at the instructed quantity? Checked daily against yesterday's closed
+            gate passes at SL Mother Hub, SL Ambient, and SL RX. Picking the right batch from a different shelf isn't
+            penalized — only a wrong batch, a missed pick, or a short pick is.
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--fefo-line)] bg-[var(--fefo-teal-50)] px-3 py-1.5 text-xs font-semibold text-[var(--fefo-teal-900)] dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+            {dateRangeLabel}
+          </span>
+          <Button variant="sm" onClick={() => exportWorkbook(rows)}>
+            Export Excel
+          </Button>
+        </div>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         <StatCard icon="%" tone={pctTone(overallPct)} label="Overall adherence" value={`${overallPct}%`} sub={`${totalCompliant.toLocaleString()} / ${totalInstructed.toLocaleString()} units`} />
-        <StatCard icon="Σ" tone="info" label="Gate passes checked" value={String(rows.length)} sub={`across ${days.length} day${days.length === 1 ? "" : "s"}`} />
-        <StatCard icon="↑" tone="ok" label="Best day" value={`${bestDay.pct}%`} sub={bestDay.date} />
-        <StatCard icon="↓" tone="bad" label="Worst day" value={`${worstDay.pct}%`} sub={worstDay.date} />
+        <StatCard icon="Σ" tone="info" label="Gate passes audited" value={String(rows.length)} sub={`across ${days.length} day${days.length === 1 ? "" : "s"}`} />
+        <StatCard icon="↑" tone="ok" label="Best day" value={shortDateLabel(bestDay.date)} sub={`${bestDay.pct}%${bestDayFacility ? ` · ${bestDayFacility}` : ""}`} />
+        <StatCard icon="↓" tone="bad" label="Worst day" value={shortDateLabel(worstDay.date)} sub={`${worstDay.pct}%${worstDayReason ? ` · ${worstDayReason}` : ""}`} />
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[3fr_2fr]">
-        <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
+        <div id="gpa-daily-log">
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="text-sm font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Daily log breakdown</p>
+            <span className="rounded-full bg-[var(--fefo-teal-50)] px-2 py-0.5 text-[11px] font-semibold text-[var(--fefo-teal-900)] dark:bg-slate-700 dark:text-slate-300">
+              {days.length} record{days.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
           <table className="w-full min-w-[520px] border-collapse text-lg tabular-nums">
             <thead className="sticky top-0 z-10">
               <tr className="text-left text-base uppercase tracking-wide text-teal-800 dark:text-teal-300">
@@ -335,6 +405,7 @@ export function GatepassAdherence() {
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-[var(--fefo-line)] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -343,6 +414,19 @@ export function GatepassAdherence() {
           </p>
           <p className="mb-3 text-sm text-[var(--fefo-muted)] dark:text-slate-400">Last 14 days — the report table covers the full range.</p>
           <TrendChart days={days.slice(-14)} selectedDate={expandedDate} onSelectDate={selectDate} />
+          {trendDelta !== null && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--fefo-line)] pt-3 text-xs dark:border-slate-700">
+              <p className="text-[var(--fefo-muted)] dark:text-slate-400">
+                <span className={`font-semibold ${trendDelta >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                  {trendDelta >= 0 ? "▲" : "▼"} {Math.abs(trendDelta).toFixed(1)} pt {trendDelta >= 0 ? "recovery" : "decline"}
+                </span>{" "}
+                over the last 7 days vs. the previous 7
+              </p>
+              <a href="#gpa-daily-log" className="font-semibold text-teal-700 hover:underline dark:text-teal-300">
+                Full daily log ↓
+              </a>
+            </div>
+          )}
         </div>
       </div>
 
@@ -438,6 +522,6 @@ export function GatepassAdherence() {
           </div>
         </div>
       )}
-    </Card>
+    </section>
   );
 }
