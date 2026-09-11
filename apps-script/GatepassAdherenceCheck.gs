@@ -312,7 +312,16 @@ function gpaFindArchivedCsv_(reportDate) {
     var t = messages[i].getDate().getTime();
     if (t >= start.getTime() && t < searchEnd.getTime()) { msg = messages[i]; break; }
   }
-  if (!msg) return null;
+  if (!msg) {
+    // Diagnostic: show what we were actually comparing against, and the
+    // closest real message dates, instead of just failing silently.
+    var closest = messages.slice().sort(function (a, b) {
+      return Math.abs(a.getDate().getTime() - start.getTime()) - Math.abs(b.getDate().getTime() - start.getTime());
+    }).slice(0, 3).map(function (m) { return m.getDate().toISOString(); });
+    Logger.log('  [diag] ' + reportDate + ': looking for ' + start.toISOString() + ' <= date < ' + searchEnd.toISOString()
+      + ' among ' + messages.length + ' messages. 3 closest by date: ' + closest.join(', '));
+    return null;
+  }
   var body = msg.getPlainBody();
   var m2 = body.match(/https?:\/\/\S+?\.csv/i);
   if (!m2) return null;
