@@ -271,6 +271,33 @@ function backfillTheSixMissingDates() {
 }
 
 /**
+ * Every export email matching the subject, flattened across threads and
+ * sorted ascending by date — cached for the life of one execution, so
+ * backfillGatepassAdherenceFromArchive() only searches Gmail once no
+ * matter how many dates it's asked to cover.
+ *
+ * Deliberately does NOT use Gmail's after:/before: search operators: a
+ * date-bounded GmailApp.search() query returned zero threads here even
+ * though the exact same query string returns real results through the
+ * Gmail API directly — some Apps Script / GmailApp-specific quirk with
+ * combining after:+before: with a quoted subject, not a bad query. This
+ * searches by subject only (matches the plain single-operator query that
+ * already works fine elsewhere in this file) and filters by date in JS.
+ */
+var gpaArchiveMessagesCache_ = null;
+function gpaAllArchiveMessages_() {
+  if (gpaArchiveMessagesCache_) return gpaArchiveMessagesCache_;
+  var threads = GmailApp.search(GPA_EMAIL_QUERY_BASE, 0, 80);
+  var messages = [];
+  threads.forEach(function (t) { t.getMessages().forEach(function (m) { messages.push(m); }); });
+  messages.sort(function (a, b) { return a.getDate().getTime() - b.getDate().getTime(); });
+  Logger.log('Archive search: ' + threads.length + ' thread(s), ' + messages.length + ' message(s)'
+    + (messages.length ? ', spanning ' + messages[0].getDate() + ' .. ' + messages[messages.length - 1].getDate() : ''));
+  gpaArchiveMessagesCache_ = messages;
+  return messages;
+}
+
+/**
  * Finds the export email generated soonest ON OR AFTER reportDate (within a
  * few days) and downloads its CSV. Picking the EARLIEST available export
  * after the date — rather than the latest overall — maximizes the chance
@@ -279,19 +306,13 @@ function backfillTheSixMissingDates() {
 function gpaFindArchivedCsv_(reportDate) {
   var start = new Date(reportDate + 'T00:00:00Z');
   var searchEnd = new Date(start.getTime() + 4 * 24 * 60 * 60 * 1000);
-  var query = GPA_EMAIL_QUERY_BASE
-    + ' after:' + Utilities.formatDate(start, 'UTC', 'yyyy/MM/dd')
-    + ' before:' + Utilities.formatDate(searchEnd, 'UTC', 'yyyy/MM/dd');
-  var threads = GmailApp.search(query, 0, 15);
-  var candidates = [];
-  threads.forEach(function (t) {
-    t.getMessages().forEach(function (m) {
-      if (m.getDate().getTime() >= start.getTime()) candidates.push(m);
-    });
-  });
-  if (!candidates.length) return null;
-  candidates.sort(function (a, b) { return a.getDate().getTime() - b.getDate().getTime(); });
-  var msg = candidates[0];
+  var messages = gpaAllArchiveMessages_(); // pre-sorted ascending by date
+  var msg = null;
+  for (var i = 0; i < messages.length; i++) {
+    var t = messages[i].getDate().getTime();
+    if (t >= start.getTime() && t < searchEnd.getTime()) { msg = messages[i]; break; }
+  }
+  if (!msg) return null;
   var body = msg.getPlainBody();
   var m2 = body.match(/https?:\/\/\S+?\.csv/i);
   if (!m2) return null;
