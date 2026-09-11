@@ -178,6 +178,10 @@ function backfillTheSixMissingDatesFromLatestExport() {
  * real, non-trivial bucket (that's the shelf-only carve-out actually firing).
  * Pass a report_date to scope to one day, or omit for everything scored.
  */
+/** Zero-arg wrappers so these are selectable from the Run dropdown — checking why 09-07/09-08 dropped after rescoring. */
+function diagAdherenceReasonBreakdown0907() { return diagAdherenceReasonBreakdown('2026-09-07'); }
+function diagAdherenceReasonBreakdown0908() { return diagAdherenceReasonBreakdown('2026-09-08'); }
+
 function diagAdherenceReasonBreakdown(reportDate) {
   var props = PropertiesService.getScriptProperties();
   var url = (props.getProperty('SUPABASE_URL') || '').trim().replace(/\/+$/, '');
