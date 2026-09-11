@@ -582,16 +582,29 @@ function gpaAssignUsedForPerformance_(url, key, upserts) {
   upserts.forEach(function (u) { if (!seen[u.gatepass_code]) { seen[u.gatepass_code] = true; codes.push(u.gatepass_code); } });
   if (!codes.length) return;
 
+  // Batched by URL LENGTH, not a fixed code count — a fixed count of 200
+  // blew past Apps Script's UrlFetch URL-length limit on a big backfill.
+  // 1500 chars of codes keeps the whole URL comfortably under any limit
+  // regardless of how long/short gate pass codes happen to be.
   var anchors = {}; // gatepass_code -> report_date (existing true row, earliest if somehow more than one)
-  for (var b = 0; b < codes.length; b += 200) {
-    var batch = codes.slice(b, b + 200);
+  var batches = [];
+  var cur = [];
+  var curLen = 0;
+  codes.forEach(function (c) {
+    if (curLen > 0 && curLen + c.length + 1 > 1500) { batches.push(cur); cur = []; curLen = 0; }
+    cur.push(c);
+    curLen += c.length + 1;
+  });
+  if (cur.length) batches.push(cur);
+
+  batches.forEach(function (batch) {
     var path = '/rest/v1/gatepass_adherence?select=gatepass_code,report_date&used_for_performance=eq.true&gatepass_code=in.(' + batch.join(',') + ')';
     var resp = gpaSupa_(url, key, 'GET', path);
     if (resp.getResponseCode() >= 300) throw new Error('Fetch existing anchors failed ' + resp.getResponseCode() + ': ' + resp.getContentText());
     JSON.parse(resp.getContentText()).forEach(function (r) {
       if (!anchors[r.gatepass_code] || r.report_date < anchors[r.gatepass_code]) anchors[r.gatepass_code] = r.report_date;
     });
-  }
+  });
 
   var earliestInRun = {}; // gatepass_code -> earliest report_date among THIS run's entries, used only when no existing anchor
   upserts.forEach(function (u) {
