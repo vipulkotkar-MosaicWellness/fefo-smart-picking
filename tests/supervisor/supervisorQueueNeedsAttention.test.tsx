@@ -70,4 +70,22 @@ describe("SupervisorQueue — Needs Attention panel", () => {
     render(<SupervisorQueue />);
     expect(screen.queryByTestId("needs-attention")).not.toBeInTheDocument();
   });
+
+  it("search narrows the pipeline-stage buckets too, not just the needs-attention panel", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const user = userEvent.setup();
+    useAuth.setState({ profile: { id: "u1", email: "s@x.com", display_name: "Supervisor", role: "supervisor" } });
+    useStore.setState({
+      tasks: [task("APPLE-ORDER", "2026-09-13T00:00:00Z"), task("BANANA-ORDER", "2026-09-13T00:00:00Z")],
+    });
+    render(<SupervisorQueue />);
+
+    expect(screen.getAllByText(/GP-APPLE-ORDER/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/GP-BANANA-ORDER/).length).toBeGreaterThan(0);
+
+    await user.type(screen.getByPlaceholderText(/search/i), "apple");
+
+    expect(screen.getAllByText(/GP-APPLE-ORDER/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/GP-BANANA-ORDER/)).not.toBeInTheDocument();
+  });
 });
