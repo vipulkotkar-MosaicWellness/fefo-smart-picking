@@ -120,6 +120,6 @@ export function pickerWorkload(facilities: FacilityPicklist[], pickers: string[]
 export function matchesSupervisorSearch(f: FacilityPicklist, channel: string, gatePassNo: string | undefined, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  const haystacks = [f.no, f.taskNo, f.facility, channel, gatePassNo ?? "", ...f.lines.flatMap((l) => [l.sku, l.name])];
-  return haystacks.some((h) => h.toLowerCase().includes(q));
+  const haystacks = [f.no, f.taskNo, f.facility, channel, gatePassNo ?? "", ...f.lines.flatMap((l) => [l.sku, l.name])].map((h) => h.toLowerCase());
+  return haystacks.some((h) => h.includes(q));
 }
