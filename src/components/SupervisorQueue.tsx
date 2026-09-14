@@ -76,9 +76,14 @@ function PicklistItem({
   const activeGatePass = active === f ? gatePassNo : gatePassOf(active, tasks);
 
   return (
-    <div className="mt-2">
+    // Wider gap above than the tabs-to-card gap below (mt-3 vs mb-1) is
+    // deliberate: a supervisor scanning the list needs the round-history
+    // tabs to read as glued to the one card right beneath them, not as a
+    // shared header floating over this item and whatever unrelated
+    // picklists happen to follow it in the same bucket.
+    <div className="mt-3">
       {hasHistory && (
-        <div className="mb-1.5">
+        <div className="mb-1">
           <RoundTabs family={family!} selectedRound={selectedRound} onSelectRound={setSelectedRound} />
         </div>
       )}
