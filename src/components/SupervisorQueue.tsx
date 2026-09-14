@@ -346,30 +346,14 @@ export function SupervisorQueue() {
   }, []);
   const now = useMemo(() => new Date(), [tick]);
 
-  const families = useMemo(() => groupPicklistFamilies(tasks), [tasks]);
-  // A facility picklist that's been re-offered (a later round already exists
-  // for its family) is history now, not a live queue item in its own right —
-  // its whole story is one click away via the RoundTabs on the round that
-  // actually superseded it. Without this, a round-1 that finished
-  // "completed, bad>0" would keep sitting in the Not Found bucket forever,
-  // duplicating the same round tabs a supervisor already sees on the round-2
-  // card that was raised to resolve it.
-  const isSupersededByLaterRound = (f: FacilityPicklist): boolean => {
-    const fam = familyFor(f, families);
-    if (!fam || fam.rounds.length <= 1) return false;
-    return fam.rounds[fam.rounds.length - 1].no !== f.no;
-  };
-
-  const filtered = all
-    .filter((f) => {
-      if (facilityFilter && f.facility !== facilityFilter) return false;
-      if (channelFilter && channelFor(f) !== channelFilter) return false;
-      if (pickerFilter && !f.lines.some((l) => l.picker === pickerFilter)) return false;
-      if (!inAgeingRange(createdAtOf(f, tasks), ageingRange)) return false;
-      if (!matchesSupervisorSearch(f, channelFor(f), gatePassFor(f), searchQuery)) return false;
-      return true;
-    })
-    .filter((f) => !isSupersededByLaterRound(f));
+  const filtered = all.filter((f) => {
+    if (facilityFilter && f.facility !== facilityFilter) return false;
+    if (channelFilter && channelFor(f) !== channelFilter) return false;
+    if (pickerFilter && !f.lines.some((l) => l.picker === pickerFilter)) return false;
+    if (!inAgeingRange(createdAtOf(f, tasks), ageingRange)) return false;
+    if (!matchesSupervisorSearch(f, channelFor(f), gatePassFor(f), searchQuery)) return false;
+    return true;
+  });
 
   const picking = filtered.filter((f) => queueBucket(f) === "picking");
   // WMS Blocked is the one bucket a picklist can sit in for a long time
@@ -384,6 +368,7 @@ export function SupervisorQueue() {
 
   const metrics = useMemo(() => queueMetrics(all), [all]);
   const channelOptions = useMemo(() => [...new Set(tasks.map((t) => t.channel))].sort(), [tasks]);
+  const families = useMemo(() => groupPicklistFamilies(tasks), [tasks]);
 
   if (all.length === 0) {
     return (

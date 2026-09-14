@@ -72,18 +72,29 @@ function taskWithoutHistory(): PickingTask {
   };
 }
 
+function pickingPendingBucket(): HTMLElement {
+  const heading = screen.getByText(/Picking Pending/);
+  return heading.closest("details")!;
+}
+
 describe("SupervisorQueue — round history", () => {
   it("shows round tabs for a picklist with a multi-round family, defaulting to Original", () => {
     useAuth.setState({ profile: { id: "u1", email: "s@x.com", display_name: "Supervisor", role: "supervisor" } });
     useStore.setState({ tasks: [taskWithHistory()] });
     render(<SupervisorQueue />);
 
-    // The Round 2 entry (GP-ROUND2) is the one that actually sits in the open
-    // queue — its card should show tabs, defaulting to showing the Original's
-    // gate pass number since selectedRound defaults to 1.
-    expect(screen.getByText(/Original/)).toBeInTheDocument();
-    expect(screen.getByText(/Round 2/)).toBeInTheDocument();
-    expect(screen.getByText(/GP-ORIGINAL/)).toBeInTheDocument();
+    // The Round 2 entry (GP-ROUND2) is the one that actually sits in the
+    // "Picking Pending" bucket — its card should show tabs, defaulting to
+    // showing the Original's gate pass number since selectedRound defaults
+    // to 1. The round-1 entry ALSO shows its own tabs, from the "Not
+    // found — needs an alternate" bucket it independently belongs in
+    // (completed, bad > 0) — that's a separate, valid vantage point onto
+    // the same family's story, so queries here are scoped to just this
+    // bucket to avoid ambiguity with that other card.
+    const bucket = pickingPendingBucket();
+    expect(within(bucket).getByText(/Original/)).toBeInTheDocument();
+    expect(within(bucket).getByText(/Round 2/)).toBeInTheDocument();
+    expect(within(bucket).getByText(/GP-ORIGINAL/)).toBeInTheDocument();
   });
 
   it("switches to Round 2's own gate pass number when its tab is clicked", async () => {
@@ -92,9 +103,10 @@ describe("SupervisorQueue — round history", () => {
     useStore.setState({ tasks: [taskWithHistory()] });
     render(<SupervisorQueue />);
 
-    await user.click(screen.getByRole("button", { name: /Round 2/ }));
+    const bucket = pickingPendingBucket();
+    await user.click(within(bucket).getByRole("button", { name: /Round 2/ }));
 
-    expect(screen.getByText(/GP-ROUND2/)).toBeInTheDocument();
+    expect(within(bucket).getByText(/GP-ROUND2/)).toBeInTheDocument();
   });
 
   it("shows no round tabs for a picklist with no re-offer history", () => {
