@@ -108,4 +108,49 @@ describe("reofferedFrom", () => {
     const round1 = useStore.getState().tasks[0].facilities[0];
     expect(round1.reofferedFrom).toBeUndefined();
   });
+
+  it("chains hop-by-hop: round 3's reofferedFrom points at round 2's .no, not round 1's", async () => {
+    const stockRows: StockRow[] = [
+      { rid: 301, location: "SL Mother Hub", bin: "A1", sku: "SKU-R3", name: "Product R3", batch: "B1", exp: [2099, 1], qty: 20, shelf: 24, type: "Good", active: "Active" },
+      { rid: 302, location: "SL Mother Hub", bin: "A2", sku: "SKU-R3", name: "Product R3", batch: "B2", exp: [2099, 2], qty: 20, shelf: 24, type: "Good", active: "Active" },
+      { rid: 303, location: "SL Mother Hub", bin: "A3", sku: "SKU-R3", name: "Product R3", batch: "B3", exp: [2099, 3], qty: 20, shelf: 24, type: "Good", active: "Active" },
+    ];
+    const task: PickingTask = {
+      no: "TASK-R3",
+      channel: CHANNEL,
+      demand: [{ channel: CHANNEL, sku: "SKU-R3", qty: 15, gatePassNo: "GPSLMH-9003" }],
+      facilities: [
+        {
+          no: "TASK-R3-MH",
+          taskNo: "TASK-R3",
+          facility: "SL Mother Hub",
+          status: "open",
+          round: 1,
+          bad: 0,
+          gatePassNo: "GPSLMH-9003",
+          lines: [{ rid: 301, sku: "SKU-R3", name: "Product R3", facility: "SL Mother Hub", bin: "A1", batch: "B1", exp: [2099, 1], rem: 900, qty: 15 }],
+        },
+      ],
+      shortfall: [],
+      createdAt: new Date().toISOString(),
+    };
+    useStore.setState({ stock: stockRows, skus: { "SKU-R3": { name: "Product R3", shelf: 24 } }, tasks: [task] });
+
+    // Round 1: 5 of 15 not-found -> round 2 created.
+    await useStore.getState().applyPicks("TASK-R3-MH", { 301: 5 }, { 301: "Damaged stock" }, "Tester");
+    let updated = useStore.getState().tasks.find((t) => t.no === "TASK-R3");
+    const round2 = updated?.facilities.find((f) => f.round === 2);
+    expect(round2).toBeDefined();
+    expect(round2!.reofferedFrom).toBe("TASK-R3-MH");
+
+    // Round 2 itself now comes up short -> round 3 created; its reofferedFrom
+    // must point at round 2's .no, not back at round 1's.
+    await useStore.getState().applyPicks(round2!.no, { [round2!.lines[0].rid]: 2 }, { [round2!.lines[0].rid]: "Damaged stock" }, "Tester");
+    updated = useStore.getState().tasks.find((t) => t.no === "TASK-R3");
+    const round3 = updated?.facilities.find((f) => f.round === 3);
+
+    expect(round3).toBeDefined();
+    expect(round3!.reofferedFrom).toBe(round2!.no);
+    expect(round3!.reofferedFrom).not.toBe("TASK-R3-MH");
+  });
 });
