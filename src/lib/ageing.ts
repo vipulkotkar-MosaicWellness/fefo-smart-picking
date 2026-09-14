@@ -1,8 +1,11 @@
-export type AgeingPreset = "today" | "yesterday" | "last7" | "last30" | "custom";
+export type AgeingPreset = "today" | "yesterday" | "yesterday2" | "yesterday3" | "yesterday4" | "last7" | "last30" | "custom";
 
 export const AGEING_PRESET_LABEL: Record<AgeingPreset, string> = {
   today: "Today",
   yesterday: "Yesterday",
+  yesterday2: "Yesterday -2",
+  yesterday3: "Yesterday -3",
+  yesterday4: "Yesterday -4",
   last7: "Last 7 days",
   last30: "Last 30 days",
   custom: "Custom range",
@@ -17,17 +20,29 @@ function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
+/** The single calendar day exactly `daysBack` days before `today` — [start, end) spanning just that one day. */
+function daysAgoRange(today: Date, daysBack: number): AgeingRange {
+  const start = new Date(today);
+  start.setDate(start.getDate() - daysBack);
+  const end = new Date(today);
+  end.setDate(end.getDate() - (daysBack - 1));
+  return { start, end };
+}
+
 /** [start, end) window for a preset, relative to `now`. `custom` needs a {from, to} pair (plain "YYYY-MM-DD" dates). */
 export function ageingRangeFor(preset: AgeingPreset, now: Date, custom?: { from: string; to: string }): AgeingRange {
   const today = startOfDay(now);
   switch (preset) {
     case "today":
       return { start: today, end: now };
-    case "yesterday": {
-      const y = new Date(today);
-      y.setDate(y.getDate() - 1);
-      return { start: y, end: today };
-    }
+    case "yesterday":
+      return daysAgoRange(today, 1);
+    case "yesterday2":
+      return daysAgoRange(today, 2);
+    case "yesterday3":
+      return daysAgoRange(today, 3);
+    case "yesterday4":
+      return daysAgoRange(today, 4);
     case "last7": {
       const s = new Date(today);
       s.setDate(s.getDate() - 7);

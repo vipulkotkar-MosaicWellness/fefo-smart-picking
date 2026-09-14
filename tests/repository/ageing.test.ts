@@ -30,6 +30,24 @@ describe("ageingRangeFor", () => {
     expect(r.start.getDate()).toBe(16);
   });
 
+  it("yesterday2 spans the day before yesterday", () => {
+    const r = ageingRangeFor("yesterday2", now);
+    expect(r.start.getDate()).toBe(13);
+    expect(r.end.getDate()).toBe(14);
+  });
+
+  it("yesterday3 spans 3 days back", () => {
+    const r = ageingRangeFor("yesterday3", now);
+    expect(r.start.getDate()).toBe(12);
+    expect(r.end.getDate()).toBe(13);
+  });
+
+  it("yesterday4 spans 4 days back", () => {
+    const r = ageingRangeFor("yesterday4", now);
+    expect(r.start.getDate()).toBe(11);
+    expect(r.end.getDate()).toBe(12);
+  });
+
   it("custom uses the given from/to dates, inclusive of the whole 'to' day", () => {
     const r = ageingRangeFor("custom", now, { from: "2026-08-01", to: "2026-08-03" });
     expect(r.start.toISOString().slice(0, 10)).toBe("2026-08-01");
