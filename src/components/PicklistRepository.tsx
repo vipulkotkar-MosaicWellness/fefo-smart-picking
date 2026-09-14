@@ -109,7 +109,7 @@ export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[]
             downloadCsv(
               gatePassBulkCsv(
                 families.flatMap((fam) => {
-                  const r = fam.rounds.find((x) => x.round === (selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round)) ?? fam.rounds[fam.rounds.length - 1];
+                  const r = fam.rounds.find((x) => x.round === (selectedRounds[fam.key] ?? fam.rounds[0].round)) ?? fam.rounds[0];
                   const gp = effectiveGatePassNo(fam.rounds[0], taskByNo.get(fam.taskNo)) ?? fam.taskNo;
                   return [{ gatePassNo: gp, lines: r.lines }];
                 }),
