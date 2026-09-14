@@ -58,3 +58,20 @@ export function ageDays(iso: string, now: Date): number {
   const ms = now.getTime() - new Date(iso).getTime();
   return Math.max(0, Math.floor(ms / 86400000));
 }
+
+/**
+ * Human-readable age for a supervisor scanning a list of picklists —
+ * "25m" while fresh, "12h" once past an hour, "4d 4h" once past a day.
+ * Never negative: a clock-skewed future timestamp reads as "0m" rather
+ * than a confusing negative duration.
+ */
+export function formatAge(iso: string, now: Date): string {
+  const ms = Math.max(0, now.getTime() - new Date(iso).getTime());
+  const totalMinutes = Math.floor(ms / 60000);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) return `${totalHours}h`;
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return `${days}d ${hours}h`;
+}
