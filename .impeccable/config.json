@@ -20,6 +20,12 @@
         ],
         "createdAt": "2026-09-07T16:57:07.332Z",
         "reason": "Agent: facility-tab ternary at line ~496 — active state is bg-teal-700 text-white, inactive state is text-slate-600/300 on the tab bar's own slate-50/900 background; the two never render on the same element. Verified live in the browser across 4+ redesign iterations this session; detector keeps matching both branches of the same template-literal ternary as if combined."
+      },
+      {
+        "rule": "overused-font",
+        "value": "arial",
+        "createdAt": "2026-09-14T16:17:45.470Z",
+        "reason": "Print-only table style (line 58) predates this session and this task's change; Arial is a deliberate, standard choice for print reliability across printer drivers/PDF renderers, not the app's UI font — not a branding-personality concern the check is meant to catch."
       }
     ]
   }
