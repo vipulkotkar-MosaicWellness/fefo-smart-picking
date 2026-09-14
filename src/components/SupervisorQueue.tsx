@@ -91,6 +91,9 @@ function Bucket({
   gatePassFor,
   emptyText,
   queued,
+  showAge,
+  createdAtFor,
+  now,
 }: {
   title: string;
   tone: "warn" | "info" | "ok" | "bad";
@@ -99,6 +102,13 @@ function Bucket({
   gatePassFor: (f: FacilityPicklist) => string | undefined;
   emptyText: string;
   queued?: boolean;
+  // When set, each row gets an age tag (and unassigned ones get the "bad"
+  // tone instead of "warn") — used only for the WMS Blocked bucket, whose
+  // `items` are pre-sorted unassigned-then-oldest-first by the caller (see
+  // needsAttentionList). Other buckets keep their plain creation order.
+  showAge?: boolean;
+  createdAtFor?: (f: FacilityPicklist) => string;
+  now?: Date;
 }) {
   if (items.length === 0) {
     return (
@@ -119,6 +129,11 @@ function Bucket({
         <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
           <span aria-hidden className="inline-block transition-transform group-open:rotate-90">▸</span>
           {title} <Tag tone={tone}>{s.picklistCount}</Tag>
+          {showAge && (
+            <span className="text-[10px] font-normal normal-case text-slate-400 dark:text-slate-500">
+              · oldest &amp; unassigned first
+            </span>
+          )}
         </span>
         <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
           <span>{s.lineCount} line(s)</span>
@@ -129,7 +144,15 @@ function Bucket({
       </summary>
       <div className="border-t border-slate-200 p-2.5 dark:border-slate-700">
         {items.map((f, i) => (
-          <PicklistItem key={f.no} f={f} channel={channelFor(f)} gatePassNo={gatePassFor(f)} queuePos={queued ? i + 1 : undefined} />
+          <PicklistItem
+            key={f.no}
+            f={f}
+            channel={channelFor(f)}
+            gatePassNo={gatePassFor(f)}
+            queuePos={queued ? i + 1 : undefined}
+            ageLabel={showAge && createdAtFor && now ? formatAge(createdAtFor(f), now) : undefined}
+            unassigned={showAge ? !f.lines.some((l) => l.picker) : undefined}
+          />
         ))}
       </div>
     </details>
@@ -257,66 +280,6 @@ function Metric({ label, value, warn }: { label: string; value: string; warn?: b
   );
 }
 
-function NeedsAttentionPanel({
-  items,
-  tasks,
-  channelFor,
-  gatePassFor,
-}: {
-  items: FacilityPicklist[];
-  tasks: PickingTask[];
-  channelFor: (f: FacilityPicklist) => string;
-  gatePassFor: (f: FacilityPicklist) => string | undefined;
-}) {
-  const [showAll, setShowAll] = useState(false);
-  // Dashboard is meant to be left open for a whole shift, so `now` needs to
-  // keep advancing even when nothing else triggers a re-render. formatAge's
-  // finest granularity is minutes, so a 60s tick is enough to keep age tags
-  // ("2h", "1d 4h") from going stale — same pattern as Workspace() in App.tsx.
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((t) => t + 1), 60_000);
-    return () => window.clearInterval(id);
-  }, []);
-  const now = useMemo(() => new Date(), [tick]);
-  const ranked = useMemo(() => needsAttentionList(items, tasks), [items, tasks]);
-  if (ranked.length === 0) return null;
-
-  const unassignedCount = ranked.filter((f) => !f.lines.some((l) => l.picker)).length;
-  const visible = showAll ? ranked : ranked.slice(0, 20);
-
-  return (
-    <div data-testid="needs-attention" className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
-          Needs attention — unassigned &amp; oldest first
-        </span>
-        <Tag tone="warn">{unassignedCount} unassigned of {ranked.length} open</Tag>
-      </div>
-      <div className="space-y-1.5">
-        {visible.map((f) => (
-          <PicklistItem
-            key={f.no}
-            f={f}
-            channel={channelFor(f)}
-            gatePassNo={gatePassFor(f)}
-            ageLabel={formatAge(createdAtOf(f, tasks), now)}
-            unassigned={!f.lines.some((l) => l.picker)}
-          />
-        ))}
-      </div>
-      {ranked.length > 20 && (
-        <button
-          onClick={() => setShowAll((s) => !s)}
-          className="mt-2 text-[11px] font-semibold text-amber-800 hover:underline dark:text-amber-300"
-        >
-          {showAll ? "Show fewer" : `Show all ${ranked.length}`}
-        </button>
-      )}
-    </div>
-  );
-}
-
 export function SupervisorQueue() {
   const tasks = activeTasks(useStore((s) => s.tasks));
   const facilityPriority = useStore((s) => s.facilityPriority);
@@ -338,6 +301,18 @@ export function SupervisorQueue() {
     [ageingPreset, ageingFrom, ageingTo],
   );
 
+  // Dashboard is meant to be left open for a whole shift, so `now` needs to
+  // keep advancing even when nothing else triggers a re-render — otherwise
+  // the WMS Blocked bucket's age tags would freeze at whenever the page
+  // happened to last render. formatAge's finest granularity is minutes, so a
+  // 60s tick is enough — same pattern as Workspace() in App.tsx.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const now = useMemo(() => new Date(), [tick]);
+
   const filtered = all.filter((f) => {
     if (facilityFilter && f.facility !== facilityFilter) return false;
     if (channelFilter && channelFor(f) !== channelFilter) return false;
@@ -348,7 +323,13 @@ export function SupervisorQueue() {
   });
 
   const picking = filtered.filter((f) => queueBucket(f) === "picking");
-  const blocked = filtered.filter((f) => queueBucket(f) === "blocked");
+  // WMS Blocked is the one bucket a picklist can sit in for a long time
+  // without anyone noticing — the 15-minute WMS-block timer fires regardless
+  // of whether a picker is assigned, so this is exactly where a stale,
+  // unassigned picklist ends up. Ranked unassigned-then-oldest-first so the
+  // ones needing attention surface at the top instead of requiring every
+  // entry to be opened one at a time to check its age.
+  const blocked = needsAttentionList(filtered.filter((f) => queueBucket(f) === "blocked"), tasks);
   const exceptions = filtered.filter((f) => queueBucket(f) === "exception");
   const done = filtered.filter((f) => queueBucket(f) === "done");
 
@@ -414,13 +395,19 @@ export function SupervisorQueue() {
         />
       </div>
 
-      <div className="mb-5">
-        <NeedsAttentionPanel items={filtered} tasks={tasks} channelFor={channelFor} gatePassFor={gatePassFor} />
-      </div>
-
       <div className="space-y-5">
         <Bucket title="Picking Pending" tone="warn" items={picking} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing pending right now." />
-        <Bucket title="Gatepass generated — inventory blocked (WMS)" tone="info" items={blocked} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing blocked in WMS right now." />
+        <Bucket
+          title="Gatepass generated — inventory blocked (WMS)"
+          tone="info"
+          items={blocked}
+          channelFor={channelFor}
+          gatePassFor={gatePassFor}
+          emptyText="Nothing blocked in WMS right now."
+          showAge
+          createdAtFor={(f) => createdAtOf(f, tasks)}
+          now={now}
+        />
         <Bucket title="Not found — needs an alternate" tone="bad" items={exceptions} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing with a shortfall right now." />
         <Bucket title="Picking completed" tone="ok" items={done} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing completed yet." />
       </div>
