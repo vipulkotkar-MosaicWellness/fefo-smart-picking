@@ -449,6 +449,7 @@ function buildFacilityLists(
   priority: string[],
   suffix = "",
   gatePassByFacility: Record<string, string | undefined> = {},
+  reofferedFrom?: string,
 ): FacilityPicklist[] {
   const createdAt = new Date().toISOString();
   return priority
@@ -463,6 +464,7 @@ function buildFacilityLists(
       lines: byFacility[f],
       createdAt,
       gatePassNo: gatePassByFacility[f],
+      ...(reofferedFrom ? { reofferedFrom } : {}),
     }));
 }
 
@@ -1305,7 +1307,7 @@ export const useStore = create<AppState>()(
           const r2Lists = [...roundsNeeded].flatMap((round) => {
             const subset: Record<string, PickLine[]> = {};
             for (const f of Object.keys(r2)) if (roundFor(f) === round) subset[f] = r2[f];
-            return buildFacilityLists(task.no, round, subset, state.facilityPriority, `-R${round}`, gatePassByFacility);
+            return buildFacilityLists(task.no, round, subset, state.facilityPriority, `-R${round}`, gatePassByFacility, completedFacility!.no);
           });
           for (const l of r2Lists) ownFacilityNos.add(l.no);
           if (r2Lists.length || extraShort.length || extraSkipped.length) {

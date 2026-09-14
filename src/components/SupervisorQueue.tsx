@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { ageingRangeFor, formatAge, inAgeingRange, type AgeingPreset } from "../lib/ageing";
+import { BUSINESS_TYPES, businessTypeOf } from "../lib/businessTypes";
 import { primaryFacilityNo } from "../lib/format";
 import { activeTasks, effectiveGatePassNo, supervisorVisibleFacilityLists, useStore } from "../lib/store";
+import { familyFor, groupPicklistFamilies, type PicklistFamily } from "../lib/picklistFamilies";
 import { bucketSummary, matchesSupervisorSearch, needsAttentionList, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
 import type { FacilityPicklist, PickingTask } from "../lib/types";
 import { AgeingFilter } from "./AgeingFilter";
 import { PartnerMark } from "./partners/PartnerMark";
 import { Card, Tag } from "./Ui";
 import { FacilityBlock } from "./FacilityBlock";
+import { RoundTabs } from "./RoundTabs";
 
 function summary(f: FacilityPicklist) {
   const qty = f.lines.reduce((s, l) => s + l.qty, 0);
@@ -37,6 +40,8 @@ function PicklistItem({
   queuePos,
   ageLabel,
   unassigned,
+  family,
+  tasks,
 }: {
   f: FacilityPicklist;
   channel: string;
@@ -44,6 +49,13 @@ function PicklistItem({
   queuePos?: number;
   ageLabel?: string;
   unassigned?: boolean;
+  // When this picklist belongs to a multi-round family (an original plus at
+  // least one not-found re-offer), round tabs render above the accordion and
+  // switching tabs shows that round's own facility/gate pass/lines — not
+  // just the single `f` this card happened to be filed under. Undefined or
+  // a single-round family renders exactly as before: just `f`.
+  family?: PicklistFamily;
+  tasks: PickingTask[];
 }) {
   // FacilityBlock renders one input + one select per line — mounting all of
   // them for every picklist in the queue (hundreds at once, thousands of
@@ -54,32 +66,48 @@ function PicklistItem({
   // afterward (not toggling back off) means a supervisor's in-progress
   // not-found entries survive if the accordion gets collapsed again.
   const [hasOpened, setHasOpened] = useState(false);
+  const hasHistory = (family?.rounds.length ?? 0) > 1;
+  // Defaults to Round 1 (Original) — never the latest/most dramatic round —
+  // so a supervisor opening a card sees what the order originally looked
+  // like before anything went not-found, not "Round 3 / Not Found" first.
+  const [selectedRound, setSelectedRound] = useState(1);
+  const active = hasHistory ? (family!.rounds.find((r) => r.round === selectedRound) ?? f) : f;
+  const activeChannel = active === f ? channel : channelOf(active, tasks);
+  const activeGatePass = active === f ? gatePassNo : gatePassOf(active, tasks);
+
   return (
-    <details
-      className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden"
-      onToggle={(e) => {
-        if (e.currentTarget.open) setHasOpened(true);
-      }}
-    >
-      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-lg p-2.5 hover:bg-slate-50 dark:hover:bg-slate-900">
-        <span className="flex items-center gap-1.5 text-sm">
-          {queuePos != null && <Tag tone="info">#{queuePos}</Tag>}
-          {ageLabel != null && <Tag tone={unassigned ? "bad" : "warn"}>{ageLabel}</Tag>}
-          {channel && <PartnerMark name={channel} compact />}
-          <b>{f.facility}</b>{" "}
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            {gatePassNo ? `Gate Pass ${gatePassNo} · ` : ""}{f.no}
-          </span>{" "}
-          {f.round > 1 && (
-            <Tag tone="info">Alternate Picklist — for {primaryFacilityNo(f.no)}</Tag>
-          )}
-        </span>
-        <span className="text-[11px] text-slate-500 dark:text-slate-400">{summary(f)}</span>
-      </summary>
-      <div className="border-t border-slate-200 p-2.5 dark:border-slate-700">
-        {hasOpened && <FacilityBlock f={f} gatePassNo={gatePassNo} />}
-      </div>
-    </details>
+    <div className="mt-2">
+      {hasHistory && (
+        <div className="mb-1.5">
+          <RoundTabs family={family!} selectedRound={selectedRound} onSelectRound={setSelectedRound} />
+        </div>
+      )}
+      <details
+        className="rounded-lg border border-slate-200 dark:border-slate-700 [&_summary::-webkit-details-marker]:hidden"
+        onToggle={(e) => {
+          if (e.currentTarget.open) setHasOpened(true);
+        }}
+      >
+        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-lg p-2.5 hover:bg-slate-50 dark:hover:bg-slate-900">
+          <span className="flex items-center gap-1.5 text-sm">
+            {queuePos != null && <Tag tone="info">#{queuePos}</Tag>}
+            {ageLabel != null && <Tag tone={unassigned ? "bad" : "warn"}>{ageLabel}</Tag>}
+            {activeChannel && <PartnerMark name={activeChannel} compact />}
+            <b>{active.facility}</b>{" "}
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {activeGatePass ? `Gate Pass ${activeGatePass} · ` : ""}{active.no}
+            </span>{" "}
+            {active.round > 1 && !hasHistory && (
+              <Tag tone="info">Alternate Picklist — for {primaryFacilityNo(active.no)}</Tag>
+            )}
+          </span>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">{summary(active)}</span>
+        </summary>
+        <div className="border-t border-slate-200 p-2.5 dark:border-slate-700">
+          {hasOpened && <FacilityBlock f={active} gatePassNo={activeGatePass} />}
+        </div>
+      </details>
+    </div>
   );
 }
 
@@ -94,6 +122,8 @@ function Bucket({
   showAge,
   createdAtFor,
   now,
+  families,
+  tasks,
 }: {
   title: string;
   tone: "warn" | "info" | "ok" | "bad";
@@ -109,6 +139,8 @@ function Bucket({
   showAge?: boolean;
   createdAtFor?: (f: FacilityPicklist) => string;
   now?: Date;
+  families: PicklistFamily[];
+  tasks: PickingTask[];
 }) {
   if (items.length === 0) {
     return (
@@ -152,6 +184,8 @@ function Bucket({
             queuePos={queued ? i + 1 : undefined}
             ageLabel={showAge && createdAtFor && now ? formatAge(createdAtFor(f), now) : undefined}
             unassigned={showAge ? !f.lines.some((l) => l.picker) : undefined}
+            family={familyFor(f, families)}
+            tasks={tasks}
           />
         ))}
       </div>
@@ -289,6 +323,7 @@ export function SupervisorQueue() {
   const [facilityFilter, setFacilityFilter] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
   const [pickerFilter, setPickerFilter] = useState("");
+  const [businessTypeFilter, setBusinessTypeFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [ageingPreset, setAgeingPreset] = useState<AgeingPreset>("last30");
   const [ageingFrom, setAgeingFrom] = useState("");
@@ -317,6 +352,7 @@ export function SupervisorQueue() {
     if (facilityFilter && f.facility !== facilityFilter) return false;
     if (channelFilter && channelFor(f) !== channelFilter) return false;
     if (pickerFilter && !f.lines.some((l) => l.picker === pickerFilter)) return false;
+    if (businessTypeFilter && businessTypeOf(channelFor(f)) !== businessTypeFilter) return false;
     if (!inAgeingRange(createdAtOf(f, tasks), ageingRange)) return false;
     if (!matchesSupervisorSearch(f, channelFor(f), gatePassFor(f), searchQuery)) return false;
     return true;
@@ -335,6 +371,7 @@ export function SupervisorQueue() {
 
   const metrics = useMemo(() => queueMetrics(all), [all]);
   const channelOptions = useMemo(() => [...new Set(tasks.map((t) => t.channel))].sort(), [tasks]);
+  const families = useMemo(() => groupPicklistFamilies(tasks), [tasks]);
 
   if (all.length === 0) {
     return (
@@ -382,6 +419,17 @@ export function SupervisorQueue() {
             <option key={p} value={p}>{p}</option>
           ))}
         </select>
+        <select
+          aria-label="Business type"
+          value={businessTypeFilter}
+          onChange={(e) => setBusinessTypeFilter(e.target.value)}
+          className="rounded-lg border border-slate-300 p-1.5 text-xs dark:border-slate-600 dark:bg-slate-900"
+        >
+          <option value="">All business types</option>
+          {BUSINESS_TYPES.map((b) => (
+            <option key={b} value={b}>{b}</option>
+          ))}
+        </select>
       </div>
 
       <div className="mb-3">
@@ -396,7 +444,7 @@ export function SupervisorQueue() {
       </div>
 
       <div className="space-y-5">
-        <Bucket title="Picking Pending" tone="warn" items={picking} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing pending right now." />
+        <Bucket title="Picking Pending" tone="warn" items={picking} channelFor={channelFor} gatePassFor={gatePassFor} queued emptyText="Nothing pending right now." families={families} tasks={tasks} />
         <Bucket
           title="Gatepass generated — inventory blocked (WMS)"
           tone="info"
@@ -407,9 +455,11 @@ export function SupervisorQueue() {
           showAge
           createdAtFor={(f) => createdAtOf(f, tasks)}
           now={now}
+          families={families}
+          tasks={tasks}
         />
-        <Bucket title="Not found — needs an alternate" tone="bad" items={exceptions} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing with a shortfall right now." />
-        <Bucket title="Picking completed" tone="ok" items={done} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing completed yet." />
+        <Bucket title="Not found — needs an alternate" tone="bad" items={exceptions} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing with a shortfall right now." families={families} tasks={tasks} />
+        <Bucket title="Picking completed" tone="ok" items={done} channelFor={channelFor} gatePassFor={gatePassFor} emptyText="Nothing completed yet." families={families} tasks={tasks} />
       </div>
 
       <div className="mt-5">

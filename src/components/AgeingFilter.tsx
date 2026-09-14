@@ -1,6 +1,6 @@
 import { AGEING_PRESET_LABEL, type AgeingPreset } from "../lib/ageing";
 
-const PRESETS: AgeingPreset[] = ["today", "yesterday", "last7", "last30", "custom"];
+const PRESETS: AgeingPreset[] = ["today", "yesterday", "yesterday2", "yesterday3", "yesterday4", "last7", "last30", "custom"];
 
 export function AgeingFilter({
   preset,
