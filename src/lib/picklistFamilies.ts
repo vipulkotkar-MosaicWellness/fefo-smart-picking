@@ -21,8 +21,27 @@ export function groupPicklistFamilies(tasks: PickingTask[]): PicklistFamily[] {
   const families = new Map<string, PicklistFamily>();
 
   for (const t of tasks) {
+    const byNo = new Map(t.facilities.map((f) => [f.no, f] as const));
+    // Follows the reofferedFrom chain back to the root (round 1, or as far
+    // back as the chain goes) when present. A round-3 re-offer's
+    // reofferedFrom points at round 2, not round 1 directly, so this
+    // recurses. Falls back to the old same-facility-suffix guess
+    // (primaryFacilityNo) for round 1 itself, and for any round whose
+    // reofferedFrom is missing or points somewhere unresolvable (historical
+    // data from before this field existed, or a malformed/self-referencing
+    // link) — the `parent.no !== f.no` guard exists specifically so a
+    // self-referencing link can't recurse forever.
+    const rootKeyOf = (f: FacilityPicklist): string => {
+      if (f.round <= 1) return f.no;
+      if (f.reofferedFrom) {
+        const parent = byNo.get(f.reofferedFrom);
+        if (parent && parent.no !== f.no) return rootKeyOf(parent);
+      }
+      return primaryFacilityNo(f.no);
+    };
+
     for (const f of t.facilities) {
-      const key = f.round > 1 ? primaryFacilityNo(f.no) : f.no;
+      const key = rootKeyOf(f);
       let fam = families.get(key);
       if (!fam) {
         fam = { key, taskNo: t.no, rounds: [], latestCreatedAt: t.createdAt };
@@ -38,4 +57,9 @@ export function groupPicklistFamilies(tasks: PickingTask[]): PicklistFamily[] {
 
   for (const fam of families.values()) fam.rounds.sort((a, b) => a.round - b.round);
   return [...families.values()];
+}
+
+/** Which family (if any) a specific facility picklist belongs to, from an already-computed family list. */
+export function familyFor(f: FacilityPicklist, families: PicklistFamily[]): PicklistFamily | undefined {
+  return families.find((fam) => fam.rounds.some((r) => r.no === f.no));
 }
