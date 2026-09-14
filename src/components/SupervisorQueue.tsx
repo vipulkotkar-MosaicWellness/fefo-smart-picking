@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
-import { ageingRangeFor, inAgeingRange, type AgeingPreset } from "../lib/ageing";
+import { useEffect, useMemo, useState } from "react";
+import { ageingRangeFor, formatAge, inAgeingRange, type AgeingPreset } from "../lib/ageing";
 import { primaryFacilityNo } from "../lib/format";
 import { activeTasks, effectiveGatePassNo, supervisorVisibleFacilityLists, useStore } from "../lib/store";
-import { bucketSummary, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
+import { bucketSummary, matchesSupervisorSearch, needsAttentionList, queueBucket, queueMetrics } from "../lib/supervisorMetrics";
 import type { FacilityPicklist, PickingTask } from "../lib/types";
 import { AgeingFilter } from "./AgeingFilter";
 import { PartnerMark } from "./partners/PartnerMark";
@@ -27,16 +27,23 @@ function createdAtOf(f: FacilityPicklist, tasks: ReturnType<typeof useStore.getS
   return f.createdAt ?? tasks.find((t) => t.no === f.taskNo)?.createdAt ?? new Date(0).toISOString();
 }
 
+// ageLabel and unassigned are meant to be passed together (both or neither):
+// unassigned only affects the badge's tone, so unassigned=true with no
+// ageLabel renders nothing and silently drops the intended signal.
 function PicklistItem({
   f,
   channel,
   gatePassNo,
   queuePos,
+  ageLabel,
+  unassigned,
 }: {
   f: FacilityPicklist;
   channel: string;
   gatePassNo?: string;
   queuePos?: number;
+  ageLabel?: string;
+  unassigned?: boolean;
 }) {
   // FacilityBlock renders one input + one select per line — mounting all of
   // them for every picklist in the queue (hundreds at once, thousands of
@@ -57,6 +64,7 @@ function PicklistItem({
       <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-lg p-2.5 hover:bg-slate-50 dark:hover:bg-slate-900">
         <span className="flex items-center gap-1.5 text-sm">
           {queuePos != null && <Tag tone="info">#{queuePos}</Tag>}
+          {ageLabel != null && <Tag tone={unassigned ? "bad" : "warn"}>{ageLabel}</Tag>}
           {channel && <PartnerMark name={channel} compact />}
           <b>{f.facility}</b>{" "}
           <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -249,6 +257,66 @@ function Metric({ label, value, warn }: { label: string; value: string; warn?: b
   );
 }
 
+function NeedsAttentionPanel({
+  items,
+  tasks,
+  channelFor,
+  gatePassFor,
+}: {
+  items: FacilityPicklist[];
+  tasks: PickingTask[];
+  channelFor: (f: FacilityPicklist) => string;
+  gatePassFor: (f: FacilityPicklist) => string | undefined;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  // Dashboard is meant to be left open for a whole shift, so `now` needs to
+  // keep advancing even when nothing else triggers a re-render. formatAge's
+  // finest granularity is minutes, so a 60s tick is enough to keep age tags
+  // ("2h", "1d 4h") from going stale — same pattern as Workspace() in App.tsx.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const now = useMemo(() => new Date(), [tick]);
+  const ranked = useMemo(() => needsAttentionList(items, tasks), [items, tasks]);
+  if (ranked.length === 0) return null;
+
+  const unassignedCount = ranked.filter((f) => !f.lines.some((l) => l.picker)).length;
+  const visible = showAll ? ranked : ranked.slice(0, 20);
+
+  return (
+    <div data-testid="needs-attention" className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">
+          Needs attention — unassigned &amp; oldest first
+        </span>
+        <Tag tone="warn">{unassignedCount} unassigned of {ranked.length} open</Tag>
+      </div>
+      <div className="space-y-1.5">
+        {visible.map((f) => (
+          <PicklistItem
+            key={f.no}
+            f={f}
+            channel={channelFor(f)}
+            gatePassNo={gatePassFor(f)}
+            ageLabel={formatAge(createdAtOf(f, tasks), now)}
+            unassigned={!f.lines.some((l) => l.picker)}
+          />
+        ))}
+      </div>
+      {ranked.length > 20 && (
+        <button
+          onClick={() => setShowAll((s) => !s)}
+          className="mt-2 text-[11px] font-semibold text-amber-800 hover:underline dark:text-amber-300"
+        >
+          {showAll ? "Show fewer" : `Show all ${ranked.length}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function SupervisorQueue() {
   const tasks = activeTasks(useStore((s) => s.tasks));
   const facilityPriority = useStore((s) => s.facilityPriority);
@@ -258,6 +326,7 @@ export function SupervisorQueue() {
   const [facilityFilter, setFacilityFilter] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
   const [pickerFilter, setPickerFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [ageingPreset, setAgeingPreset] = useState<AgeingPreset>("last30");
   const [ageingFrom, setAgeingFrom] = useState("");
   const [ageingTo, setAgeingTo] = useState("");
@@ -274,6 +343,7 @@ export function SupervisorQueue() {
     if (channelFilter && channelFor(f) !== channelFilter) return false;
     if (pickerFilter && !f.lines.some((l) => l.picker === pickerFilter)) return false;
     if (!inAgeingRange(createdAtOf(f, tasks), ageingRange)) return false;
+    if (!matchesSupervisorSearch(f, channelFor(f), gatePassFor(f), searchQuery)) return false;
     return true;
   });
 
@@ -298,13 +368,21 @@ export function SupervisorQueue() {
 
   return (
     <Card title="Picking queue">
-      <div className="mb-4 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+      <div className="mb-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="Open picklists" value={String(metrics.openCount)} />
+        <Metric label="Unassigned" value={String(metrics.unassignedCount)} warn={metrics.unassignedCount > 0} />
         <Metric label="Stock exceptions" value={String(metrics.exceptionCount)} warn={metrics.exceptionCount > 0} />
         <Metric label="Fill rate" value={metrics.fillRatePct == null ? "—" : `${metrics.fillRatePct}%`} />
       </div>
 
       <div className="mb-3 flex flex-wrap gap-2">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search gate pass, picklist #, SKU…"
+          className="min-w-56 flex-1 rounded-lg border border-slate-300 p-1.5 text-xs dark:border-slate-600 dark:bg-slate-900"
+        />
         <select value={facilityFilter} onChange={(e) => setFacilityFilter(e.target.value)} className="rounded-lg border border-slate-300 p-1.5 text-xs dark:border-slate-600 dark:bg-slate-900">
           <option value="">All facilities</option>
           {facilityPriority.map((f) => (
@@ -334,6 +412,10 @@ export function SupervisorQueue() {
           onFromChange={setAgeingFrom}
           onToChange={setAgeingTo}
         />
+      </div>
+
+      <div className="mb-5">
+        <NeedsAttentionPanel items={filtered} tasks={tasks} channelFor={channelFor} gatePassFor={gatePassFor} />
       </div>
 
       <div className="space-y-5">

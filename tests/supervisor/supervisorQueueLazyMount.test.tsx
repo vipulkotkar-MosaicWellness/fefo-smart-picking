@@ -50,6 +50,17 @@ function heavyTask(no: string, lineCount: number): PickingTask {
   };
 }
 
+// An open, unassigned picklist also surfaces in the Needs Attention panel
+// above the pipeline buckets (by design — it's a shortcut view on top of the
+// same underlying data, with its own independent accordion state). These
+// tests exercise the pipeline-bucket instance specifically, so scope past
+// the panel's copy rather than grabbing whichever match comes first.
+function bucketInstance(text: RegExp): HTMLElement {
+  const match = screen.getAllByText(text).find((el) => !el.closest('[data-testid="needs-attention"]'));
+  if (!match) throw new Error(`No pipeline-bucket match for ${text}`);
+  return match;
+}
+
 describe("SupervisorQueue — lazy-mounts each picklist's heavy detail", () => {
   it("doesn't mount a picklist's line inputs until its accordion is opened", async () => {
     const user = userEvent.setup();
@@ -63,8 +74,8 @@ describe("SupervisorQueue — lazy-mounts each picklist's heavy detail", () => {
     expect(screen.queryAllByRole("spinbutton").length).toBe(0);
     expect(screen.queryByText("SKU-TASK1-0")).not.toBeInTheDocument();
 
-    // Open TASK1's accordion.
-    await user.click(screen.getByText(/GP-TASK1/));
+    // Open TASK1's accordion (the pipeline-bucket instance).
+    await user.click(bucketInstance(/GP-TASK1/));
 
     // TASK1's lines are now mounted...
     expect(screen.getByText("SKU-TASK1-0")).toBeInTheDocument();
@@ -80,7 +91,7 @@ describe("SupervisorQueue — lazy-mounts each picklist's heavy detail", () => {
 
     render(<SupervisorQueue />);
 
-    const summary = screen.getByText(/GP-TASK3/);
+    const summary = bucketInstance(/GP-TASK3/);
     await user.click(summary); // open
     expect(screen.getByText("SKU-TASK3-0")).toBeInTheDocument();
 

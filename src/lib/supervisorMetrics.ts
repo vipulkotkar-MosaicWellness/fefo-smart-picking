@@ -43,6 +43,28 @@ export function queueBucket(f: FacilityPicklist): QueueBucket {
   return "picking";
 }
 
+/**
+ * Open picklists ranked "what a supervisor should look at first": unassigned
+ * (nobody has a picker on any line) ahead of assigned-but-still-open ones,
+ * oldest first within each group. This is deliberately flat and independent
+ * of pipeline stage (queueBucket) — an unassigned picklist that's been
+ * sitting for days can be buried inside ANY of the 4 stage buckets (Picking
+ * Pending, WMS Blocked, etc.) with no way to spot it without opening each
+ * one individually. This list is the shortcut; the stage buckets remain the
+ * full, complete picture.
+ */
+export function needsAttentionList(facilities: FacilityPicklist[], tasks: { no: string; createdAt: string }[]): FacilityPicklist[] {
+  const createdAtOf = (f: FacilityPicklist): string =>
+    f.createdAt ?? tasks.find((t) => t.no === f.taskNo)?.createdAt ?? new Date(0).toISOString();
+  const open = facilities.filter((f) => f.status !== "completed");
+  return [...open].sort((a, b) => {
+    const aUnassigned = !a.lines.some((l) => l.picker);
+    const bUnassigned = !b.lines.some((l) => l.picker);
+    if (aUnassigned !== bUnassigned) return aUnassigned ? -1 : 1;
+    return new Date(createdAtOf(a)).getTime() - new Date(createdAtOf(b)).getTime();
+  });
+}
+
 export interface BucketSummary {
   picklistCount: number;
   lineCount: number;
@@ -86,4 +108,18 @@ export function pickerWorkload(facilities: FacilityPicklist[], pickers: string[]
     picker,
     activeLines: open.reduce((s, f) => s + f.lines.filter((l) => l.picker === picker && l.picked == null).length, 0),
   }));
+}
+
+/**
+ * Case-insensitive match against everything a supervisor would actually
+ * type in a hurry: the gate pass number, the facility/task picklist number,
+ * the channel, or any line's SKU code/product name. An empty (or
+ * whitespace-only) query matches everything, so the search box can double
+ * as "no filter" when untouched.
+ */
+export function matchesSupervisorSearch(f: FacilityPicklist, channel: string, gatePassNo: string | undefined, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const haystacks = [f.no, f.taskNo, f.facility, channel, gatePassNo ?? "", ...f.lines.flatMap((l) => [l.sku, l.name])].map((h) => h.toLowerCase());
+  return haystacks.some((h) => h.includes(q));
 }
