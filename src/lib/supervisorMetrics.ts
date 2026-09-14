@@ -43,6 +43,28 @@ export function queueBucket(f: FacilityPicklist): QueueBucket {
   return "picking";
 }
 
+/**
+ * Open picklists ranked "what a supervisor should look at first": unassigned
+ * (nobody has a picker on any line) ahead of assigned-but-still-open ones,
+ * oldest first within each group. This is deliberately flat and independent
+ * of pipeline stage (queueBucket) — an unassigned picklist that's been
+ * sitting for days can be buried inside ANY of the 4 stage buckets (Picking
+ * Pending, WMS Blocked, etc.) with no way to spot it without opening each
+ * one individually. This list is the shortcut; the stage buckets remain the
+ * full, complete picture.
+ */
+export function needsAttentionList(facilities: FacilityPicklist[], tasks: { no: string; createdAt: string }[]): FacilityPicklist[] {
+  const createdAtOf = (f: FacilityPicklist): string =>
+    f.createdAt ?? tasks.find((t) => t.no === f.taskNo)?.createdAt ?? new Date(0).toISOString();
+  const open = facilities.filter((f) => f.status !== "completed");
+  return [...open].sort((a, b) => {
+    const aUnassigned = !a.lines.some((l) => l.picker);
+    const bUnassigned = !b.lines.some((l) => l.picker);
+    if (aUnassigned !== bUnassigned) return aUnassigned ? -1 : 1;
+    return new Date(createdAtOf(a)).getTime() - new Date(createdAtOf(b)).getTime();
+  });
+}
+
 export interface BucketSummary {
   picklistCount: number;
   lineCount: number;
