@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ageingRangeFor, formatAge, inAgeingRange, type AgeingPreset } from "../lib/ageing";
 import { primaryFacilityNo } from "../lib/format";
 import { activeTasks, effectiveGatePassNo, supervisorVisibleFacilityLists, useStore } from "../lib/store";
@@ -269,7 +269,16 @@ function NeedsAttentionPanel({
   gatePassFor: (f: FacilityPicklist) => string | undefined;
 }) {
   const [showAll, setShowAll] = useState(false);
-  const now = useMemo(() => new Date(), []);
+  // Dashboard is meant to be left open for a whole shift, so `now` needs to
+  // keep advancing even when nothing else triggers a re-render. formatAge's
+  // finest granularity is minutes, so a 60s tick is enough to keep age tags
+  // ("2h", "1d 4h") from going stale — same pattern as Workspace() in App.tsx.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const now = useMemo(() => new Date(), [tick]);
   const ranked = useMemo(() => needsAttentionList(items, tasks), [items, tasks]);
   if (ranked.length === 0) return null;
 
