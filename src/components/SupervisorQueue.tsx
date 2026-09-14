@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ageingRangeFor, formatAge, inAgeingRange, type AgeingPreset } from "../lib/ageing";
+import { BUSINESS_TYPES, businessTypeOf } from "../lib/businessTypes";
 import { primaryFacilityNo } from "../lib/format";
 import { activeTasks, effectiveGatePassNo, supervisorVisibleFacilityLists, useStore } from "../lib/store";
 import { familyFor, groupPicklistFamilies, type PicklistFamily } from "../lib/picklistFamilies";
@@ -322,6 +323,7 @@ export function SupervisorQueue() {
   const [facilityFilter, setFacilityFilter] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
   const [pickerFilter, setPickerFilter] = useState("");
+  const [businessTypeFilter, setBusinessTypeFilter] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [ageingPreset, setAgeingPreset] = useState<AgeingPreset>("last30");
   const [ageingFrom, setAgeingFrom] = useState("");
@@ -350,6 +352,7 @@ export function SupervisorQueue() {
     if (facilityFilter && f.facility !== facilityFilter) return false;
     if (channelFilter && channelFor(f) !== channelFilter) return false;
     if (pickerFilter && !f.lines.some((l) => l.picker === pickerFilter)) return false;
+    if (businessTypeFilter && businessTypeOf(channelFor(f)) !== businessTypeFilter) return false;
     if (!inAgeingRange(createdAtOf(f, tasks), ageingRange)) return false;
     if (!matchesSupervisorSearch(f, channelFor(f), gatePassFor(f), searchQuery)) return false;
     return true;
@@ -414,6 +417,17 @@ export function SupervisorQueue() {
           <option value="">All pickers</option>
           {pickers.map((p) => (
             <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Business type"
+          value={businessTypeFilter}
+          onChange={(e) => setBusinessTypeFilter(e.target.value)}
+          className="rounded-lg border border-slate-300 p-1.5 text-xs dark:border-slate-600 dark:bg-slate-900"
+        >
+          <option value="">All business types</option>
+          {BUSINESS_TYPES.map((b) => (
+            <option key={b} value={b}>{b}</option>
           ))}
         </select>
       </div>
