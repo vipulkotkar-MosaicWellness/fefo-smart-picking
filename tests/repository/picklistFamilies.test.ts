@@ -120,6 +120,17 @@ describe("groupPicklistFamilies", () => {
     const families = groupPicklistFamilies([t]);
     expect(families).toHaveLength(1);
   });
+
+  it("does not hang on a reofferedFrom cycle (malformed/corrupted data)", () => {
+    const t = task({
+      facilities: [
+        facility({ no: "TASK-1-A", round: 2, reofferedFrom: "TASK-1-B" }),
+        facility({ no: "TASK-1-B", round: 2, reofferedFrom: "TASK-1-A" }),
+      ],
+    });
+    const families = groupPicklistFamilies([t]);
+    expect(families.length).toBeGreaterThan(0);
+  });
 });
 
 describe("familyFor", () => {

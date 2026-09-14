@@ -28,14 +28,18 @@ export function groupPicklistFamilies(tasks: PickingTask[]): PicklistFamily[] {
     // recurses. Falls back to the old same-facility-suffix guess
     // (primaryFacilityNo) for round 1 itself, and for any round whose
     // reofferedFrom is missing or points somewhere unresolvable (historical
-    // data from before this field existed, or a malformed/self-referencing
-    // link) — the `parent.no !== f.no` guard exists specifically so a
-    // self-referencing link can't recurse forever.
-    const rootKeyOf = (f: FacilityPicklist): string => {
+    // data from before this field existed, or malformed/corrupted data) —
+    // the `visited` set guards against a cycle of any length (not just
+    // direct self-reference) so a corrupted chain can't recurse forever.
+    const rootKeyOf = (f: FacilityPicklist, visited = new Set<string>()): string => {
       if (f.round <= 1) return f.no;
+      if (visited.has(f.no)) return primaryFacilityNo(f.no);
       if (f.reofferedFrom) {
         const parent = byNo.get(f.reofferedFrom);
-        if (parent && parent.no !== f.no) return rootKeyOf(parent);
+        if (parent && parent.no !== f.no) {
+          visited.add(f.no);
+          return rootKeyOf(parent, visited);
+        }
       }
       return primaryFacilityNo(f.no);
     };
