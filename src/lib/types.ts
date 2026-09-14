@@ -69,6 +69,15 @@ export interface FacilityPicklist {
   facility: string;
   status: PicklistStatus;
   round: number; // 1 = first pass, 2 = round-2 (re-offer of not-found)
+  // The exact facility picklist `.no` of the shortfall round that triggered
+  // this one, when this round IS a re-offer (round > 1). Lets
+  // groupPicklistFamilies() link a re-offer back to its original even when
+  // it landed on a DIFFERENT facility than the one that came up short — the
+  // facility-suffix-based fallback (primaryFacilityNo) only works when a
+  // re-offer stays on the same facility. Undefined for round 1, and for any
+  // round-2+ picklist created before this field existed (no backfill is
+  // possible for those — see the 14 Sep 2026 design spec).
+  reofferedFrom?: string;
   bad: number; // qty moved to bad location / not found
   gp?: string; // gatepass number
   // The customer-facing gate pass number FOR THIS FACILITY specifically —
