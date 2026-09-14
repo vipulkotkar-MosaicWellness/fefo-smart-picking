@@ -109,3 +109,17 @@ export function pickerWorkload(facilities: FacilityPicklist[], pickers: string[]
     activeLines: open.reduce((s, f) => s + f.lines.filter((l) => l.picker === picker && l.picked == null).length, 0),
   }));
 }
+
+/**
+ * Case-insensitive match against everything a supervisor would actually
+ * type in a hurry: the gate pass number, the facility/task picklist number,
+ * the channel, or any line's SKU code/product name. An empty (or
+ * whitespace-only) query matches everything, so the search box can double
+ * as "no filter" when untouched.
+ */
+export function matchesSupervisorSearch(f: FacilityPicklist, channel: string, gatePassNo: string | undefined, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const haystacks = [f.no, f.taskNo, f.facility, channel, gatePassNo ?? "", ...f.lines.flatMap((l) => [l.sku, l.name])];
+  return haystacks.some((h) => h.toLowerCase().includes(q));
+}
