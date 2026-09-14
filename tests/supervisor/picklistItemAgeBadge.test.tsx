@@ -41,6 +41,12 @@ describe("SupervisorQueue — existing pipeline buckets are unaffected by the ag
     useAuth.setState({ profile: { id: "u1", email: "s@x.com", display_name: "Supervisor", role: "supervisor" } });
     useStore.setState({ tasks: [task("PLAIN1", "2026-09-14T00:00:00Z")] });
     render(<SupervisorQueue />);
-    expect(screen.getByText(/GP-PLAIN1/)).toBeInTheDocument();
+    // An open, unassigned picklist also surfaces in the Needs Attention panel
+    // (by design — it's a shortcut view on top of the same underlying data),
+    // so match on the pipeline-bucket instance specifically, not the panel's.
+    const bucketInstance = screen
+      .getAllByText(/GP-PLAIN1/)
+      .find((el) => !el.closest('[data-testid="needs-attention"]'));
+    expect(bucketInstance).toBeInTheDocument();
   });
 });
