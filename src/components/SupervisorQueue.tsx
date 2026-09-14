@@ -32,11 +32,15 @@ function PicklistItem({
   channel,
   gatePassNo,
   queuePos,
+  ageLabel,
+  unassigned,
 }: {
   f: FacilityPicklist;
   channel: string;
   gatePassNo?: string;
   queuePos?: number;
+  ageLabel?: string;
+  unassigned?: boolean;
 }) {
   // FacilityBlock renders one input + one select per line — mounting all of
   // them for every picklist in the queue (hundreds at once, thousands of
@@ -57,6 +61,7 @@ function PicklistItem({
       <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-lg p-2.5 hover:bg-slate-50 dark:hover:bg-slate-900">
         <span className="flex items-center gap-1.5 text-sm">
           {queuePos != null && <Tag tone="info">#{queuePos}</Tag>}
+          {ageLabel != null && <Tag tone={unassigned ? "bad" : "warn"}>{ageLabel}</Tag>}
           {channel && <PartnerMark name={channel} compact />}
           <b>{f.facility}</b>{" "}
           <span className="text-xs text-slate-500 dark:text-slate-400">
