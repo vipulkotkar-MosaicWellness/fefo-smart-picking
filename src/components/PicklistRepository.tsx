@@ -5,16 +5,11 @@ import { groupPicklistFamilies, type PicklistFamily } from "../lib/picklistFamil
 import { activeTasks, effectiveGatePassNo, useStore } from "../lib/store";
 import type { PickingTask } from "../lib/types";
 import { gatePassBulkCsv, uniwareCsv } from "../lib/uniwareExport";
+import { roundLabel, RoundTabs } from "./RoundTabs";
 import { Button, Card, Tag } from "./Ui";
 
 function timeLabel(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-}
-
-function roundLabel(round: number): string {
-  if (round === 1) return "Original";
-  if (round === 2) return "Not-Found Re-offer";
-  return `Round ${round}`;
 }
 
 function FamilyRow({
@@ -42,22 +37,7 @@ function FamilyRow({
           <span className="text-sm font-semibold">{gatePassNo ?? <span className="text-amber-700 dark:text-amber-400">Gate pass pending</span>}</span>
           <span className="ml-2 text-[11px] text-slate-500 dark:text-slate-400">{family.taskNo} · {active.facility}</span>
         </div>
-        {hasAlternates && (
-          <div className="flex gap-1 rounded-md border border-slate-300 bg-white p-0.5 dark:border-slate-600 dark:bg-slate-800">
-            {family.rounds.map((r) => (
-              <button
-                key={r.round}
-                onClick={() => onSelectRound(r.round)}
-                className={`rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
-                  active.round === r.round ? "bg-teal-700 text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
-                }`}
-              >
-                {roundLabel(r.round)}
-                {r.round === 1 && r.bad > 0 && <Tag tone="bad">short</Tag>}
-              </button>
-            ))}
-          </div>
-        )}
+        {hasAlternates && <RoundTabs family={family} selectedRound={active.round} onSelectRound={onSelectRound} />}
       </div>
 
       <table className="w-full border-collapse text-xs">
@@ -129,7 +109,7 @@ export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[]
             downloadCsv(
               gatePassBulkCsv(
                 families.flatMap((fam) => {
-                  const r = fam.rounds.find((x) => x.round === (selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round)) ?? fam.rounds[fam.rounds.length - 1];
+                  const r = fam.rounds.find((x) => x.round === (selectedRounds[fam.key] ?? fam.rounds[0].round)) ?? fam.rounds[0];
                   const gp = effectiveGatePassNo(fam.rounds[0], taskByNo.get(fam.taskNo)) ?? fam.taskNo;
                   return [{ gatePassNo: gp, lines: r.lines }];
                 }),
@@ -151,7 +131,7 @@ export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[]
               family={fam}
               gatePassNo={effectiveGatePassNo(fam.rounds[0], t)}
               createdByName={t?.createdByName}
-              selectedRound={selectedRounds[fam.key] ?? fam.rounds[fam.rounds.length - 1].round}
+              selectedRound={selectedRounds[fam.key] ?? fam.rounds[0].round}
               onSelectRound={(round) => setSelectedRounds((prev) => ({ ...prev, [fam.key]: round }))}
             />
           );

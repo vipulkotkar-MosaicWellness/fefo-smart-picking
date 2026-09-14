@@ -145,7 +145,7 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
       </div>
       {f.gp && (
         <div className="my-1.5 rounded-md bg-emerald-50 px-2 py-1.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-          Gatepass {f.gp} · picked {f.pickedTotal}{f.bad ? ` · ${f.bad} not found` : ""}
+          <span className="font-normal text-emerald-700 dark:text-emerald-400">Internal ref:</span> {f.gp} · picked {f.pickedTotal}{f.bad ? ` · ${f.bad} not found` : ""}
         </div>
       )}
 
