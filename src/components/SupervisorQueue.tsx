@@ -27,6 +27,9 @@ function createdAtOf(f: FacilityPicklist, tasks: ReturnType<typeof useStore.getS
   return f.createdAt ?? tasks.find((t) => t.no === f.taskNo)?.createdAt ?? new Date(0).toISOString();
 }
 
+// ageLabel and unassigned are meant to be passed together (both or neither):
+// unassigned only affects the badge's tone, so unassigned=true with no
+// ageLabel renders nothing and silently drops the intended signal.
 function PicklistItem({
   f,
   channel,
