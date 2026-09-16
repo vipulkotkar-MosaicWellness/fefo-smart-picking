@@ -49,6 +49,57 @@ function taskWithHistory(): PickingTask {
   };
 }
 
+// Mirrors a real production case (GPSLMH10461): a single not-found event on
+// round 1 got re-offered to TWO facilities at once, so both new rounds carry
+// round: 2 — one on SL Mother Hub, one on SL Ambient. Only their `no` (and
+// gate pass) tells them apart.
+function taskWithSplitRoundTwo(): PickingTask {
+  return {
+    no: "TASK-SPLIT",
+    channel: "Flipkart",
+    demand: [],
+    shortfall: [],
+    createdAt: "2026-09-14T00:00:00Z",
+    facilities: [
+      {
+        no: "TASK-SPLIT-MH",
+        taskNo: "TASK-SPLIT",
+        facility: "SL Mother Hub",
+        status: "completed",
+        round: 1,
+        bad: 5,
+        gatePassNo: "GP-SPLIT-ORIGINAL",
+        createdAt: "2026-09-14T00:00:00Z",
+        lines: [{ rid: 10, sku: "SKU3", name: "Product 3", facility: "SL Mother Hub", bin: "A1", batch: "B1", exp: [2099, 1], rem: 12, qty: 5, picked: 0, nf: 5 }],
+      },
+      {
+        no: "TASK-SPLIT-MH-R2",
+        taskNo: "TASK-SPLIT",
+        facility: "SL Mother Hub",
+        status: "open",
+        round: 2,
+        bad: 0,
+        gatePassNo: "GP-SPLIT-R2-MH",
+        createdAt: "2026-09-15T00:00:00Z",
+        reofferedFrom: "TASK-SPLIT-MH",
+        lines: [{ rid: 11, sku: "SKU3", name: "Product 3", facility: "SL Mother Hub", bin: "A2", batch: "B2", exp: [2099, 2], rem: 12, qty: 4 }],
+      },
+      {
+        no: "TASK-SPLIT-AMB-R2",
+        taskNo: "TASK-SPLIT",
+        facility: "SL Ambient",
+        status: "open",
+        round: 2,
+        bad: 0,
+        gatePassNo: "GP-SPLIT-R2-AMB",
+        createdAt: "2026-09-15T00:00:00Z",
+        reofferedFrom: "TASK-SPLIT-MH",
+        lines: [{ rid: 12, sku: "SKU3", name: "Product 3", facility: "SL Ambient", bin: "C1", batch: "B3", exp: [2099, 3], rem: 12, qty: 1 }],
+      },
+    ],
+  };
+}
+
 function taskWithoutHistory(): PickingTask {
   return {
     no: "TASK-PLAIN",
@@ -107,6 +158,27 @@ describe("SupervisorQueue — round history", () => {
     await user.click(within(bucket).getByRole("button", { name: /Round 2/ }));
 
     expect(within(bucket).getByText(/GP-ROUND2/)).toBeInTheDocument();
+  });
+
+  it("distinguishes two round-2 cards that share a round number across different facilities", async () => {
+    const user = userEvent.setup();
+    useAuth.setState({ profile: { id: "u1", email: "s@x.com", display_name: "Supervisor", role: "supervisor" } });
+    useStore.setState({ tasks: [taskWithSplitRoundTwo()] });
+    render(<SupervisorQueue />);
+
+    // Both round-2 facilities are open, so each gets its own card in Picking
+    // Pending, and BOTH show all three tabs for the shared family — so the
+    // Ambient tab appears twice (once per card). Scope to the first card's
+    // own container and confirm clicking ITS Ambient tab shows the Ambient
+    // round's gate pass, not the Mother Hub round-2's (the bug: both share
+    // round: 2, so a lookup keyed on round number alone can't tell them
+    // apart and silently resolves to whichever comes first).
+    const ambientTabs = screen.getAllByRole("button", { name: /Round 2 · SL Ambient/ });
+    expect(ambientTabs.length).toBeGreaterThan(0);
+    const card = ambientTabs[0].closest(".mt-3") as HTMLElement;
+    await user.click(ambientTabs[0]);
+
+    expect(within(card).getByText(/GP-SPLIT-R2-AMB/)).toBeInTheDocument();
   });
 
   it("shows no round tabs for a picklist with no re-offer history", () => {

@@ -15,7 +15,7 @@ function round(overrides: Partial<FacilityPicklist> = {}): FacilityPicklist {
 describe("RoundTabs", () => {
   it("renders nothing for a single-round family", () => {
     const family: PicklistFamily = { key: "T-MH", taskNo: "T", rounds: [round()], latestCreatedAt: "2026-09-14T00:00:00Z" };
-    const { container } = render(<RoundTabs family={family} selectedRound={1} onSelectRound={() => {}} />);
+    const { container } = render(<RoundTabs family={family} selectedNo="T-MH" onSelectNo={() => {}} />);
     expect(container).toBeEmptyDOMElement();
   });
 
@@ -25,7 +25,7 @@ describe("RoundTabs", () => {
       rounds: [round({ round: 1, facility: "SL Mother Hub" }), round({ no: "T-AMB-R2", round: 2, facility: "SL Ambient" })],
       latestCreatedAt: "2026-09-14T00:00:00Z",
     };
-    render(<RoundTabs family={family} selectedRound={1} onSelectRound={() => {}} />);
+    render(<RoundTabs family={family} selectedNo="T-MH" onSelectNo={() => {}} />);
     expect(screen.getByText(/Original/)).toBeInTheDocument();
     expect(screen.getByText(/SL Mother Hub/)).toBeInTheDocument();
     expect(screen.getByText(/Round 2/)).toBeInTheDocument();
@@ -42,21 +42,41 @@ describe("RoundTabs", () => {
       ],
       latestCreatedAt: "2026-09-14T00:00:00Z",
     };
-    render(<RoundTabs family={family} selectedRound={1} onSelectRound={() => {}} />);
+    render(<RoundTabs family={family} selectedNo="T-MH" onSelectNo={() => {}} />);
     const markers = screen.getAllByTitle("Moved to a different facility than the previous round");
     expect(markers).toHaveLength(1);
   });
 
-  it("calls onSelectRound with the clicked round's number", async () => {
+  it("calls onSelectNo with the clicked round's picklist number", async () => {
     const user = userEvent.setup();
-    const onSelectRound = vi.fn();
+    const onSelectNo = vi.fn();
     const family: PicklistFamily = {
       key: "T-MH", taskNo: "T",
       rounds: [round({ round: 1 }), round({ no: "T-MH-R2", round: 2 })],
       latestCreatedAt: "2026-09-14T00:00:00Z",
     };
-    render(<RoundTabs family={family} selectedRound={1} onSelectRound={onSelectRound} />);
+    render(<RoundTabs family={family} selectedNo="T-MH" onSelectNo={onSelectNo} />);
     await user.click(screen.getByRole("button", { name: /Round 2/ }));
-    expect(onSelectRound).toHaveBeenCalledWith(2);
+    expect(onSelectNo).toHaveBeenCalledWith("T-MH-R2");
+  });
+
+  it("distinguishes two rounds that share the same round number on different facilities (a single not-found event re-offered to both at once)", async () => {
+    const user = userEvent.setup();
+    const onSelectNo = vi.fn();
+    const family: PicklistFamily = {
+      key: "T-MH", taskNo: "T",
+      rounds: [
+        round({ round: 1, facility: "SL Mother Hub" }),
+        round({ no: "T-MH-R2", round: 2, facility: "SL Mother Hub" }),
+        round({ no: "T-AMB-R2", round: 2, facility: "SL Ambient" }),
+      ],
+      latestCreatedAt: "2026-09-14T00:00:00Z",
+    };
+    render(<RoundTabs family={family} selectedNo="T-MH" onSelectNo={onSelectNo} />);
+    const ambientTab = screen.getByRole("button", { name: /Round 2 · SL Ambient/ });
+    await user.click(ambientTab);
+    // Must resolve to the Ambient round specifically, not fall back to the
+    // first round: 2 entry (Mother Hub) just because they share a number.
+    expect(onSelectNo).toHaveBeenCalledWith("T-AMB-R2");
   });
 });

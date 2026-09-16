@@ -70,8 +70,13 @@ function PicklistItem({
   // Defaults to Round 1 (Original) — never the latest/most dramatic round —
   // so a supervisor opening a card sees what the order originally looked
   // like before anything went not-found, not "Round 3 / Not Found" first.
-  const [selectedRound, setSelectedRound] = useState(1);
-  const active = hasHistory ? (family!.rounds.find((r) => r.round === selectedRound) ?? f) : f;
+  // Keyed on `no` (the round's unique picklist number), not its `round`
+  // number: a single not-found event can re-offer to more than one facility
+  // at once, so two rounds can both carry round: 2 (one per facility) — only
+  // `no` tells them apart.
+  const [selectedNo, setSelectedNo] = useState<string | undefined>(undefined);
+  const defaultNo = family?.rounds[0]?.no;
+  const active = hasHistory ? (family!.rounds.find((r) => r.no === (selectedNo ?? defaultNo)) ?? f) : f;
   const activeChannel = active === f ? channel : channelOf(active, tasks);
   const activeGatePass = active === f ? gatePassNo : gatePassOf(active, tasks);
 
@@ -84,7 +89,7 @@ function PicklistItem({
     <div className="mt-3">
       {hasHistory && (
         <div className="mb-1">
-          <RoundTabs family={family!} selectedRound={selectedRound} onSelectRound={setSelectedRound} />
+          <RoundTabs family={family!} selectedNo={selectedNo ?? defaultNo!} onSelectNo={setSelectedNo} />
         </div>
       )}
       <details

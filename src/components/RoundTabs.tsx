@@ -18,15 +18,23 @@ export function roundLabel(round: number): string {
  * neutral gray/white for the rest, and a single small amber dot as the
  * only additional marker — meaning "this round's facility differs from the
  * previous round's," not a new color per state.
+ *
+ * Selection is keyed on each round's `no` (its unique picklist number), not
+ * its `round` number — a single not-found event can re-offer to more than
+ * one facility at once, producing two rounds that both carry round: 2 (one
+ * per facility). `no` is the only field guaranteed unique per round; keying
+ * on `round` would make those two tabs indistinguishable to onSelectNo and
+ * React's key, so clicking one would silently resolve to whichever of the
+ * two happened to come first in the array.
  */
 export function RoundTabs({
   family,
-  selectedRound,
-  onSelectRound,
+  selectedNo,
+  onSelectNo,
 }: {
   family: PicklistFamily;
-  selectedRound: number;
-  onSelectRound: (round: number) => void;
+  selectedNo: string;
+  onSelectNo: (no: string) => void;
 }) {
   if (family.rounds.length <= 1) return null;
   return (
@@ -36,10 +44,10 @@ export function RoundTabs({
         const facilityChanged = i > 0 && prev.facility !== r.facility;
         return (
           <button
-            key={r.round}
-            onClick={() => onSelectRound(r.round)}
+            key={r.no}
+            onClick={() => onSelectNo(r.no)}
             className={`rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
-              selectedRound === r.round ? "bg-teal-700 text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+              selectedNo === r.no ? "bg-teal-700 text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
             }`}
           >
             {roundLabel(r.round)} · {r.facility}
