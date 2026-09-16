@@ -1239,6 +1239,22 @@ export const useStore = create<AppState>()(
           const extraSkipped: BinSkip[] = [];
           const reserved = (key: string) => reservedFor(tasks, key);
           const heldKeysForRound2 = activeHoldKeys(state.holds);
+          // The real Hold records for THIS completion's own not-found lines
+          // aren't written until after this whole action finishes (see the
+          // holdsToCreate/placeHold loop below, which necessarily runs after
+          // set()) — so activeHoldKeys(state.holds) above can't see them yet.
+          // Without this, the re-offer we're about to build could send the
+          // very next round straight back to a bin+batch this picklist just
+          // reported not-found for, since nothing else about that lot changed
+          // in `stock`. Fold this completion's own not-found keys in
+          // immediately so the exclusion applies to the re-offer that caused
+          // them, not just to whichever completion happens next. Real
+          // incident: GPSLMH10477's round 2 was generated 10ms after round 1
+          // completed and landed back on round 1's exact bin (R7-C19-002)
+          // and batch (BA036161) for this reason.
+          for (const l of completedFacility.lines) {
+            if (l.nf) heldKeysForRound2.add(holdKey(l.sku, completedFacility.facility, l.bin, l.batch));
+          }
           // Same crash shape as the missing-channel-rule case above:
           // state.skus[sku] used to be read unguarded here, so a not-found
           // SKU that isn't in this browser's current stock/skus snapshot
