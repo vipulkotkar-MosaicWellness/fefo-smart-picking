@@ -16,16 +16,20 @@ function FamilyRow({
   family,
   gatePassNo,
   createdByName,
-  selectedRound,
-  onSelectRound,
+  selectedNo,
+  onSelectNo,
 }: {
   family: PicklistFamily;
   gatePassNo?: string;
   createdByName?: string;
-  selectedRound: number;
-  onSelectRound: (round: number) => void;
+  selectedNo: string;
+  onSelectNo: (no: string) => void;
 }) {
-  const active = family.rounds.find((r) => r.round === selectedRound) ?? family.rounds[family.rounds.length - 1];
+  // Keyed on `no` (each round's unique picklist number), not `round` number
+  // — a single not-found event can re-offer to more than one facility at
+  // once, so two rounds can share the same round number (one per facility);
+  // `no` is the only field that still tells them apart. See RoundTabs.tsx.
+  const active = family.rounds.find((r) => r.no === selectedNo) ?? family.rounds[family.rounds.length - 1];
   const hasAlternates = family.rounds.length > 1;
   const batches = [...new Set(active.lines.map((l) => l.batch))];
   const now = new Date();
@@ -37,7 +41,7 @@ function FamilyRow({
           <span className="text-sm font-semibold">{gatePassNo ?? <span className="text-amber-700 dark:text-amber-400">Gate pass pending</span>}</span>
           <span className="ml-2 text-[11px] text-slate-500 dark:text-slate-400">{family.taskNo} · {active.facility}</span>
         </div>
-        {hasAlternates && <RoundTabs family={family} selectedRound={active.round} onSelectRound={onSelectRound} />}
+        {hasAlternates && <RoundTabs family={family} selectedNo={active.no} onSelectNo={onSelectNo} />}
       </div>
 
       <table className="w-full border-collapse text-xs">
@@ -81,7 +85,7 @@ function FamilyRow({
 export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[] } = {}) {
   const storeTasks = useStore((s) => s.tasks);
   const tasks = tasksProp ?? activeTasks(storeTasks);
-  const [selectedRounds, setSelectedRounds] = useState<Record<string, number>>({});
+  const [selectedNos, setSelectedNos] = useState<Record<string, string>>({});
 
   const taskByNo = new Map(tasks.map((t) => [t.no, t]));
   // Discarded facility picklists are a separate concept from archived tasks
@@ -109,7 +113,7 @@ export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[]
             downloadCsv(
               gatePassBulkCsv(
                 families.flatMap((fam) => {
-                  const r = fam.rounds.find((x) => x.round === (selectedRounds[fam.key] ?? fam.rounds[0].round)) ?? fam.rounds[0];
+                  const r = fam.rounds.find((x) => x.no === (selectedNos[fam.key] ?? fam.rounds[0].no)) ?? fam.rounds[0];
                   const gp = effectiveGatePassNo(fam.rounds[0], taskByNo.get(fam.taskNo)) ?? fam.taskNo;
                   return [{ gatePassNo: gp, lines: r.lines }];
                 }),
@@ -131,8 +135,8 @@ export function PicklistRepository({ tasks: tasksProp }: { tasks?: PickingTask[]
               family={fam}
               gatePassNo={effectiveGatePassNo(fam.rounds[0], t)}
               createdByName={t?.createdByName}
-              selectedRound={selectedRounds[fam.key] ?? fam.rounds[0].round}
-              onSelectRound={(round) => setSelectedRounds((prev) => ({ ...prev, [fam.key]: round }))}
+              selectedNo={selectedNos[fam.key] ?? fam.rounds[0].no}
+              onSelectNo={(no) => setSelectedNos((prev) => ({ ...prev, [fam.key]: no }))}
             />
           );
         })}

@@ -26,6 +26,15 @@
         "value": "arial",
         "createdAt": "2026-09-14T16:17:45.470Z",
         "reason": "Print-only table style (line 58) predates this session and this task's change; Arial is a deliberate, standard choice for print reliability across printer drivers/PDF renderers, not the app's UI font — not a branding-personality concern the check is meant to catch."
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/RoundTabs.tsx"
+        ],
+        "createdAt": "2026-09-16T00:00:00.000Z",
+        "reason": "Selected/unselected tab ternary (bg-teal-700 text-white vs text-slate-600/300) — the two branches never render on the same element. Same false-positive pattern already verified and ignored for StockHolds.tsx and Reports.tsx this session."
       }
     ]
   }
