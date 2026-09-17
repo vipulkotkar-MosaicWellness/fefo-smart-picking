@@ -174,6 +174,11 @@ export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: 
   const barW = 24;
   const chartW = Math.max(480 - padL - padR, days.length * slot);
   const w = padL + chartW + padR;
+  // Shared by the bar tip, its value label, and the trendline dot below —
+  // all three must floor the same way (a day at/near 0% never fully
+  // collapses to the baseline) so they visually agree with each other.
+  const pointX = (i: number) => padL + slot * i + slot / 2;
+  const pointY = (pct: number) => padT + chartH - Math.max((pct / 100) * chartH, 2);
 
   return (
     <div>
@@ -204,7 +209,7 @@ export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: 
             const slotX = padL + slot * i;
             const barX = slotX + (slot - barW) / 2;
             const barH = Math.max((d.pct / 100) * chartH, 2);
-            const y = padT + chartH - barH;
+            const y = pointY(d.pct);
             const isSelected = d.date === selectedDate;
             const isHovered = hovered?.date === d.date;
             return (
@@ -213,10 +218,10 @@ export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: 
                 <rect x={barX} y={y} width={barW} height={barH} rx={3} fill={statusColor(d.pct)} opacity={isHovered ? 1 : 0.88} />
                 {isSelected && <rect x={barX - 2} y={y - 2} width={barW + 4} height={barH + 2} rx={4} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-teal-700 dark:text-teal-300" />}
                 {/* Value at the tip — text token colour, never the bar's own hue, so it stays legible over any status colour. */}
-                <text x={slotX + slot / 2} y={y - 6} textAnchor="middle" fontSize="11" fontWeight={700} fill="currentColor" opacity={isHovered || isSelected ? 1 : 0.85}>
+                <text x={pointX(i)} y={y - 6} textAnchor="middle" fontSize="11" fontWeight={700} fill="currentColor" opacity={isHovered || isSelected ? 1 : 0.85}>
                   {pctDisplay(d.pct)}
                 </text>
-                <text x={slotX + slot / 2} y={h - 9} textAnchor="middle" fontSize="11" fill="currentColor" opacity={isHovered || isSelected ? 0.95 : 0.6} fontWeight={isSelected ? 700 : 400}>
+                <text x={pointX(i)} y={h - 9} textAnchor="middle" fontSize="11" fill="currentColor" opacity={isHovered || isSelected ? 0.95 : 0.6} fontWeight={isSelected ? 700 : 400}>
                   {shortDateLabel(d.date)}
                 </text>
                 {/* Hit target: the whole slot, taller than the bar, so a short bar (a bad day) is just as easy to hover/click as a tall one. */}
@@ -242,12 +247,14 @@ export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: 
           })}
           {showTrendline && days.length > 1 && (
             <polyline
-              points={days.map((d, i) => `${padL + slot * i + slot / 2},${padT + chartH - (d.pct / 100) * chartH}`).join(" ")}
+              points={days.map((d, i) => `${pointX(i)},${pointY(d.pct)}`).join(" ")}
               fill="none"
               stroke="currentColor"
               strokeWidth={1.5}
               className="text-teal-700 dark:text-teal-300"
               opacity={0.7}
+              pointerEvents="none"
+              aria-hidden="true"
             />
           )}
           {showTrendline &&
@@ -255,11 +262,13 @@ export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: 
             days.map((d, i) => (
               <circle
                 key={`dot-${d.date}`}
-                cx={padL + slot * i + slot / 2}
-                cy={padT + chartH - (d.pct / 100) * chartH}
+                cx={pointX(i)}
+                cy={pointY(d.pct)}
                 r={3}
                 fill="currentColor"
                 className="text-teal-700 dark:text-teal-300"
+                pointerEvents="none"
+                aria-hidden="true"
               />
             ))}
           <line x1={padL} y1={padT + chartH} x2={w - padR} y2={padT + chartH} stroke="currentColor" strokeOpacity={0.25} />
