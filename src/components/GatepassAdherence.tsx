@@ -359,11 +359,16 @@ export function GatepassAdherence() {
   const baselineWeeks = useMemo(() => byWeek(baselineRows), [baselineRows]);
   const metric1Days = caseBasedDays.slice(-15);
   const metric2Days = caseBasedDays.slice(-15).map((d) => ({ ...d, pct: computePurityMetrics(d.rows, fefoDeviations).metric2Pct }));
-  // Scoped to the SAME trailing-15-day window the charts/tables above show —
-  // not all of caseBasedRows — so the "Last 15 days · N units breached"
-  // subtitle can never silently drift into showing a since-launch
-  // cumulative total once the case-based era runs longer than 15 days.
-  const purity = computePurityMetrics(metric1Days.flatMap((d) => d.rows), fefoDeviations);
+  // Real day count shown in the window, not a hardcoded "15" — right after
+  // launch there's only a handful of days, and a "Last 15 days" label would
+  // overstate the window the chart/table actually cover.
+  const windowDayCount = metric1Days.length;
+  // Scoped to the SAME trailing window the charts/tables above show — not
+  // all of caseBasedRows — so the breach-units subtitle can never silently
+  // drift into showing a since-launch cumulative total once the case-based
+  // era runs longer than 15 days.
+  const windowRows = metric1Days.flatMap((d) => d.rows);
+  const purity = computePurityMetrics(windowRows, fefoDeviations);
 
   const shellCls = "rounded-xl border border-[var(--fefo-line)] bg-[var(--fefo-surface)] p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800";
 
@@ -431,7 +436,7 @@ export function GatepassAdherence() {
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <div className="rounded-2xl border border-[var(--fefo-line)] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
               <p className="mb-1 text-lg font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Pure case-based %</p>
-              <p className="mb-3 text-sm text-[var(--fefo-muted)] dark:text-slate-400">Last 15 days · same compliance rule as always</p>
+              <p className="mb-3 text-sm text-[var(--fefo-muted)] dark:text-slate-400">Last {windowDayCount} day{windowDayCount === 1 ? "" : "s"} · same compliance rule as always</p>
               <TrendChart days={metric1Days} selectedDate={null} onSelectDate={() => {}} showTrendline />
               <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
                 <table className="w-full border-collapse text-sm tabular-nums">
@@ -461,7 +466,7 @@ export function GatepassAdherence() {
             <div className="rounded-2xl border border-[var(--fefo-line)] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
               <p className="mb-1 text-lg font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Case-based + FEFO breach %</p>
               <p className="mb-3 text-sm text-[var(--fefo-muted)] dark:text-slate-400">
-                Last 15 days · {purity.breachQty.toLocaleString()} units breached FEFO out of {purity.instructedQty.toLocaleString()}
+                Last {windowDayCount} day{windowDayCount === 1 ? "" : "s"} · {purity.breachQty.toLocaleString()} units breached FEFO out of {purity.instructedQty.toLocaleString()}
               </p>
               <TrendChart days={metric2Days} selectedDate={null} onSelectDate={() => {}} showTrendline />
               <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
