@@ -357,9 +357,13 @@ export function GatepassAdherence() {
   const baselineRows = rows.filter((r) => r.report_date < CASE_BASED_LAUNCH_DATE);
   const caseBasedDays = useMemo(() => byDay(caseBasedRows), [caseBasedRows]);
   const baselineWeeks = useMemo(() => byWeek(baselineRows), [baselineRows]);
-  const purity = computePurityMetrics(caseBasedRows, fefoDeviations);
   const metric1Days = caseBasedDays.slice(-15);
   const metric2Days = caseBasedDays.slice(-15).map((d) => ({ ...d, pct: computePurityMetrics(d.rows, fefoDeviations).metric2Pct }));
+  // Scoped to the SAME trailing-15-day window the charts/tables above show —
+  // not all of caseBasedRows — so the "Last 15 days · N units breached"
+  // subtitle can never silently drift into showing a since-launch
+  // cumulative total once the case-based era runs longer than 15 days.
+  const purity = computePurityMetrics(metric1Days.flatMap((d) => d.rows), fefoDeviations);
 
   const shellCls = "rounded-xl border border-[var(--fefo-line)] bg-[var(--fefo-surface)] p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800";
 
