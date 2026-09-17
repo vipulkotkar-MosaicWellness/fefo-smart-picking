@@ -1076,6 +1076,9 @@ export const useStore = create<AppState>()(
 
         const allocations = computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(get().holds), get().caseSizes);
 
+        // Fires once per generate() call against the planner's original demand list — NOT
+        // re-run on not-found re-offer rounds (see the round-2+ re-offer logic in applyPicks
+        // below), since a re-offer isn't a new order, just a retry of one already logged here.
         if (isSupabaseConfigured) {
           const gaps = demand.filter((d) => !get().caseSizes[d.sku]).map((d) => ({ sku: d.sku, qty: d.qty }));
           if (gaps.length > 0) {

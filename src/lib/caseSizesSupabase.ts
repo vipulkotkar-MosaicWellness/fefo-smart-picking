@@ -65,14 +65,19 @@ export interface CaseSizeGapRow {
  * never from a preview, so this table only ever reflects orders that
  * actually happened. Reads any existing row first and adds onto it
  * (occurrences/total_qty accumulate, first_seen_at is preserved) rather
- * than overwriting — this is a running count, not a snapshot.
+ * than overwriting — this is a running count, not a snapshot. Concurrent
+ * calls for the same SKU can race (read-then-upsert, no DB-side atomic
+ * increment) and under-count; acceptable since this only feeds an Admin
+ * analytics dashboard, not anything that gates picking.
  */
 export async function logCaseSizeGaps(occurrences: { sku: string; qty: number }[]): Promise<void> {
   if (!supabase || occurrences.length === 0) return;
   const skus = [...new Set(occurrences.map((o) => o.sku))];
   const { data, error: fetchError } = await supabase.from("case_size_gaps").select("sku,first_seen_at,occurrences,total_qty").in("sku", skus);
   if (fetchError) throw fetchError;
-  const existing = new Map((data ?? []).map((r) => [r.sku, r as CaseSizeGapRow] as const));
+  // Not cast to CaseSizeGapRow: that select omits last_seen_at, and a full-interface cast would
+  // dishonestly claim it's present.
+  const existing = new Map((data ?? []).map((r) => [r.sku, r as Pick<CaseSizeGapRow, "sku" | "first_seen_at" | "occurrences" | "total_qty">] as const));
   const now = new Date().toISOString();
   const bySku = new Map<string, { qty: number; count: number }>();
   for (const o of occurrences) {
