@@ -24,7 +24,7 @@ export function computeFefoDeviation(caseBasedLines: PickLine[], strictFefoLines
   function byLot(lines: PickLine[]): Map<string, { sku: string; bin: string; batch: string; qty: number }> {
     const map = new Map<string, { sku: string; bin: string; batch: string; qty: number }>();
     for (const l of lines) {
-      const key = `${l.sku}|${l.bin}|${l.batch}`;
+      const key = `${l.sku}::${l.bin}::${l.batch}`;
       const cur = map.get(key) ?? { sku: l.sku, bin: l.bin, batch: l.batch, qty: 0 };
       cur.qty += l.qty;
       map.set(key, cur);
