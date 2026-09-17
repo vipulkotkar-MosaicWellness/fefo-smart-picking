@@ -10,7 +10,7 @@
 
 **Business context (for whoever picks this up):** management gave conditional approval after a 9-day real-data simulation found this trades away ~0.9% of picked volume's FEFO-purity (8,080 of 880,905 units over Aug 25–Sep 2 would ship from a non-nearest-expiry batch — concentrated in a handful of large-case/fragmented-lot SKUs, not diffuse) in exchange for picking speed. A slotting/putaway fix (Phase 2, separate plan, tied to the EasyEcom rotation) is expected to shrink that cost further later — this plan is Phase 1 only: the picking engine itself.
 
-**Sequencing:** Task 1 (type) has no dependents-order requirement but logically comes first. Task 2 (engine) is the core and should be done and fully tested before Tasks 4-5 wire it in, since those tasks' own tests assume Task 2's exact behavior. Tasks 3-4 (data table + store wiring) can happen in parallel with Task 2 but must land before Task 5 (which needs live `caseSizes` in the store). Tasks 6-9 (display, admin UI, export, backfill) are independent of each other once Task 5 is done.
+**Sequencing:** Task 1 (type) has no dependents-order requirement but logically comes first. Task 2 (engine) is the core and should be done and fully tested before Tasks 4-5 wire it in, since those tasks' own tests assume Task 2's exact behavior. Tasks 3-4 (data table + store wiring) can happen in parallel with Task 2 but must land before Task 5 (which needs live `caseSizes` in the store). Tasks 6-9 (display, admin UI, export) are independent of each other once Task 5 is done. Task 10 (gap logging) needs Task 4's `generate()` wiring in place. Task 11 (gap dashboard) needs Task 10. Task 12 (backfill) should run last, once Task 8's Admin screen and Task 11's gap dashboard both exist — that way, the moment the 276 known case sizes are loaded in, whatever's left over is immediately visible as real, actionable gaps rather than a silent unknown.
 
 ---
 
@@ -1131,7 +1131,421 @@ git commit -m "feat: add cases/eaches columns to the human-facing share/CSV expo
 
 ---
 
-### Task 10: One-time backfill of real case sizes
+### Task 10: Log every real order for a SKU with no configured case size
+
+**Files:**
+- Create: `supabase/add_case_size_gaps_table.sql`
+- Modify: `src/lib/caseSizesSupabase.ts`
+- Modify: `src/lib/store.ts` (`generate()`)
+- Test: `tests/lib/caseSizeGaps.test.ts`, `tests/demand/caseSizeGapLogging.test.ts`
+
+"Any product with no case size just behaves as today" is the right safety net, but it must not be silent — every time a REAL order (`generate()`, not the Demand Planner's preview) is created for a SKU with no case size, log it: which SKU, how much quantity, when. This is the raw data Task 11's dashboard is built on. Deliberately scoped to real orders only — previewing an allocation in Demand Planner never writes a log entry, since nothing actually happened yet.
+
+- [ ] **Step 1: Write the failing tests**
+
+```ts
+// tests/lib/caseSizeGaps.test.ts
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../../src/lib/supabaseClient", () => ({
+  isSupabaseConfigured: true,
+  supabase: {
+    from: vi.fn(),
+  },
+}));
+
+describe("logCaseSizeGaps", () => {
+  it("creates a new row for a SKU seen for the first time", async () => {
+    const { logCaseSizeGaps } = await import("../../src/lib/caseSizesSupabase");
+    const { supabase } = await import("../../src/lib/supabaseClient");
+    const selectChain = { in: vi.fn(async () => ({ data: [], error: null })) };
+    const upsert = vi.fn(async () => ({ error: null }));
+    vi.mocked(supabase!.from).mockImplementation((table: string) => {
+      if (table !== "case_size_gaps") throw new Error(`unexpected table ${table}`);
+      return { select: vi.fn(() => selectChain), upsert } as never;
+    });
+
+    await logCaseSizeGaps([{ sku: "SKU-NOCASE", qty: 50 }]);
+
+    expect(upsert).toHaveBeenCalledWith(
+      [expect.objectContaining({ sku: "SKU-NOCASE", occurrences: 1, total_qty: 50 })],
+      { onConflict: "sku" },
+    );
+  });
+
+  it("merges multiple demand lines for the same SKU in one call into a single row", async () => {
+    const { logCaseSizeGaps } = await import("../../src/lib/caseSizesSupabase");
+    const { supabase } = await import("../../src/lib/supabaseClient");
+    const selectChain = { in: vi.fn(async () => ({ data: [], error: null })) };
+    const upsert = vi.fn(async () => ({ error: null }));
+    vi.mocked(supabase!.from).mockImplementation(() => ({ select: vi.fn(() => selectChain), upsert }) as never);
+
+    await logCaseSizeGaps([
+      { sku: "SKU-MULTI", qty: 20 },
+      { sku: "SKU-MULTI", qty: 15 },
+    ]);
+
+    expect(upsert).toHaveBeenCalledWith(
+      [expect.objectContaining({ sku: "SKU-MULTI", occurrences: 2, total_qty: 35 })],
+      { onConflict: "sku" },
+    );
+  });
+
+  it("accumulates onto an existing row instead of overwriting it", async () => {
+    const { logCaseSizeGaps } = await import("../../src/lib/caseSizesSupabase");
+    const { supabase } = await import("../../src/lib/supabaseClient");
+    const selectChain = {
+      in: vi.fn(async () => ({
+        data: [{ sku: "SKU-SEEN-BEFORE", first_seen_at: "2026-09-01T00:00:00.000Z", occurrences: 3, total_qty: 100 }],
+        error: null,
+      })),
+    };
+    const upsert = vi.fn(async () => ({ error: null }));
+    vi.mocked(supabase!.from).mockImplementation(() => ({ select: vi.fn(() => selectChain), upsert }) as never);
+
+    await logCaseSizeGaps([{ sku: "SKU-SEEN-BEFORE", qty: 25 }]);
+
+    const [[rows]] = upsert.mock.calls;
+    expect(rows[0].first_seen_at).toBe("2026-09-01T00:00:00.000Z"); // preserved, not reset
+    expect(rows[0].occurrences).toBe(4); // 3 + 1
+    expect(rows[0].total_qty).toBe(125); // 100 + 25
+  });
+
+  it("does nothing when the list is empty", async () => {
+    const { logCaseSizeGaps } = await import("../../src/lib/caseSizesSupabase");
+    const { supabase } = await import("../../src/lib/supabaseClient");
+    await logCaseSizeGaps([]);
+    expect(supabase!.from).not.toHaveBeenCalled();
+  });
+});
+```
+
+```ts
+// tests/demand/caseSizeGapLogging.test.ts
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { StockRow } from "../../src/lib/types";
+
+const logCaseSizeGaps = vi.fn(async () => undefined);
+vi.mock("../../src/lib/caseSizesSupabase", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/caseSizesSupabase")>();
+  return { ...actual, logCaseSizeGaps };
+});
+
+const CHANNEL = "Internal Stock Transfer - Warehouse - Local";
+
+describe("generate() — logs a gap for a real order on a SKU with no case size", () => {
+  afterEach(() => {
+    logCaseSizeGaps.mockClear();
+    vi.resetModules();
+  });
+
+  it("logs the SKU and quantity when generate() actually creates a task", async () => {
+    const { useStore } = await import("../../src/lib/store");
+    const initialState = useStore.getState();
+
+    const stock: StockRow[] = [
+      { rid: 1, location: "SL Mother Hub", bin: "A1", sku: "SKU-GAP", name: "Product Gap", batch: "B1", exp: [2099, 1], qty: 500, shelf: 24, type: "Good", active: "Active" },
+    ];
+    useStore.setState({ stock, skus: { "SKU-GAP": { name: "Product Gap", shelf: 24 } }, caseSizes: {}, tasks: [] });
+    useStore.getState().setDemand([{ channel: CHANNEL, sku: "SKU-GAP", qty: 75, gatePassNo: "GP-GAP-1" }]);
+
+    await useStore.getState().generate(null, "Tester");
+
+    expect(logCaseSizeGaps).toHaveBeenCalledWith([{ sku: "SKU-GAP", qty: 75 }]);
+
+    useStore.setState(initialState, true);
+  });
+
+  it("does NOT log a SKU that has a configured case size", async () => {
+    const { useStore } = await import("../../src/lib/store");
+    const initialState = useStore.getState();
+
+    const stock: StockRow[] = [
+      { rid: 1, location: "SL Mother Hub", bin: "A1", sku: "SKU-COVERED", name: "Product Covered", batch: "B1", exp: [2099, 1], qty: 500, shelf: 24, type: "Good", active: "Active" },
+    ];
+    useStore.setState({ stock, skus: { "SKU-COVERED": { name: "Product Covered", shelf: 24 } }, caseSizes: { "SKU-COVERED": 30 }, tasks: [] });
+    useStore.getState().setDemand([{ channel: CHANNEL, sku: "SKU-COVERED", qty: 75, gatePassNo: "GP-GAP-2" }]);
+
+    await useStore.getState().generate(null, "Tester");
+
+    expect(logCaseSizeGaps).not.toHaveBeenCalled();
+
+    useStore.setState(initialState, true);
+  });
+});
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `npx vitest run tests/lib/caseSizeGaps.test.ts tests/demand/caseSizeGapLogging.test.ts`
+Expected: FAIL — `logCaseSizeGaps` doesn't exist yet, and `generate()` never calls anything like it.
+
+- [ ] **Step 3: Write minimal implementation**
+
+```sql
+-- supabase/add_case_size_gaps_table.sql
+--
+-- FEFO Smart Picking — tracks every real order placed for a SKU that had no
+-- configured case size at the time, so the Admin gap dashboard (see
+-- add_case_sizes_table.sql for the sibling case_sizes table) can show real,
+-- volume-ranked, order-driven gaps instead of a silent "not covered yet".
+-- Run this in Supabase → SQL Editor, AFTER schema.sql and
+-- schema_step3_complete.sql have already been run.
+
+create table if not exists case_size_gaps (
+  sku            text primary key,
+  first_seen_at  timestamptz not null default now(),
+  last_seen_at   timestamptz not null default now(),
+  occurrences    integer not null default 0,
+  total_qty      integer not null default 0
+);
+
+alter table case_size_gaps enable row level security;
+
+create policy "read case size gaps" on case_size_gaps for select to authenticated using (true);
+
+-- Written automatically by generate() as a side effect of a real order, so
+-- any role that can create a picklist (planner/admin/super_admin) needs
+-- write access here — not just Admin, unlike case_sizes itself.
+create policy "log case size gaps" on case_size_gaps for insert to authenticated with check (true);
+create policy "update case size gaps" on case_size_gaps for update to authenticated using (true) with check (true);
+```
+
+Append to `src/lib/caseSizesSupabase.ts`:
+
+```ts
+export interface CaseSizeGapRow {
+  sku: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  occurrences: number;
+  total_qty: number;
+}
+
+/**
+ * Logs one gap occurrence per SKU for a batch of demand lines that had no
+ * configured case size — called from generate() for a REAL order only,
+ * never from a preview, so this table only ever reflects orders that
+ * actually happened. Reads any existing row first and adds onto it
+ * (occurrences/total_qty accumulate, first_seen_at is preserved) rather
+ * than overwriting — this is a running count, not a snapshot.
+ */
+export async function logCaseSizeGaps(occurrences: { sku: string; qty: number }[]): Promise<void> {
+  if (!supabase || occurrences.length === 0) return;
+  const skus = [...new Set(occurrences.map((o) => o.sku))];
+  const { data, error: fetchError } = await supabase.from("case_size_gaps").select("sku,first_seen_at,occurrences,total_qty").in("sku", skus);
+  if (fetchError) throw fetchError;
+  const existing = new Map((data ?? []).map((r) => [r.sku, r as CaseSizeGapRow] as const));
+  const now = new Date().toISOString();
+  const bySku = new Map<string, { qty: number; count: number }>();
+  for (const o of occurrences) {
+    const cur = bySku.get(o.sku) ?? { qty: 0, count: 0 };
+    cur.qty += o.qty;
+    cur.count += 1;
+    bySku.set(o.sku, cur);
+  }
+  const rows = [...bySku.entries()].map(([sku, agg]) => {
+    const prev = existing.get(sku);
+    return {
+      sku,
+      first_seen_at: prev?.first_seen_at ?? now,
+      last_seen_at: now,
+      occurrences: (prev?.occurrences ?? 0) + agg.count,
+      total_qty: (prev?.total_qty ?? 0) + agg.qty,
+    };
+  });
+  const { error } = await supabase.from("case_size_gaps").upsert(rows, { onConflict: "sku" });
+  if (error) throw error;
+}
+
+export async function fetchCaseSizeGaps(): Promise<CaseSizeGapRow[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.from("case_size_gaps").select("sku,first_seen_at,last_seen_at,occurrences,total_qty").order("total_qty", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as CaseSizeGapRow[];
+}
+```
+
+Update the `caseSizesSupabase.ts` import line in `src/lib/store.ts` to also bring in `logCaseSizeGaps`:
+```ts
+import { applyCaseSizeRows, fetchCaseSizes, logCaseSizeGaps, subscribeCaseSizes } from "./caseSizesSupabase";
+```
+
+In `generate()`, right after the `computeChannelAllocations` call (the line added/confirmed in Task 4), add:
+```ts
+        const allocations = computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(get().holds), get().caseSizes);
+
+        if (isSupabaseConfigured) {
+          const gaps = demand.filter((d) => !get().caseSizes[d.sku]).map((d) => ({ sku: d.sku, qty: d.qty }));
+          if (gaps.length > 0) {
+            try {
+              await logCaseSizeGaps(gaps);
+            } catch {
+              // Logging failure must never block real task creation — this
+              // is visibility, not a gate.
+            }
+          }
+        }
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `npx vitest run tests/lib/caseSizeGaps.test.ts tests/demand/caseSizeGapLogging.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Run the full suite and typecheck**
+
+Run: `npx vitest run && npx tsc --noEmit`
+Expected: PASS
+
+- [ ] **Step 6: Run the migration against Supabase**
+
+Run `supabase/add_case_size_gaps_table.sql` in Supabase → SQL Editor.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add supabase/add_case_size_gaps_table.sql src/lib/caseSizesSupabase.ts src/lib/store.ts tests/lib/caseSizeGaps.test.ts tests/demand/caseSizeGapLogging.test.ts
+git commit -m "feat: log every real order placed for a SKU with no configured case size"
+```
+
+---
+
+### Task 11: Admin dashboard — case size gap summary
+
+**Files:**
+- Modify: `src/components/AdminConfig.tsx`
+- Test: `tests/admin/caseSizeGapDashboard.test.tsx`
+
+The visibility Vipul asked for directly: how many SKUs are being served correctly with case-based picking, how many are hitting a size gap, and — for the gap SKUs — how much order volume is affected, ranked so the highest-impact gaps surface first. A SKU that had gaps in the past but now has a case size configured (added via Task 8's form) drops off the "needs attention" list automatically — its history stays in the table, just marked resolved, not deleted.
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+// tests/admin/caseSizeGapDashboard.test.tsx
+import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { AdminConfig } from "../../src/components/AdminConfig";
+import { useAuth } from "../../src/lib/authStore";
+import { useStore } from "../../src/lib/store";
+import type { PickingTask } from "../../src/lib/types";
+
+const initialStoreState = useStore.getState();
+const initialAuthState = useAuth.getState();
+afterEach(() => {
+  useStore.setState(initialStoreState, true);
+  useAuth.setState(initialAuthState, true);
+});
+
+function taskDemanding(sku: string, qty: number): PickingTask {
+  return {
+    no: `TASK-${sku}`, channel: "Blinkit", demand: [{ channel: "Blinkit", sku, qty, gatePassNo: undefined }],
+    facilities: [], shortfall: [], createdAt: new Date().toISOString(),
+  };
+}
+
+describe("AdminConfig — case size gap dashboard", () => {
+  it("shows headline counts and a volume-ranked gap table", () => {
+    useAuth.setState({ profile: { id: "u1", email: "a@x.com", display_name: "Admin", role: "super_admin" } });
+    useStore.setState({
+      caseSizes: { "SKU-COVERED": 30 },
+      caseSizeGaps: [
+        { sku: "SKU-BIG-GAP", first_seen_at: "2026-09-01T00:00:00.000Z", last_seen_at: "2026-09-15T00:00:00.000Z", occurrences: 5, total_qty: 900 },
+        { sku: "SKU-SMALL-GAP", first_seen_at: "2026-09-10T00:00:00.000Z", last_seen_at: "2026-09-11T00:00:00.000Z", occurrences: 1, total_qty: 20 },
+      ],
+      skus: {
+        "SKU-COVERED": { name: "Covered Product", shelf: 24 },
+        "SKU-BIG-GAP": { name: "Big Gap Product", shelf: 24 },
+        "SKU-SMALL-GAP": { name: "Small Gap Product", shelf: 24 },
+      },
+      tasks: [taskDemanding("SKU-COVERED", 100), taskDemanding("SKU-BIG-GAP", 900), taskDemanding("SKU-SMALL-GAP", 20)],
+    });
+
+    render(<AdminConfig />);
+
+    expect(screen.getByText(/1 SKU served with case-based picking/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 SKUs affected by a missing case size/i)).toBeInTheDocument();
+
+    // Ranked by volume — the 900-unit gap must appear before the 20-unit one.
+    const rows = screen.getAllByTestId("case-size-gap-row");
+    expect(rows[0]).toHaveTextContent("SKU-BIG-GAP");
+    expect(rows[0]).toHaveTextContent("900");
+    expect(rows[1]).toHaveTextContent("SKU-SMALL-GAP");
+    expect(rows[1]).toHaveTextContent("20");
+  });
+
+  it("a SKU with historical gap entries but now covered by a case size shows as resolved, not as an open gap", () => {
+    useAuth.setState({ profile: { id: "u1", email: "a@x.com", display_name: "Admin", role: "super_admin" } });
+    useStore.setState({
+      caseSizes: { "SKU-NOW-FIXED": 40 },
+      caseSizeGaps: [{ sku: "SKU-NOW-FIXED", first_seen_at: "2026-09-01T00:00:00.000Z", last_seen_at: "2026-09-05T00:00:00.000Z", occurrences: 3, total_qty: 300 }],
+      skus: { "SKU-NOW-FIXED": { name: "Now Fixed Product", shelf: 24 } },
+      tasks: [taskDemanding("SKU-NOW-FIXED", 300)],
+    });
+
+    render(<AdminConfig />);
+
+    expect(screen.getByText(/1 SKU served with case-based picking/i)).toBeInTheDocument();
+    expect(screen.getByText(/0 SKUs affected by a missing case size/i)).toBeInTheDocument();
+    const row = screen.getByTestId("case-size-gap-row-resolved");
+    expect(row).toHaveTextContent("SKU-NOW-FIXED");
+    expect(row).toHaveTextContent(/resolved/i);
+  });
+});
+```
+
+Note: check `AdminConfig.tsx`'s actual current structure before finalizing selectors — the test's job is to prove the two headline counts render correctly and the gap table is sorted by `total_qty` descending, with a resolved SKU visually distinguished and excluded from the "affected" headline count; adapt exact text/markup to what's real once you're in the file.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run tests/admin/caseSizeGapDashboard.test.tsx`
+Expected: FAIL — no gap dashboard exists yet, and `caseSizeGaps` isn't a recognized store field.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Add to `AppState` in `src/lib/store.ts` (near `caseSizes`):
+```ts
+  caseSizeGaps: CaseSizeGapRow[];
+  loadCaseSizeGaps: () => Promise<void>;
+```
+Initial state: `caseSizeGaps: [],`. Action:
+```ts
+      loadCaseSizeGaps: async () => {
+        if (!isSupabaseConfigured) return;
+        try {
+          set({ caseSizeGaps: await fetchCaseSizeGaps() });
+        } catch {
+          // Transient failure — keep whatever's already in state.
+        }
+      },
+```
+Call `loadCaseSizeGaps()` when the Admin screen's case-size section mounts (this is a review dashboard, not data other screens depend on — it doesn't need the global App.tsx mount-effect list or a realtime subscription; loading it when an admin actually opens this section is enough).
+
+In `AdminConfig.tsx`, add a new section under/near Task 8's case-size card:
+- **"served with case-based picking" count**: number of distinct SKUs that (a) appear in at least one line of `tasks[].demand` and (b) have an entry in `caseSizes`.
+- **"affected by a missing case size" count**: number of distinct SKUs in `caseSizeGaps` that do NOT currently have an entry in `caseSizes` (an "open" gap) — a SKU that now has a case size is excluded from this count even if it has historical gap rows.
+- **A table**, one row per `caseSizeGaps` entry, columns: SKU, product name (from `skus[sku]?.name`), total quantity affected, occurrences, first seen, last seen, and a status badge — "Open" for a SKU not in `caseSizes`, "Resolved" for one that now is. Sort open gaps by `total_qty` descending first, then resolved gaps below them (also by `total_qty` descending) — so the dashboard leads with what still needs attention, not with old history.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx vitest run tests/admin/caseSizeGapDashboard.test.tsx`
+Expected: PASS
+
+- [ ] **Step 5: Run the full suite**
+
+Run: `npx vitest run`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/lib/store.ts src/components/AdminConfig.tsx tests/admin/caseSizeGapDashboard.test.tsx
+git commit -m "feat: Admin dashboard showing case-size coverage and volume-ranked gaps"
+```
+
+---
+
+### Task 12: One-time backfill of real case sizes
 
 **Files:**
 - Reference data: `docs/superpowers/specs/2026-09-17-case-sizes-seed.csv` (already generated and verified this session — 276 SKUs, sourced from `Active SKU Config.xlsx`'s "Case Configuration" column, non-numeric/"NA" rows already excluded)
@@ -1180,7 +1594,11 @@ Expected: `MWBWSKP.00206.B0_N` → `300`, `MWMMHTP.0005.AAAA.B0_N` → `190` (ma
 
 Sign into the app, open Admin → the new case sizes card (Task 8) — 276 entries should already be listed, since the app loads `case_sizes` live from Supabase, not from this seed file.
 
-No commit needed for this task (it's a data change, not a code change) — but note in the PR description or a follow-up message to Vipul that the backfill has run and the count that resulted.
+- [ ] **Step 5: Check the gap dashboard (Task 11) for what's actually left**
+
+Open the case-size gap dashboard. Any SKU that already has open-order history logged in `case_size_gaps` (from real orders placed before this backfill ran) and is now covered by one of the 276 backfilled sizes should show as "Resolved," not "Open" — the "affected by a missing case size" headline count should drop accordingly. Whatever's still listed as "Open" afterward is the real, current, volume-ranked worklist — report that number (not "276 loaded, done") as the actual state of coverage, since it's measured against real demand rather than catalog size.
+
+No commit needed for this task (it's a data change, not a code change) — but note in the PR description or a follow-up message to Vipul that the backfill has run, the count that resulted, and what the gap dashboard shows as still open afterward.
 
 ---
 
