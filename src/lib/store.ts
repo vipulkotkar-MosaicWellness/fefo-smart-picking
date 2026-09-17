@@ -23,7 +23,16 @@ import { fetchFacilityLastSynced, fetchStock, fetchSyncState, replaceStock } fro
 import type { SyncSource } from "./syncSource";
 import { deletePickerRow, fetchPickers, insertPicker, renamePickerRow, subscribePickers } from "./pickersSupabase";
 import { applyChannelOverrides, fetchChannelOverrides, markChannelOverrideDeleted, subscribeChannelOverrides, upsertChannelOverride } from "./channelsSupabase";
-import { applyCaseSizeRows, deleteCaseSize as deleteCaseSizeRow, fetchCaseSizes, logCaseSizeGaps, subscribeCaseSizes, upsertCaseSize as upsertCaseSizeRow } from "./caseSizesSupabase";
+import {
+  applyCaseSizeRows,
+  type CaseSizeGapRow,
+  deleteCaseSize as deleteCaseSizeRow,
+  fetchCaseSizeGaps,
+  fetchCaseSizes,
+  logCaseSizeGaps,
+  subscribeCaseSizes,
+  upsertCaseSize as upsertCaseSizeRow,
+} from "./caseSizesSupabase";
 import { fetchAllTasks, fetchTaskByNo, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
   BinSkip,
@@ -626,6 +635,18 @@ export interface AppState {
   caseSizes: Record<string, number>;
   loadCaseSizes: () => Promise<void>;
   startCaseSizesRealtime: () => () => void;
+  // Historical/ongoing record of SKUs that hit a missing-case-size gap on a
+  // real order (see logCaseSizeGaps in caseSizesSupabase.ts, called from
+  // generate()). Loaded on demand for the Admin dashboard section only — NOT
+  // wired into App.tsx's global mount effect and NOT realtime-subscribed
+  // like caseSizes above, since this is a review dashboard, not data any
+  // other screen depends on. A SKU can appear here AND in caseSizes at the
+  // same time (its gap history stays even after an Admin configures a case
+  // size for it going forward) — see AdminConfig's "Resolved" vs "Open"
+  // distinction, which is what actually decides whether a row still counts
+  // as needing attention.
+  caseSizeGaps: CaseSizeGapRow[];
+  loadCaseSizeGaps: () => Promise<void>;
   // Add/update or remove a SKU's case size. Same try/catch + notice pattern
   // as addChannel/deleteChannel, but with no local optimistic update — the
   // realtime subscription (startCaseSizesRealtime) is what actually updates
@@ -707,6 +728,7 @@ export const useStore = create<AppState>()(
       channelRules: { ...CHANNELS },
       channelBuckets: {},
       caseSizes: {},
+      caseSizeGaps: [],
       deletedChannels: [],
       facilityPriority: [...FACILITY_PRIORITY],
       pickers: [...PICKERS_DEFAULT],
@@ -863,6 +885,15 @@ export const useStore = create<AppState>()(
       startCaseSizesRealtime: () => {
         if (!isSupabaseConfigured) return () => {};
         return subscribeCaseSizes(() => void get().loadCaseSizes());
+      },
+
+      loadCaseSizeGaps: async () => {
+        if (!isSupabaseConfigured) return;
+        try {
+          set({ caseSizeGaps: await fetchCaseSizeGaps() });
+        } catch {
+          // Transient failure — keep whatever's already in state.
+        }
       },
 
       addCaseSize: async (sku, size) => {

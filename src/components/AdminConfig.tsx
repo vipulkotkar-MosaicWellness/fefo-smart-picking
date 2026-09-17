@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../lib/authStore";
 import { BUCKET_LABELS, type ChannelBucket } from "../lib/channels";
 import { dueForAutoComplete, oneTimeCloseCutoffMs, useStore } from "../lib/store";
@@ -16,12 +16,15 @@ export function AdminConfig() {
     removePicker,
     logAudit,
     tasks,
+    skus,
     autoCompleteAfterDays,
     setAutoCompleteAfterDays,
     closeAgedWmsBlockedPicklists,
     caseSizes,
     addCaseSize,
     deleteCaseSize,
+    caseSizeGaps,
+    loadCaseSizeGaps,
   } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
   const isSuperAdmin = useAuth((s) => s.profile?.role === "super_admin");
@@ -38,6 +41,14 @@ export function AdminConfig() {
   const [editPickerName, setEditPickerName] = useState("");
   const [newCaseSizeSku, setNewCaseSizeSku] = useState("");
   const [newCaseSizeVal, setNewCaseSizeVal] = useState("");
+
+  // Loaded on demand when this screen mounts — see loadCaseSizeGaps's own
+  // comment on AppState: deliberately NOT wired into App.tsx's global mount
+  // effect and NOT realtime-subscribed, since this is a review dashboard,
+  // not data any other screen depends on.
+  useEffect(() => {
+    void loadCaseSizeGaps();
+  }, [loadCaseSizeGaps]);
 
   function submitNewPicker() {
     const name = newPickerName.trim();
@@ -143,6 +154,28 @@ export function AdminConfig() {
   // Computed the same way here as inside closeAgedWmsBlockedPicklists, so
   // this preview count is exactly what will actually close, never more.
   const dueForCleanup = dueForAutoComplete(tasks, oneTimeCloseCutoffMs(cutoffDate));
+
+  // "Served with case-based picking": distinct SKUs that have actually
+  // appeared in a real order (a demand line on some task) AND currently
+  // have a case size configured. Not just "every SKU in caseSizes" — a
+  // configured case size for a SKU nobody has ever ordered isn't "serving"
+  // anything yet.
+  const servedSkus = new Set<string>();
+  for (const t of tasks) {
+    for (const d of t.demand) {
+      if (caseSizes[d.sku] != null) servedSkus.add(d.sku);
+    }
+  }
+  const servedCount = servedSkus.size;
+
+  // A gap row is "open" if that SKU still has no case size configured right
+  // now — "resolved" if an Admin has since added one via the Case sizes
+  // card above. Resolved rows stay in the table (history), just excluded
+  // from the "affected" headline count and sorted below the open ones.
+  const openGaps = [...caseSizeGaps].filter((g) => caseSizes[g.sku] == null).sort((a, b) => b.total_qty - a.total_qty);
+  const resolvedGaps = [...caseSizeGaps].filter((g) => caseSizes[g.sku] != null).sort((a, b) => b.total_qty - a.total_qty);
+  const affectedCount = openGaps.length;
+  const gapRows = [...openGaps, ...resolvedGaps];
 
   async function runCleanup() {
     if (dueForCleanup.length === 0) return;
@@ -422,6 +455,72 @@ export function AdminConfig() {
             </table>
             {Object.keys(caseSizes).length === 0 && (
               <p className="mt-2 text-[11px] text-slate-400">No case sizes configured yet — add one above.</p>
+            )}
+          </div>
+        </Card>
+
+        <Card title="Case size gap coverage">
+          <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
+            How many SKUs are picking case-first today vs. still missing a case size — the gap table below is ranked
+            by order volume affected, so the highest-impact gaps surface first. A SKU that later gets a case size
+            configured drops out of the count automatically but keeps its history here, marked Resolved.
+          </p>
+
+          <p className="mb-3 flex flex-wrap gap-2">
+            <span className="rounded-md bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800 dark:bg-teal-900/40 dark:text-teal-300">
+              {servedCount} SKU{servedCount === 1 ? "" : "s"} served with case-based picking
+            </span>
+            <span className="rounded-md bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+              {affectedCount} SKU{affectedCount === 1 ? "" : "s"} affected by a missing case size
+            </span>
+          </p>
+
+          <div className="max-h-72 overflow-y-auto">
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                  <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">SKU</th>
+                  <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Product</th>
+                  <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Total qty affected</th>
+                  <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Occurrences</th>
+                  <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">First seen</th>
+                  <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Last seen</th>
+                  <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gapRows.map((g) => {
+                  const resolved = caseSizes[g.sku] != null;
+                  return (
+                    <tr
+                      key={g.sku}
+                      data-testid={resolved ? "case-size-gap-row-resolved" : "case-size-gap-row"}
+                      className={resolved ? "text-slate-400 dark:text-slate-500" : "text-slate-700 dark:text-slate-200"}
+                    >
+                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{g.sku}</td>
+                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{skus[g.sku]?.name ?? "—"}</td>
+                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{g.total_qty}</td>
+                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{g.occurrences}</td>
+                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{new Date(g.first_seen_at).toLocaleDateString()}</td>
+                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{new Date(g.last_seen_at).toLocaleDateString()}</td>
+                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
+                        <span
+                          className={
+                            resolved
+                              ? "rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+                              : "rounded bg-amber-50 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                          }
+                        >
+                          {resolved ? "Resolved" : "Open"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {gapRows.length === 0 && (
+              <p className="mt-2 text-[11px] text-slate-400">No case size gaps logged yet.</p>
             )}
           </div>
         </Card>
