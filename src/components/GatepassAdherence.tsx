@@ -154,7 +154,7 @@ function shortDateLabel(dateStr: string): string {
   return `${day} ${MONTH_ABBR[Number(m) - 1]}`;
 }
 
-function TrendChart({ days, selectedDate, onSelectDate }: { days: DaySummary[]; selectedDate: string | null; onSelectDate: (date: string) => void }) {
+export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: { days: DaySummary[]; selectedDate: string | null; onSelectDate: (date: string) => void; showTrendline?: boolean }) {
   const [hovered, setHovered] = useState<DaySummary | null>(null);
 
   const h = 220;
@@ -240,6 +240,27 @@ function TrendChart({ days, selectedDate, onSelectDate }: { days: DaySummary[]; 
               </g>
             );
           })}
+          {showTrendline && days.length > 1 && (
+            <polyline
+              points={days.map((d, i) => `${padL + slot * i + slot / 2},${padT + chartH - (d.pct / 100) * chartH}`).join(" ")}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              className="text-teal-700 dark:text-teal-300"
+              opacity={0.7}
+            />
+          )}
+          {showTrendline &&
+            days.map((d, i) => (
+              <circle
+                key={`dot-${d.date}`}
+                cx={padL + slot * i + slot / 2}
+                cy={padT + chartH - (d.pct / 100) * chartH}
+                r={3}
+                fill="currentColor"
+                className="text-teal-700 dark:text-teal-300"
+              />
+            ))}
           <line x1={padL} y1={padT + chartH} x2={w - padR} y2={padT + chartH} stroke="currentColor" strokeOpacity={0.25} />
         </svg>
 
