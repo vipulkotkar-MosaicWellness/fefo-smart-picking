@@ -40,8 +40,8 @@ function byDay(rows: GatepassAdherenceRow[]): DaySummary[] {
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
-/** Monday of the Mon-Sun week containing this date, as YYYY-MM-DD. UTC throughout — report_date is a plain date string with no timezone of its own, matching byDay's convention. */
-function weekStart(dateStr: string): string {
+/** Monday of the Mon-Sun week containing this date, as YYYY-MM-DD. UTC throughout — report_date is a plain date string with no timezone of its own, matching byDay's convention. Exported for its own direct test — the Sunday boundary (step BACK 6 days, not forward) is the one branch here easy to get subtly wrong. */
+export function weekStart(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00Z");
   const day = d.getUTCDay(); // 0=Sun..6=Sat
   const diffToMonday = day === 0 ? 6 : day - 1;
