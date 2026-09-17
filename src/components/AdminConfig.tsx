@@ -4,6 +4,10 @@ import { BUCKET_LABELS, type ChannelBucket } from "../lib/channels";
 import { dueForAutoComplete, oneTimeCloseCutoffMs, useStore } from "../lib/store";
 import { Button, Card } from "./Ui";
 
+function gapDateLabel(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+}
+
 export function AdminConfig() {
   const {
     channelRules,
@@ -41,13 +45,16 @@ export function AdminConfig() {
   const [editPickerName, setEditPickerName] = useState("");
   const [newCaseSizeSku, setNewCaseSizeSku] = useState("");
   const [newCaseSizeVal, setNewCaseSizeVal] = useState("");
+  const [gapsLoading, setGapsLoading] = useState(true);
 
   // Loaded on demand when this screen mounts — see loadCaseSizeGaps's own
   // comment on AppState: deliberately NOT wired into App.tsx's global mount
   // effect and NOT realtime-subscribed, since this is a review dashboard,
-  // not data any other screen depends on.
+  // not data any other screen depends on. Tracks its own loading flag since,
+  // unlike caseSizes, there's no global preload — without it, an empty
+  // caseSizeGaps mid-fetch would read as "confirmed zero gaps".
   useEffect(() => {
-    void loadCaseSizeGaps();
+    void loadCaseSizeGaps().finally(() => setGapsLoading(false));
   }, [loadCaseSizeGaps]);
 
   function submitNewPicker() {
@@ -489,6 +496,13 @@ export function AdminConfig() {
                 </tr>
               </thead>
               <tbody>
+                {gapsLoading && gapRows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="p-1.5 text-slate-400">
+                      Loading…
+                    </td>
+                  </tr>
+                )}
                 {gapRows.map((g) => {
                   const resolved = caseSizes[g.sku] != null;
                   return (
@@ -501,8 +515,8 @@ export function AdminConfig() {
                       <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{skus[g.sku]?.name ?? "—"}</td>
                       <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{g.total_qty}</td>
                       <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{g.occurrences}</td>
-                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{new Date(g.first_seen_at).toLocaleDateString()}</td>
-                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{new Date(g.last_seen_at).toLocaleDateString()}</td>
+                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{gapDateLabel(g.first_seen_at)}</td>
+                      <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{gapDateLabel(g.last_seen_at)}</td>
                       <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
                         <span
                           className={
@@ -519,7 +533,7 @@ export function AdminConfig() {
                 })}
               </tbody>
             </table>
-            {gapRows.length === 0 && (
+            {!gapsLoading && gapRows.length === 0 && (
               <p className="mt-2 text-[11px] text-slate-400">No case size gaps logged yet.</p>
             )}
           </div>

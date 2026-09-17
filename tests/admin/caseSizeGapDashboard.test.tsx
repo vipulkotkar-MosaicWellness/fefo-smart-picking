@@ -1,9 +1,17 @@
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AdminConfig } from "../../src/components/AdminConfig";
 import { useAuth } from "../../src/lib/authStore";
 import { useStore } from "../../src/lib/store";
 import type { PickingTask } from "../../src/lib/types";
+
+// AdminConfig's mount effect calls loadCaseSizeGaps(), which otherwise hits
+// the real Supabase client — mock fetchCaseSizeGaps to resolve immediately
+// with no rows so every test here is deterministic and network-independent.
+vi.mock("../../src/lib/caseSizesSupabase", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/caseSizesSupabase")>();
+  return { ...actual, fetchCaseSizeGaps: vi.fn(async () => []) };
+});
 
 const initialStoreState = useStore.getState();
 const initialAuthState = useAuth.getState();
@@ -65,5 +73,38 @@ describe("AdminConfig — case size gap dashboard", () => {
     const row = screen.getByTestId("case-size-gap-row-resolved");
     expect(row).toHaveTextContent("SKU-NOW-FIXED");
     expect(row).toHaveTextContent(/resolved/i);
+  });
+
+  it("shows a clean empty state when there are no gaps at all", async () => {
+    useAuth.setState({ profile: { id: "u1", email: "a@x.com", display_name: "Admin", role: "super_admin" } });
+    useStore.setState({ caseSizes: {}, caseSizeGaps: [], skus: {}, tasks: [] });
+
+    render(<AdminConfig />);
+
+    expect(screen.getByText(/0 SKUs affected by a missing case size/i)).toBeInTheDocument();
+    // The mount-time loadCaseSizeGaps() call resolves asynchronously (even when
+    // it's a same-tick no-op, e.g. Supabase not configured in tests), so the
+    // "confirmed empty" message only appears once that settles — findByText
+    // waits for it instead of asserting on the transient loading state.
+    expect(await screen.findByText(/No case size gaps logged yet\./i)).toBeInTheDocument();
+    expect(screen.queryByTestId("case-size-gap-row")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("case-size-gap-row-resolved")).not.toBeInTheDocument();
+  });
+
+  it("'served' counts a SKU as soon as it has a case size and any demand, even demand predating the case size", () => {
+    // Pinning the intended definition (configured + ever ordered), not "picked
+    // case-first at least once" — see the comment above servedSkus in
+    // AdminConfig.tsx. Otherwise a future reader could mistake this for a bug.
+    useAuth.setState({ profile: { id: "u1", email: "a@x.com", display_name: "Admin", role: "super_admin" } });
+    useStore.setState({
+      caseSizes: { "SKU-OLD-DEMAND": 25 },
+      caseSizeGaps: [],
+      skus: { "SKU-OLD-DEMAND": { name: "Old Demand Product", shelf: 24 } },
+      tasks: [taskDemanding("SKU-OLD-DEMAND", 10)],
+    });
+
+    render(<AdminConfig />);
+
+    expect(screen.getByText(/1 SKU served with case-based picking/i)).toBeInTheDocument();
   });
 });
