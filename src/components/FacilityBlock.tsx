@@ -12,6 +12,25 @@ function timeLabel(iso?: string): string | undefined {
   return iso ? new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : undefined;
 }
 
+/**
+ * Row shape shared by the Copy and Print exports of a facility's picklist —
+ * the human-facing share for people, not a WMS import file. This
+ * component's own "CSV" button is a DIFFERENT, Uniware-bound export
+ * (uniwareCsv(), below) that shares this file only by location; it is a
+ * strict import contract for Uniware — like the separate Bulk Gate Pass CSV
+ * in PicklistRepository.tsx/uniwareExport.ts — and must not gain extra
+ * columns. caseQty/eachQty here are left undefined (never "0") when the
+ * line has no case split, so Copy/Print render them blank rather than a
+ * misleading zero.
+ */
+export function buildShareRows(f: FacilityPicklist) {
+  const lines = criticalPathSort(f.lines);
+  return lines.map((l, i) => ({
+    sr: i + 1, bin: l.bin, sku: l.sku, name: l.name, batch: l.batch, vendorBatch: l.vendorBatch ?? "",
+    qty: l.qty, caseQty: l.caseQty, eachQty: l.eachQty, picker: l.picker ?? "",
+  }));
+}
+
 /** The full picklist detail: assignment controls, share buttons, line table, complete button. */
 export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePassNo?: string }) {
   const { pickers, assignAll, assignLine, uploadAssignments, applyPicks, discardFacilityPicklist, revokeWmsBlock, logAudit } = useStore();
@@ -26,16 +45,10 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
   const seq = new Map<number, number>();
   lines.forEach((l, i) => seq.set(l.rid, i + 1));
 
-  function shareRows() {
-    return lines.map((l, i) => ({
-      sr: i + 1, bin: l.bin, sku: l.sku, name: l.name, batch: l.batch, vendorBatch: l.vendorBatch ?? "",
-      qty: l.qty, picker: l.picker ?? "",
-    }));
-  }
   function copy() {
     const txt =
-      `${f.no} · ${f.facility}\nSr#\tLocation\tSKU\tSKU Name\tBatch\tVendor Batch\tQty\tPicker\n` +
-      shareRows().map((r) => `${r.sr}\t${r.bin}\t${r.sku}\t${r.name}\t${r.batch}\t${r.vendorBatch}\t${r.qty}\t${r.picker}`).join("\n");
+      `${f.no} · ${f.facility}\nSr#\tLocation\tSKU\tSKU Name\tBatch\tVendor Batch\tQty\tCases\tEaches\tPicker\n` +
+      buildShareRows(f).map((r) => `${r.sr}\t${r.bin}\t${r.sku}\t${r.name}\t${r.batch}\t${r.vendorBatch}\t${r.qty}\t${r.caseQty ?? ""}\t${r.eachQty ?? ""}\t${r.picker}`).join("\n");
     navigator.clipboard.writeText(txt).then(() => alert("Picklist copied."), () => alert("Copy blocked; use CSV."));
   }
   function csv() {
@@ -55,8 +68,8 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
           ? `<p style="font-size:14px;color:#555;margin:4px 0">Multiple pickers assigned — see table</p>`
           : "";
     const html =
-      `<h2>${f.no}</h2><p>${f.facility}</p>${pickerHeader}<table border=1 cellpadding=6 style="border-collapse:collapse;font-family:Arial"><tr><th>Sr #</th><th>Location</th><th>SKU / SKU Name</th><th>Batch</th><th>Vendor Batch</th><th>Qty</th><th>Picker</th><th>Picked</th></tr>` +
-      shareRows().map((r) => `<tr><td>${r.sr}</td><td>${r.bin}</td><td>${r.sku}<br><small>${r.name}</small></td><td>${r.batch}</td><td>${r.vendorBatch}</td><td>${r.qty}</td><td>${r.picker}</td><td></td></tr>`).join("") +
+      `<h2>${f.no}</h2><p>${f.facility}</p>${pickerHeader}<table border=1 cellpadding=6 style="border-collapse:collapse;font-family:Arial"><tr><th>Sr #</th><th>Location</th><th>SKU / SKU Name</th><th>Batch</th><th>Vendor Batch</th><th>Qty</th><th>Cases</th><th>Eaches</th><th>Picker</th><th>Picked</th></tr>` +
+      buildShareRows(f).map((r) => `<tr><td>${r.sr}</td><td>${r.bin}</td><td>${r.sku}<br><small>${r.name}</small></td><td>${r.batch}</td><td>${r.vendorBatch}</td><td>${r.qty}</td><td>${r.caseQty ?? ""}</td><td>${r.eachQty ?? ""}</td><td>${r.picker}</td><td></td></tr>`).join("") +
       `</table>`;
     const w = window.open("", "_blank");
     if (!w) return alert("Allow pop-ups to print.");
