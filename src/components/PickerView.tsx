@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../lib/authStore";
 import { criticalPathSort } from "../lib/engine";
-import { monLabel } from "../lib/format";
+import { caseEachLabel, monLabel } from "../lib/format";
 import { NOT_FOUND_REASONS } from "../lib/notFoundReasons";
 import { loadQueue } from "../lib/offlineQueue";
 import { supervisorVisibleFacilityLists, useStore } from "../lib/store";
@@ -154,7 +154,7 @@ export function PickerView() {
             <br />
             Batch <b>{line.batch}</b> · exp {monLabel(line.exp)}
           </div>
-          <div className="mt-3 inline-block rounded-lg bg-slate-100 px-4 py-2 text-2xl font-bold tabular-nums dark:bg-slate-900">Pick {line.qty}</div>
+          <div className="mt-3 inline-block rounded-lg bg-slate-100 px-4 py-2 text-2xl font-bold tabular-nums dark:bg-slate-900">Pick {caseEachLabel(line) ?? line.qty}</div>
 
           {!exceptionMode ? (
             <div className="mt-5 space-y-2">
