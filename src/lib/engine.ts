@@ -53,6 +53,13 @@ export interface AllocateArgs {
   // ChannelRule.minBinQty. Lots that clear the shelf-life cutoff but fall
   // under this floor are reported in `skipped` instead of being allocated.
   minQty?: number;
+  // Case pack size for this SKU, if one is configured (see the case_sizes
+  // table / caseSizesSupabase.ts). When set and > 1, allocation runs
+  // case-first: full cases only (FEFO order, one case only ever from a
+  // single bin — a picker can't assemble one case from four shelf
+  // locations), then loose eaches for whatever remains. Omitted or <= 1
+  // behaves exactly as before: plain per-unit FEFO, no case/each split.
+  caseSize?: number;
 }
 
 export interface AllocateResult {
@@ -103,6 +110,10 @@ export function allocate(args: AllocateArgs): AllocateResult {
         .map((o) => ({ sku, name: o.b.name, facility: o.b.location, bin: o.b.bin, batch: o.b.batch, qtyAvailable: o.av, threshold: minQty }))
     : [];
 
+  if (args.caseSize && args.caseSize > 1) {
+    return allocateCaseFirst(sku, need, eligible, args.caseSize, skipped);
+  }
+
   let remain = need;
   const lines: PickLine[] = [];
   for (const o of eligible) {
@@ -122,5 +133,72 @@ export function allocate(args: AllocateArgs): AllocateResult {
     });
     remain -= take;
   }
+  return { lines, short: remain, any: eligible.length > 0, skipped };
+}
+
+/**
+ * Case-first-then-eaches allocation: Pass 1 pulls only full cases, FEFO
+ * order, one case only ever from a single bin+batch (a picker can't
+ * assemble one case from four shelf locations — confirmed design
+ * assumption). Pass 2 fills whatever remains as loose eaches, FEFO order,
+ * from any lot with quantity left over, including a lot Pass 1 already
+ * partially used. A lot touched by both passes stays ONE PickLine with a
+ * caseQty+eachQty split, not two — a picker is never sent to the same bin
+ * twice for one SKU.
+ */
+function allocateCaseFirst(
+  sku: string,
+  need: number,
+  eligible: { rem: number; b: StockRow; av: number }[],
+  caseSize: number,
+  skipped: BinSkip[],
+): AllocateResult {
+  type Row = { o: (typeof eligible)[number]; caseQty: number; eachQty: number; remaining: number };
+  const perLot = new Map<number, Row>();
+  let remain = need;
+
+  for (const o of eligible) {
+    if (remain <= 0) break;
+    const casesAvail = Math.floor(o.av / caseSize);
+    const take = Math.min(Math.floor(remain / caseSize), casesAvail) * caseSize;
+    if (take <= 0) continue;
+    perLot.set(o.b.rid, { o, caseQty: take, eachQty: 0, remaining: o.av - take });
+    remain -= take;
+  }
+
+  if (remain > 0) {
+    for (const o of eligible) {
+      if (remain <= 0) break;
+      const row = perLot.get(o.b.rid);
+      const available = row ? row.remaining : o.av;
+      const take = Math.min(remain, available);
+      if (take <= 0) continue;
+      if (row) {
+        row.eachQty += take;
+        row.remaining -= take;
+      } else {
+        perLot.set(o.b.rid, { o, caseQty: 0, eachQty: take, remaining: o.av - take });
+      }
+      remain -= take;
+    }
+  }
+
+  const lines: PickLine[] = [...perLot.values()]
+    .sort((a, b) => a.o.rem - b.o.rem || (a.o.b.expDate && b.o.b.expDate ? a.o.b.expDate.localeCompare(b.o.b.expDate) : 0))
+    .map(({ o, caseQty, eachQty }) => ({
+      rid: o.b.rid,
+      sku,
+      name: o.b.name,
+      facility: o.b.location,
+      bin: o.b.bin,
+      batch: o.b.batch,
+      vendorBatch: o.b.vendorBatch,
+      exp: o.b.exp,
+      rem: o.rem,
+      qty: caseQty + eachQty,
+      caseQty: caseQty > 0 ? caseQty : undefined,
+      eachQty: eachQty > 0 ? eachQty : undefined,
+    }));
+
   return { lines, short: remain, any: eligible.length > 0, skipped };
 }
