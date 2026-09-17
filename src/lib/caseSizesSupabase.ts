@@ -50,3 +50,54 @@ export function subscribeCaseSizes(onChange: () => void): () => void {
     void client.removeChannel(channel);
   };
 }
+
+export interface CaseSizeGapRow {
+  sku: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  occurrences: number;
+  total_qty: number;
+}
+
+/**
+ * Logs one gap occurrence per SKU for a batch of demand lines that had no
+ * configured case size — called from generate() for a REAL order only,
+ * never from a preview, so this table only ever reflects orders that
+ * actually happened. Reads any existing row first and adds onto it
+ * (occurrences/total_qty accumulate, first_seen_at is preserved) rather
+ * than overwriting — this is a running count, not a snapshot.
+ */
+export async function logCaseSizeGaps(occurrences: { sku: string; qty: number }[]): Promise<void> {
+  if (!supabase || occurrences.length === 0) return;
+  const skus = [...new Set(occurrences.map((o) => o.sku))];
+  const { data, error: fetchError } = await supabase.from("case_size_gaps").select("sku,first_seen_at,occurrences,total_qty").in("sku", skus);
+  if (fetchError) throw fetchError;
+  const existing = new Map((data ?? []).map((r) => [r.sku, r as CaseSizeGapRow] as const));
+  const now = new Date().toISOString();
+  const bySku = new Map<string, { qty: number; count: number }>();
+  for (const o of occurrences) {
+    const cur = bySku.get(o.sku) ?? { qty: 0, count: 0 };
+    cur.qty += o.qty;
+    cur.count += 1;
+    bySku.set(o.sku, cur);
+  }
+  const rows = [...bySku.entries()].map(([sku, agg]) => {
+    const prev = existing.get(sku);
+    return {
+      sku,
+      first_seen_at: prev?.first_seen_at ?? now,
+      last_seen_at: now,
+      occurrences: (prev?.occurrences ?? 0) + agg.count,
+      total_qty: (prev?.total_qty ?? 0) + agg.qty,
+    };
+  });
+  const { error } = await supabase.from("case_size_gaps").upsert(rows, { onConflict: "sku" });
+  if (error) throw error;
+}
+
+export async function fetchCaseSizeGaps(): Promise<CaseSizeGapRow[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.from("case_size_gaps").select("sku,first_seen_at,last_seen_at,occurrences,total_qty").order("total_qty", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as CaseSizeGapRow[];
+}

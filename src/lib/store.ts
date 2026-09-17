@@ -23,7 +23,7 @@ import { fetchFacilityLastSynced, fetchStock, fetchSyncState, replaceStock } fro
 import type { SyncSource } from "./syncSource";
 import { deletePickerRow, fetchPickers, insertPicker, renamePickerRow, subscribePickers } from "./pickersSupabase";
 import { applyChannelOverrides, fetchChannelOverrides, markChannelOverrideDeleted, subscribeChannelOverrides, upsertChannelOverride } from "./channelsSupabase";
-import { applyCaseSizeRows, deleteCaseSize as deleteCaseSizeRow, fetchCaseSizes, subscribeCaseSizes, upsertCaseSize as upsertCaseSizeRow } from "./caseSizesSupabase";
+import { applyCaseSizeRows, deleteCaseSize as deleteCaseSizeRow, fetchCaseSizes, logCaseSizeGaps, subscribeCaseSizes, upsertCaseSize as upsertCaseSizeRow } from "./caseSizesSupabase";
 import { fetchAllTasks, fetchTaskByNo, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
   BinSkip,
@@ -1075,6 +1075,19 @@ export const useStore = create<AppState>()(
         }
 
         const allocations = computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(get().holds), get().caseSizes);
+
+        if (isSupabaseConfigured) {
+          const gaps = demand.filter((d) => !get().caseSizes[d.sku]).map((d) => ({ sku: d.sku, qty: d.qty }));
+          if (gaps.length > 0) {
+            try {
+              await logCaseSizeGaps(gaps);
+            } catch {
+              // Logging failure must never block real task creation — this
+              // is visibility, not a gate.
+            }
+          }
+        }
+
         const newTasks: PickingTask[] = [];
         const allUnusedGatePasses: string[] = [];
         // Gate passes a CSV supplied that turned out to already belong to
