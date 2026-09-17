@@ -1138,20 +1138,28 @@ export const useStore = create<AppState>()(
         // group, safe to match by index.
         if (isSupabaseConfigured && demand.some((d) => get().caseSizes[d.sku])) {
           const strictFefoAllocations = computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(get().holds), {});
+          // Collected first, then fired together — an order spanning several
+          // channel groups/facilities would otherwise await each Supabase
+          // insert one at a time, serializing generate()'s critical path
+          // (task creation happens after this block) behind however many
+          // deviations happened to occur. Failures are already swallowed per
+          // call below, so there's no correctness reason to serialize them.
+          const logCalls: Promise<void>[] = [];
           for (let i = 0; i < allocations.length; i++) {
             const caseBased = allocations[i];
             const strictFefo = strictFefoAllocations[i];
             for (const facility of Object.keys(caseBased.byFacility)) {
               const deviations = computeFefoDeviation(caseBased.byFacility[facility], strictFefo.byFacility[facility] ?? []);
               if (deviations.length > 0) {
-                try {
-                  await logFefoDeviations(facility, caseBased.gatePassByFacility[facility], deviations);
-                } catch {
-                  // Logging failure must never block real task creation — this is visibility, not a gate.
-                }
+                logCalls.push(
+                  logFefoDeviations(facility, caseBased.gatePassByFacility[facility], deviations).catch(() => {
+                    // Logging failure must never block real task creation — this is visibility, not a gate.
+                  }),
+                );
               }
             }
           }
+          await Promise.allSettled(logCalls);
         }
 
         const newTasks: PickingTask[] = [];

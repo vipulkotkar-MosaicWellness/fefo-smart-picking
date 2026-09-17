@@ -284,3 +284,35 @@ describe("computeChannelAllocations (pure — no Supabase, no side effects)", ()
     expect(lines.every((l) => l.batch === "B2")).toBe(true);
   });
 });
+
+describe("computeChannelAllocations — grouping is independent of caseSizes", () => {
+  // generate() in store.ts calls this function twice for the same demand —
+  // once with the real caseSizes, once with {} to get a strict-FEFO
+  // counterfactual (see the FEFO-deviation logging block) — and matches the
+  // two results up by array index, on the assumption that grouping depends
+  // only on demand (channel + gate pass), never on caseSizes. If that ever
+  // stopped being true, deviation rows would silently pair up the wrong
+  // channel/facility against each other with no test catching it — this
+  // test pins the invariant directly instead of leaving it as a comment.
+  it("produces the same channel/gate-pass grouping, in the same order, whether or not caseSizes is supplied", () => {
+    const stock: StockRow[] = [
+      stockRow({ rid: 1, location: "SL Mother Hub", sku: "TEST-SKU", batch: "B1", qty: 100 }),
+      stockRow({ rid: 2, location: "SL Mother Hub", sku: "OTHER-SKU", batch: "B2", qty: 100 }),
+    ];
+    const twoSkus = { ...skus, "OTHER-SKU": { name: "Other Product", shelf: 24 } };
+    const demand: DemandLine[] = [
+      { channel: "ChannelA", sku: "TEST-SKU", qty: 10, gatePassNo: "GP-A" },
+      { channel: "ChannelB", sku: "OTHER-SKU", qty: 20, gatePassNo: "GP-B" },
+    ];
+    const twoChannelRules = { ChannelA: { type: "fixed" as const, val: 0 }, ChannelB: { type: "fixed" as const, val: 0 } };
+
+    const withCaseSizes = computeChannelAllocations(demand, twoChannelRules, twoSkus, stock, [], undefined, { "TEST-SKU": 5 });
+    const withoutCaseSizes = computeChannelAllocations(demand, twoChannelRules, twoSkus, stock, [], undefined, {});
+
+    expect(withCaseSizes).toHaveLength(withoutCaseSizes.length);
+    for (let i = 0; i < withCaseSizes.length; i++) {
+      expect(withCaseSizes[i].channel).toBe(withoutCaseSizes[i].channel);
+      expect(Object.keys(withCaseSizes[i].gatePassByFacility)).toEqual(Object.keys(withoutCaseSizes[i].gatePassByFacility));
+    }
+  });
+});
