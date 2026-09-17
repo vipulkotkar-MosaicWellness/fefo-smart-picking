@@ -183,6 +183,10 @@ function allocateCaseFirst(
     }
   }
 
+  // Load-bearing, not cosmetic: perLot's Map insertion order mixes Pass 1
+  // and Pass 2 (a lot Pass 1 skipped but Pass 2 used gets inserted after
+  // lots Pass 1 already added), so without this re-sort the output could
+  // list a later-expiring lot before an earlier-expiring one.
   const lines: PickLine[] = [...perLot.values()]
     .sort((a, b) => a.o.rem - b.o.rem || (a.o.b.expDate && b.o.b.expDate ? a.o.b.expDate.localeCompare(b.o.b.expDate) : 0))
     .map(({ o, caseQty, eachQty }) => ({
