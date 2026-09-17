@@ -91,4 +91,101 @@ describe("flushOfflineQueue — replays queued pick results instead of dropping 
 
     useStore.setState(initialState, true);
   });
+
+  // The more common real-world trigger: connectivity blips and comes back
+  // in the SAME browser tab (no reload) — App.tsx's `online` listener fires
+  // flushOfflineQueue() directly. In this case `tasks` still holds the
+  // facility as already locally "completed" from the original offline
+  // attempt (that's WHY it's in the queue at all): resolvePickLine no-ops
+  // on every already-resolved line, the facility is already "completed" so
+  // applyPicks' own completion block never runs, and applyPicks' internal
+  // save never fires. Without an explicit save after replaying applyPicks,
+  // flushOfflineQueue would dequeue the item, do nothing, and still report
+  // "✓ Synced" — the exact silent-drop bug this file exists to catch.
+  it("still reaches Supabase on a same-session retry, where the facility is already completed locally", async () => {
+    const tasksSupabase = await import("../../src/lib/tasksSupabase");
+    const { useStore } = await import("../../src/lib/store");
+    const { enqueue, loadQueue } = await import("../../src/lib/offlineQueue");
+    const initialState = useStore.getState();
+
+    // This device's local state: the facility already transitioned to
+    // "completed" during the original (failed-to-save) applyPicks call.
+    const locallyCompletedTask: PickingTask = {
+      no: "TASK-RETRY",
+      channel: CHANNEL,
+      demand: [{ channel: CHANNEL, sku: "SKU-RETRY", qty: 10, gatePassNo: "GP-RETRY" }],
+      facilities: [
+        {
+          no: "TASK-RETRY-MH", taskNo: "TASK-RETRY", facility: "SL Mother Hub", status: "completed", round: 1, bad: 3, gatePassNo: "GP-RETRY",
+          pickedTotal: 7, gp: "GP-100137", completedAt: new Date().toISOString(),
+          lines: [{ rid: 601, sku: "SKU-RETRY", name: "Retry product", facility: "SL Mother Hub", bin: "M2", batch: "B2", exp: [2099, 1], rem: 900, qty: 10, picked: 7, nf: 3, nfReason: "Damaged stock" }],
+        },
+      ],
+      shortfall: [],
+      createdAt: new Date().toISOString(),
+    };
+    // The server's copy is still stale/open — the original save never went through.
+    const freshFromServer: PickingTask = {
+      ...locallyCompletedTask,
+      facilities: [{ ...locallyCompletedTask.facilities[0], status: "open", bad: 0, pickedTotal: undefined, gp: undefined, completedAt: undefined, lines: [{ ...locallyCompletedTask.facilities[0].lines[0], picked: undefined, nf: undefined, nfReason: undefined }] }],
+    };
+    vi.mocked(tasksSupabase.fetchTaskByNo).mockResolvedValue(freshFromServer);
+    useStore.setState({ tasks: [locallyCompletedTask], tasksLoaded: true });
+
+    enqueue({ facilityNo: "TASK-RETRY-MH", results: { 601: 3 }, reasons: { 601: "Damaged stock" }, heldBy: "Night Picker" });
+
+    await useStore.getState().flushOfflineQueue();
+
+    // Not zero calls — applyPicks itself made none (no completion transition
+    // fired this round), so this call can only be the explicit follow-up save.
+    expect(tasksSupabase.updateTaskData).toHaveBeenCalledTimes(1);
+    const savedTask = vi.mocked(tasksSupabase.updateTaskData).mock.calls.at(-1)?.[0] as PickingTask;
+    const savedLine = savedTask.facilities[0].lines[0];
+    expect(savedLine.picked).toBe(7);
+    expect(savedLine.nf).toBe(3);
+    // Empty because it was actually saved — not because the item was dropped.
+    expect(loadQueue()).toHaveLength(0);
+
+    useStore.setState(initialState, true);
+  });
+
+  it("re-queues the item (never silently drops it) when the same-session retry save still fails", async () => {
+    const tasksSupabase = await import("../../src/lib/tasksSupabase");
+    const { useStore } = await import("../../src/lib/store");
+    const { enqueue, loadQueue } = await import("../../src/lib/offlineQueue");
+    const initialState = useStore.getState();
+
+    const locallyCompletedTask: PickingTask = {
+      no: "TASK-RETRY-FAIL",
+      channel: CHANNEL,
+      demand: [{ channel: CHANNEL, sku: "SKU-RETRY-FAIL", qty: 10, gatePassNo: "GP-RETRY-FAIL" }],
+      facilities: [
+        {
+          no: "TASK-RETRY-FAIL-MH", taskNo: "TASK-RETRY-FAIL", facility: "SL Mother Hub", status: "completed", round: 1, bad: 0, gatePassNo: "GP-RETRY-FAIL",
+          pickedTotal: 10, gp: "GP-100274", completedAt: new Date().toISOString(),
+          lines: [{ rid: 701, sku: "SKU-RETRY-FAIL", name: "Retry-fail product", facility: "SL Mother Hub", bin: "M3", batch: "B3", exp: [2099, 1], rem: 900, qty: 10, picked: 10, nf: 0 }],
+        },
+      ],
+      shortfall: [],
+      createdAt: new Date().toISOString(),
+    };
+    // Still offline / still failing — the retry's own save attempt errors too.
+    vi.mocked(tasksSupabase.fetchTaskByNo).mockRejectedValue(new Error("network unreachable"));
+    useStore.setState({ tasks: [locallyCompletedTask], tasksLoaded: true });
+
+    enqueue({ facilityNo: "TASK-RETRY-FAIL-MH", results: { 701: 0 }, reasons: {}, heldBy: "Night Picker" });
+
+    await useStore.getState().flushOfflineQueue();
+
+    expect(tasksSupabase.updateTaskData).not.toHaveBeenCalled();
+    // Re-queued, not dropped — the picker's result is still safe for the next retry.
+    const queued = loadQueue();
+    expect(queued).toHaveLength(1);
+    expect(queued[0].facilityNo).toBe("TASK-RETRY-FAIL-MH");
+    expect(queued[0].results).toEqual({ 701: 0 });
+    // Must not falsely report success when nothing actually saved.
+    expect(useStore.getState().notice).not.toMatch(/Synced/);
+
+    useStore.setState(initialState, true);
+  });
 });

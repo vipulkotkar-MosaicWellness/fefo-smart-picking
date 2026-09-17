@@ -1377,12 +1377,37 @@ export const useStore = create<AppState>()(
         const gpQueue = loadGatePassQueue();
         if (queue.length === 0 && gpQueue.length === 0) return;
         for (const item of queue) {
-          // Remove the old entry before retrying — applyPicks' own catch
-          // block re-queues a fresh entry if this retry also fails, so
-          // nothing is lost either way, and there's no leftover stale
-          // duplicate sitting alongside a new one.
+          // Remove the old entry before retrying — a failed retry re-queues
+          // a fresh entry below, so nothing is lost either way, and there's
+          // no leftover stale duplicate sitting alongside a new one.
           dequeuePick(item.id);
           await get().applyPicks(item.facilityNo, item.results, item.reasons, item.heldBy);
+          // applyPicks only attempts its OWN Supabase save when a facility
+          // transitions into "completed" during that specific call. On a
+          // same-session retry (connectivity blipped and came back without
+          // a reload — the common case, triggered by App.tsx's `online`
+          // listener) the facility is often already locally "completed"
+          // from the original offline attempt: resolvePickLine no-ops on
+          // already-resolved lines, the completion block never runs, and
+          // applyPicks' internal save (and its own re-enqueue-on-failure)
+          // never fires at all. So this explicit save is the one thing that
+          // guarantees the retry actually reaches Supabase, regardless of
+          // what applyPicks decided to do internally this round. On a
+          // genuine reload-then-replay, where the facility DOES transition
+          // to "completed" during the call above, this is a harmless
+          // redundant write of state applyPicks already saved — round-2
+          // re-offers, holds and gate-pass stamping only ever happen inside
+          // applyPicks itself, never here, so nothing gets doubled.
+          const task = get().tasks.find((t) => t.facilities.some((f) => f.no === item.facilityNo));
+          if (task) {
+            try {
+              await saveOwnFacilityChanges(task, new Set([item.facilityNo]));
+            } catch {
+              // Still offline / still failing — re-queue rather than
+              // silently dropping it now that it was dequeued above.
+              enqueuePick({ facilityNo: item.facilityNo, results: item.results, reasons: item.reasons, heldBy: item.heldBy });
+            }
+          }
         }
         for (const item of gpQueue) {
           const task = get().tasks.find((t) => t.no === item.taskNo);
