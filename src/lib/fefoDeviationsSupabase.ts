@@ -32,7 +32,13 @@ export async function logFefoDeviations(facility: string, gatePassNo: string | u
   if (error) throw error;
 }
 
-/** Rows created on or after `sinceDate` (YYYY-MM-DD) — the reporting screen filters to whatever window it's showing. */
+/**
+ * Rows created on or after `sinceDate` (YYYY-MM-DD) — the reporting screen
+ * filters to whatever window it's showing. `created_at` is a `timestamptz`,
+ * so Postgres casts the bare date to midnight in the database's own
+ * timezone (UTC, by Supabase's default) before comparing — "on or after
+ * midnight UTC on sinceDate", not the caller's local midnight.
+ */
 export async function fetchFefoDeviations(sinceDate: string): Promise<FefoDeviationRow[]> {
   if (!supabase) return [];
   const { data, error } = await supabase.from("fefo_deviations").select("gate_pass_no,facility,sku,bin,batch,deviation_qty,created_at").gte("created_at", sinceDate);

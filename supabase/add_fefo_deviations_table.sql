@@ -24,6 +24,10 @@ create table if not exists fefo_deviations (
   created_at     timestamptz not null default now()
 );
 
+-- Backs the reporting screen's `.gte("created_at", sinceDate)` window filter
+-- — same reasoning as gatepass_adherence_report_date on gatepass_adherence.
+create index if not exists fefo_deviations_created_at on fefo_deviations (created_at);
+
 alter table fefo_deviations enable row level security;
 
 create policy "read fefo deviations" on fefo_deviations for select to authenticated using (true);
