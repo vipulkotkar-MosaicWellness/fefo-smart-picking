@@ -1,5 +1,5 @@
 // tests/admin/caseSizesAdmin.test.tsx
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AdminConfig } from "../../src/components/AdminConfig";
@@ -57,6 +57,49 @@ describe("AdminConfig — case sizes", () => {
     const caseSizesSupabase = await import("../../src/lib/caseSizesSupabase");
     expect(caseSizesSupabase.upsertCaseSize).not.toHaveBeenCalled();
     alertSpy.mockRestore();
+  });
+
+  it("surfaces a notice and keeps the form filled in when upsertCaseSize rejects", async () => {
+    const user = userEvent.setup();
+    useAuth.setState({ profile: { id: "u1", email: "a@x.com", display_name: "Admin", role: "super_admin" } });
+    useStore.setState({ caseSizes: {} });
+    const caseSizesSupabase = await import("../../src/lib/caseSizesSupabase");
+    vi.mocked(caseSizesSupabase.upsertCaseSize).mockRejectedValueOnce(new Error("RLS violation"));
+    render(<AdminConfig />);
+
+    const skuInput = screen.getByLabelText(/sku/i, { selector: "input" });
+    const sizeInput = screen.getByLabelText(/case size/i);
+    await user.type(skuInput, "SKU-FAIL");
+    await user.type(sizeInput, "25");
+    await user.click(screen.getByRole("button", { name: /add case size|save/i }));
+
+    expect(caseSizesSupabase.upsertCaseSize).toHaveBeenCalledWith("SKU-FAIL", 25);
+    // AdminConfig doesn't render `notice` itself (App.tsx owns that banner) —
+    // assert the store action actually surfaced the failure into it.
+    await waitFor(() => {
+      expect(useStore.getState().notice).toMatch(/could not save case size for sku-fail.*rls violation/i);
+    });
+    // Form should NOT clear on failure — the admin can retry without retyping.
+    expect(skuInput).toHaveValue("SKU-FAIL");
+    expect(sizeInput).toHaveValue(25);
+  });
+
+  it("surfaces a notice when deleteCaseSize rejects, without logging a false success", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const user = userEvent.setup();
+    useAuth.setState({ profile: { id: "u1", email: "a@x.com", display_name: "Admin", role: "super_admin" } });
+    useStore.setState({ caseSizes: { "SKU-EXISTING": 40 } });
+    const caseSizesSupabase = await import("../../src/lib/caseSizesSupabase");
+    vi.mocked(caseSizesSupabase.deleteCaseSize).mockRejectedValueOnce(new Error("network error"));
+    render(<AdminConfig />);
+
+    await user.click(screen.getByRole("button", { name: /remove case size/i }));
+
+    expect(caseSizesSupabase.deleteCaseSize).toHaveBeenCalledWith("SKU-EXISTING");
+    await waitFor(() => {
+      expect(useStore.getState().notice).toMatch(/could not delete case size for sku-existing.*network error/i);
+    });
+    confirmSpy.mockRestore();
   });
 
   it("lets a super admin remove a case size, but hides that control from a plain admin", async () => {

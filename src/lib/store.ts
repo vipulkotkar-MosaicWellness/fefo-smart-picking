@@ -23,7 +23,7 @@ import { fetchFacilityLastSynced, fetchStock, fetchSyncState, replaceStock } fro
 import type { SyncSource } from "./syncSource";
 import { deletePickerRow, fetchPickers, insertPicker, renamePickerRow, subscribePickers } from "./pickersSupabase";
 import { applyChannelOverrides, fetchChannelOverrides, markChannelOverrideDeleted, subscribeChannelOverrides, upsertChannelOverride } from "./channelsSupabase";
-import { applyCaseSizeRows, fetchCaseSizes, subscribeCaseSizes } from "./caseSizesSupabase";
+import { applyCaseSizeRows, deleteCaseSize as deleteCaseSizeRow, fetchCaseSizes, subscribeCaseSizes, upsertCaseSize as upsertCaseSizeRow } from "./caseSizesSupabase";
 import { fetchAllTasks, fetchTaskByNo, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
   BinSkip,
@@ -626,6 +626,14 @@ export interface AppState {
   caseSizes: Record<string, number>;
   loadCaseSizes: () => Promise<void>;
   startCaseSizesRealtime: () => () => void;
+  // Add/update or remove a SKU's case size. Same try/catch + notice pattern
+  // as addChannel/deleteChannel, but with no local optimistic update — the
+  // realtime subscription (startCaseSizesRealtime) is what actually updates
+  // AppState.caseSizes on success, so there's no local copy to hand-roll or
+  // drift from it. Returns whether the Supabase call succeeded, so the
+  // caller (AdminConfig) knows whether it's safe to clear its form.
+  addCaseSize: (sku: string, size: number) => Promise<boolean>;
+  deleteCaseSize: (sku: string) => Promise<boolean>;
   addPicker: (name: string) => Promise<void>;
   renamePicker: (oldName: string, newName: string) => Promise<void>;
   removePicker: (name: string) => Promise<void>;
@@ -855,6 +863,26 @@ export const useStore = create<AppState>()(
       startCaseSizesRealtime: () => {
         if (!isSupabaseConfigured) return () => {};
         return subscribeCaseSizes(() => void get().loadCaseSizes());
+      },
+
+      addCaseSize: async (sku, size) => {
+        try {
+          await upsertCaseSizeRow(sku, size);
+          return true;
+        } catch (e) {
+          set({ notice: "Could not save case size for " + sku + ": " + (e as Error).message });
+          return false;
+        }
+      },
+
+      deleteCaseSize: async (sku) => {
+        try {
+          await deleteCaseSizeRow(sku);
+          return true;
+        } catch (e) {
+          set({ notice: "Could not delete case size for " + sku + ": " + (e as Error).message });
+          return false;
+        }
       },
 
       loadHolds: async () => {

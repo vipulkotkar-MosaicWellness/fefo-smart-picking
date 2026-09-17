@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useAuth } from "../lib/authStore";
-import { deleteCaseSize, upsertCaseSize } from "../lib/caseSizesSupabase";
 import { BUCKET_LABELS, type ChannelBucket } from "../lib/channels";
 import { dueForAutoComplete, oneTimeCloseCutoffMs, useStore } from "../lib/store";
 import { Button, Card } from "./Ui";
@@ -21,6 +20,8 @@ export function AdminConfig() {
     setAutoCompleteAfterDays,
     closeAgedWmsBlockedPicklists,
     caseSizes,
+    addCaseSize,
+    deleteCaseSize,
   } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
   const isSuperAdmin = useAuth((s) => s.profile?.role === "super_admin");
@@ -109,27 +110,31 @@ export function AdminConfig() {
     logAudit(myName, `Deleted channel ${name}`);
   }
 
-  // Case sizes flow through the store the same way channelRules does: we
-  // just fire the Supabase call here and let the existing realtime
-  // subscription (subscribeCaseSizes, wired in the store) refresh
+  // Case sizes flow through the store the same way channelRules does: the
+  // store action (addCaseSize/deleteCaseSize) fires the Supabase call and
+  // surfaces a failure via the app-wide `notice` banner (same try/catch
+  // pattern as addChannel/deleteChannel); on success, the existing realtime
+  // subscription (subscribeCaseSizes, wired in the store) refreshes
   // AppState.caseSizes — no local state to hand-roll or drift from it.
-  function submitNewCaseSize() {
+  async function submitNewCaseSize() {
     const sku = newCaseSizeSku.trim();
     if (!sku) return;
     const size = Number(newCaseSizeVal);
-    if (!Number.isFinite(size) || size <= 1) {
+    if (!Number.isFinite(size) || !Number.isInteger(size) || size <= 1) {
       alert("Case size must be a whole number greater than 1.");
       return;
     }
-    void upsertCaseSize(sku, size);
+    const ok = await addCaseSize(sku, size);
+    if (!ok) return;
     logAudit(myName, `Set case size for ${sku} to ${size}`);
     setNewCaseSizeSku("");
     setNewCaseSizeVal("");
   }
 
-  function removeCaseSize(sku: string) {
+  async function removeCaseSize(sku: string) {
     if (!window.confirm(`Remove the case size for ${sku}? Future picks for this SKU fall back to each-only allocation.`)) return;
-    void deleteCaseSize(sku);
+    const ok = await deleteCaseSize(sku);
+    if (!ok) return;
     logAudit(myName, `Removed case size for ${sku}`);
   }
 
@@ -389,7 +394,7 @@ export function AdminConfig() {
                 className="mt-0.5 w-20 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-800"
               />
             </label>
-            <Button variant="sm" onClick={submitNewCaseSize}>Add case size</Button>
+            <Button variant="sm" onClick={() => void submitNewCaseSize()}>Add case size</Button>
           </div>
 
           <div className="max-h-72 overflow-y-auto">
@@ -408,7 +413,7 @@ export function AdminConfig() {
                     <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{size}</td>
                     {isSuperAdmin && (
                       <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
-                        <Button variant="sm" onClick={() => removeCaseSize(sku)}>Remove case size</Button>
+                        <Button variant="sm" onClick={() => void removeCaseSize(sku)}>Remove case size</Button>
                       </td>
                     )}
                   </tr>
