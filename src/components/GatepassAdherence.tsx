@@ -7,7 +7,15 @@ import {
   lineTone,
   type GatepassAdherence as GatepassAdherenceRow,
 } from "../lib/gatepassAdherenceSupabase";
+import { fetchFefoDeviations, type FefoDeviationRow } from "../lib/fefoDeviationsSupabase";
+import { computePurityMetrics } from "../lib/fefoPurityMetrics";
 import { Button, StatCard, Tag } from "./Ui";
+
+// The date case-based picking went live — everything on/after this splits
+// into the new top section; everything before stays in the historical
+// pure-FEFO baseline below. A plain literal, same convention as other
+// fixed cutoff dates in this codebase (e.g. AdminConfig's cutoffDate).
+const CASE_BASED_LAUNCH_DATE = "2026-09-17";
 
 interface DaySummary {
   date: string;
@@ -326,6 +334,7 @@ export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: 
 
 export function GatepassAdherence() {
   const [rows, setRows] = useState<GatepassAdherenceRow[]>([]);
+  const [fefoDeviations, setFefoDeviations] = useState<FefoDeviationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
@@ -338,10 +347,19 @@ export function GatepassAdherence() {
       .then((r) => { if (!cancelled) setRows(r); })
       .catch((e) => { if (!cancelled) setError((e as Error).message); })
       .finally(() => { if (!cancelled) setLoading(false); });
+    fetchFefoDeviations(CASE_BASED_LAUNCH_DATE)
+      .then((r) => { if (!cancelled) setFefoDeviations(r); })
+      .catch(() => { /* non-fatal — Metric 2 just shows 0 breach if this fails */ });
     return () => { cancelled = true; };
   }, []);
 
-  const days = useMemo(() => byDay(rows), [rows]);
+  const caseBasedRows = rows.filter((r) => r.report_date >= CASE_BASED_LAUNCH_DATE);
+  const baselineRows = rows.filter((r) => r.report_date < CASE_BASED_LAUNCH_DATE);
+  const caseBasedDays = useMemo(() => byDay(caseBasedRows), [caseBasedRows]);
+  const baselineWeeks = useMemo(() => byWeek(baselineRows), [baselineRows]);
+  const purity = computePurityMetrics(caseBasedRows, fefoDeviations);
+  const metric1Days = caseBasedDays.slice(-15);
+  const metric2Days = caseBasedDays.slice(-15).map((d) => ({ ...d, pct: computePurityMetrics(d.rows, fefoDeviations).metric2Pct }));
 
   const shellCls = "rounded-xl border border-[var(--fefo-line)] bg-[var(--fefo-surface)] p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800";
 
@@ -371,21 +389,21 @@ export function GatepassAdherence() {
     );
   }
 
-  const totalInstructed = rows.reduce((s, r) => s + r.instructed_qty, 0);
-  const totalCompliant = rows.reduce((s, r) => s + r.compliant_qty, 0);
+  const totalInstructed = baselineRows.reduce((s, r) => s + r.instructed_qty, 0);
+  const totalCompliant = baselineRows.reduce((s, r) => s + r.compliant_qty, 0);
   const overallPct = totalInstructed ? Math.round((totalCompliant / totalInstructed) * 10000) / 100 : 0;
-  const bestDay = days.reduce((a, b) => (b.pct > a.pct ? b : a), days[0]);
-  const worstDay = days.reduce((a, b) => (b.pct < a.pct ? b : a), days[0]);
-  const bestDayFacility = topFacility(bestDay);
-  const worstDayReason = topBreachReason(worstDay);
-  const expandedDay = days.find((d) => d.date === expandedDate) ?? null;
-  const expandedGp = expandedDay?.rows.find((r) => r.gatepass_code === expandedGatepass) ?? null;
+  const bestWeek = baselineWeeks.length ? baselineWeeks.reduce((a, b) => (b.pct > a.pct ? b : a), baselineWeeks[0]) : null;
+  const worstWeek = baselineWeeks.length ? baselineWeeks.reduce((a, b) => (b.pct < a.pct ? b : a), baselineWeeks[0]) : null;
+  const bestWeekFacility = bestWeek ? topFacility(bestWeek) : null;
+  const worstWeekReason = worstWeek ? topBreachReason(worstWeek) : null;
+  const expandedWeek = baselineWeeks.find((d) => d.date === expandedDate) ?? null;
+  const expandedGp = expandedWeek?.rows.find((r) => r.gatepass_code === expandedGatepass) ?? null;
 
-  const dateRangeLabel = days.length
-    ? `${shortDateLabel(days[0].date)} – ${shortDateLabel(days[days.length - 1].date)}, ${days[days.length - 1].date.slice(0, 4)}`
+  const dateRangeLabel = baselineWeeks.length
+    ? `${shortDateLabel(baselineWeeks[0].date)} – ${shortDateLabel(baselineWeeks[baselineWeeks.length - 1].date)}, ${baselineWeeks[baselineWeeks.length - 1].date.slice(0, 4)}`
     : "";
-  const last7Pct = windowPct(days.slice(-7));
-  const prior7 = days.slice(-14, -7);
+  const last7Pct = windowPct(baselineWeeks.slice(-7));
+  const prior7 = baselineWeeks.slice(-14, -7);
   const prior7Pct = prior7.length >= 3 ? windowPct(prior7) : null;
   const trendDelta = last7Pct !== null && prior7Pct !== null ? last7Pct - prior7Pct : null;
 
@@ -396,13 +414,92 @@ export function GatepassAdherence() {
 
   return (
     <section className={shellCls}>
+      {caseBasedRows.length > 0 && (
+        <div className="mb-6 border-b border-[var(--fefo-line)] pb-6 dark:border-slate-700">
+          <h2 className="mb-1 text-xl font-bold tracking-tight text-[var(--fefo-text)] dark:text-slate-100">
+            Case-Based Picking — Live Since {shortDateLabel(CASE_BASED_LAUNCH_DATE)}
+          </h2>
+          <p className="mb-4 max-w-2xl text-sm text-[var(--fefo-muted)] dark:text-slate-400">
+            Two numbers, day by day: whether the instructed batch was picked as instructed (unchanged method), and that
+            same number further adjusted for units where case-first picking itself chose a later-expiry batch than strict
+            FEFO would have.
+          </p>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <div className="rounded-2xl border border-[var(--fefo-line)] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <p className="mb-1 text-lg font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Pure case-based %</p>
+              <p className="mb-3 text-sm text-[var(--fefo-muted)] dark:text-slate-400">Last 15 days · same compliance rule as always</p>
+              <TrendChart days={metric1Days} selectedDate={null} onSelectDate={() => {}} showTrendline />
+              <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                <table className="w-full border-collapse text-sm tabular-nums">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="text-left text-xs uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                      <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Date</th>
+                      <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Instructed</th>
+                      <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Compliant</th>
+                      <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Pure case-based %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {metric1Days.map((d) => (
+                      <tr key={d.date} className="text-slate-700 dark:text-slate-200">
+                        <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">{d.date}</td>
+                        <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{d.instructedQty.toLocaleString()}</td>
+                        <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{d.compliantQty.toLocaleString()}</td>
+                        <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">
+                          <Tag tone={pctTone(d.pct)}>{pctDisplay(d.pct)}</Tag>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-[var(--fefo-line)] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <p className="mb-1 text-lg font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Case-based + FEFO breach %</p>
+              <p className="mb-3 text-sm text-[var(--fefo-muted)] dark:text-slate-400">
+                Last 15 days · {purity.breachQty.toLocaleString()} units breached FEFO out of {purity.instructedQty.toLocaleString()}
+              </p>
+              <TrendChart days={metric2Days} selectedDate={null} onSelectDate={() => {}} showTrendline />
+              <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                <table className="w-full border-collapse text-sm tabular-nums">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="text-left text-xs uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                      <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Date</th>
+                      <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Instructed</th>
+                      <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Breach units</th>
+                      <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Case-based + FEFO breach %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {metric1Days.map((d) => {
+                      const dayPurity = computePurityMetrics(d.rows, fefoDeviations);
+                      return (
+                        <tr key={d.date} className="text-slate-700 dark:text-slate-200">
+                          <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">{d.date}</td>
+                          <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{dayPurity.instructedQty.toLocaleString()}</td>
+                          <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{dayPurity.breachQty.toLocaleString()}</td>
+                          <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">
+                            <Tag tone={pctTone(dayPurity.metric2Pct)}>{pctDisplay(dayPurity.metric2Pct)}</Tag>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-[var(--fefo-line)] pb-4 dark:border-slate-700">
         <div className="min-w-0">
-          <h2 className="text-xl font-bold tracking-tight text-[var(--fefo-text)] dark:text-slate-100">Pick Compliance &amp; Fulfillment Accuracy</h2>
+          <h2 className="text-xl font-bold tracking-tight text-[var(--fefo-text)] dark:text-slate-100">Pure-FEFO Baseline — Pick Compliance &amp; Fulfillment Accuracy</h2>
           <p className="mt-1 max-w-2xl text-sm text-[var(--fefo-muted)] dark:text-slate-400">
-            Was the instructed batch actually picked, at the instructed quantity? Checked daily against yesterday's closed
-            gate passes at SL Mother Hub, SL Ambient, and SL RX. Picking the right batch from a different shelf isn't
-            penalized — only a wrong batch, a missed pick, or a short pick is.
+            The historical record from before case-based picking went live on {shortDateLabel(CASE_BASED_LAUNCH_DATE)} — was
+            the instructed batch actually picked, at the instructed quantity? Checked daily against each day's closed gate
+            passes at SL Mother Hub, SL Ambient, and SL RX. Picking the right batch from a different shelf isn't penalized —
+            only a wrong batch, a missed pick, or a short pick is. See the section above for the current, case-based era.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -410,7 +507,7 @@ export function GatepassAdherence() {
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
             {dateRangeLabel}
           </span>
-          <Button variant="sm" onClick={() => exportWorkbook(rows)}>
+          <Button variant="sm" onClick={() => exportWorkbook(baselineRows)}>
             Export Excel
           </Button>
         </div>
@@ -418,24 +515,24 @@ export function GatepassAdherence() {
 
       <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         <StatCard icon="%" tone={pctTone(overallPct)} label="Overall adherence" value={pctDisplay(overallPct)} sub={`${totalCompliant.toLocaleString()} / ${totalInstructed.toLocaleString()} units`} />
-        <StatCard icon="Σ" tone="info" label="Gate passes audited" value={String(rows.length)} sub={`across ${days.length} day${days.length === 1 ? "" : "s"}`} />
-        <StatCard icon="↑" tone="ok" label="Best day" value={shortDateLabel(bestDay.date)} sub={`${pctDisplay(bestDay.pct)}${bestDayFacility ? ` · ${bestDayFacility}` : ""}`} />
-        <StatCard icon="↓" tone="bad" label="Worst day" value={shortDateLabel(worstDay.date)} sub={`${pctDisplay(worstDay.pct)}${worstDayReason ? ` · ${worstDayReason}` : ""}`} />
+        <StatCard icon="Σ" tone="info" label="Gate passes audited" value={String(baselineRows.length)} sub={`across ${baselineWeeks.length} week${baselineWeeks.length === 1 ? "" : "s"}`} />
+        <StatCard icon="↑" tone="ok" label="Best week" value={bestWeek ? shortDateLabel(bestWeek.date) : "—"} sub={bestWeek ? `${pctDisplay(bestWeek.pct)}${bestWeekFacility ? ` · ${bestWeekFacility}` : ""}` : ""} />
+        <StatCard icon="↓" tone="bad" label="Worst week" value={worstWeek ? shortDateLabel(worstWeek.date) : "—"} sub={worstWeek ? `${pctDisplay(worstWeek.pct)}${worstWeekReason ? ` · ${worstWeekReason}` : ""}` : ""} />
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
         <div id="gpa-daily-log">
           <div className="mb-1.5 flex items-center justify-between">
-            <p className="text-sm font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Daily log breakdown</p>
+            <p className="text-sm font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Weekly log breakdown</p>
             <span className="rounded-full bg-[var(--fefo-teal-50)] px-2 py-0.5 text-[11px] font-semibold text-[var(--fefo-teal-900)] dark:bg-slate-700 dark:text-slate-300">
-              {days.length} record{days.length === 1 ? "" : "s"}
+              {baselineWeeks.length} record{baselineWeeks.length === 1 ? "" : "s"}
             </span>
           </div>
           <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
           <table className="w-full min-w-[520px] border-collapse text-lg tabular-nums">
             <thead className="sticky top-0 z-10">
               <tr className="text-left text-base uppercase tracking-wide text-teal-800 dark:text-teal-300">
-                <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Report Date</th>
+                <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Week Starting</th>
                 <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Gate Passes</th>
                 <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
                 <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
@@ -443,7 +540,7 @@ export function GatepassAdherence() {
               </tr>
             </thead>
             <tbody>
-              {days.map((d) => (
+              {baselineWeeks.map((d) => (
                 <tr
                   key={d.date}
                   onClick={() => selectDate(d.date)}
@@ -465,7 +562,7 @@ export function GatepassAdherence() {
               ))}
               <tr className="font-bold text-[var(--fefo-text)] dark:text-slate-100">
                 <td className="p-2">Overall</td>
-                <td className="p-2 text-right">{rows.length}</td>
+                <td className="p-2 text-right">{baselineRows.length}</td>
                 <td className="p-2 text-right">{totalInstructed.toLocaleString()}</td>
                 <td className="p-2 text-right">{totalCompliant.toLocaleString()}</td>
                 <td className="p-2 text-right">
@@ -479,30 +576,30 @@ export function GatepassAdherence() {
 
         <div className="rounded-2xl border border-[var(--fefo-line)] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <p className="mb-1 text-lg font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">
-            Daily adherence trend
+            Pure-FEFO baseline — weekly
           </p>
-          <p className="mb-3 text-sm text-[var(--fefo-muted)] dark:text-slate-400">Last 14 days — the report table covers the full range.</p>
-          <TrendChart days={days.slice(-14)} selectedDate={expandedDate} onSelectDate={selectDate} />
+          <p className="mb-3 text-sm text-[var(--fefo-muted)] dark:text-slate-400">Every week before case-based picking went live.</p>
+          <TrendChart days={baselineWeeks} selectedDate={expandedDate} onSelectDate={selectDate} showTrendline />
           {trendDelta !== null && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--fefo-line)] pt-3 text-xs dark:border-slate-700">
               <p className="text-[var(--fefo-muted)] dark:text-slate-400">
                 <span className={`font-semibold ${trendDelta >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
                   {trendDelta >= 0 ? "▲" : "▼"} {Math.abs(trendDelta).toFixed(1)} pt {trendDelta >= 0 ? "recovery" : "decline"}
                 </span>{" "}
-                over the last 7 days vs. the previous 7
+                over the last 7 weeks vs. the previous 7
               </p>
               <a href="#gpa-daily-log" className="font-semibold text-teal-700 hover:underline dark:text-teal-300">
-                Full daily log ↓
+                Full weekly log ↓
               </a>
             </div>
           )}
         </div>
       </div>
 
-      {expandedDay && (
+      {expandedWeek && (
         <div className="mb-4">
           <p className="mb-1.5 text-base font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-            Gate passes on {expandedDay.date}
+            Gate passes for week of {expandedWeek.date}
           </p>
           <div className="max-h-96 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
             <table className="w-full min-w-[480px] border-collapse text-lg tabular-nums">
@@ -516,7 +613,7 @@ export function GatepassAdherence() {
                 </tr>
               </thead>
               <tbody>
-                {expandedDay.rows.map((r) => (
+                {expandedWeek.rows.map((r) => (
                   <tr
                     key={r.gatepass_code}
                     onClick={() => setExpandedGatepass(expandedGatepass === r.gatepass_code ? null : r.gatepass_code)}
