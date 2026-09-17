@@ -12,6 +12,15 @@ function timeLabel(iso?: string): string | undefined {
   return iso ? new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : undefined;
 }
 
+/** "180 cases + 20 eaches" style label for a case-split line; undefined for a plain line (caller falls back to the flat qty). Deliberately phrased as quantities, not a case COUNT, since PickLine only carries the resulting caseQty/eachQty, not the case size itself. */
+function caseEachLabel(l: { caseQty?: number; eachQty?: number }): string | undefined {
+  if (!l.caseQty && !l.eachQty) return undefined;
+  const parts: string[] = [];
+  if (l.caseQty) parts.push(`${l.caseQty} case${l.caseQty === 1 ? "" : "s"}`);
+  if (l.eachQty) parts.push(`${l.eachQty} each${l.eachQty === 1 ? "" : "es"}`);
+  return parts.join(" + ");
+}
+
 /** The full picklist detail: assignment controls, share buttons, line table, complete button. */
 export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePassNo?: string }) {
   const { pickers, assignAll, assignLine, uploadAssignments, applyPicks, discardFacilityPicklist, revokeWmsBlock, logAudit } = useStore();
@@ -173,7 +182,7 @@ export function FacilityBlock({ f, gatePassNo }: { f: FacilityPicklist; gatePass
                   </div>
                 </td>
                 <td className="border-b border-slate-100 p-1.5 font-semibold dark:border-slate-700/60">
-                  {open ? l.qty : (l.picked ?? l.qty)}
+                  {open ? (caseEachLabel(l) ?? l.qty) : (l.picked ?? l.qty)}
                   {!open && l.nf ? <> <Tag tone="bad">{l.nf} NF</Tag></> : null}
                 </td>
                 <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">
