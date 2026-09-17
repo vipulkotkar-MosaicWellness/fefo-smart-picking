@@ -188,4 +188,52 @@ describe("flushOfflineQueue — replays queued pick results instead of dropping 
 
     useStore.setState(initialState, true);
   });
+
+  // Reload-then-replay where BOTH save attempts fail: applyPicks' own
+  // internal save (the completion transition genuinely fires this round,
+  // since `tasks` is a freshly-reloaded, still-unpicked copy) fails and
+  // re-queues via its own catch block, and flushOfflineQueue's unconditional
+  // explicit follow-up save then ALSO fails and would re-queue a second time
+  // if it didn't check for the entry applyPicks already left behind first.
+  it("does not double-enqueue when applyPicks' own save and the explicit follow-up save both fail", async () => {
+    const tasksSupabase = await import("../../src/lib/tasksSupabase");
+    const { useStore } = await import("../../src/lib/store");
+    const { enqueue, loadQueue } = await import("../../src/lib/offlineQueue");
+    const initialState = useStore.getState();
+
+    const freshTask: PickingTask = {
+      no: "TASK-DUP",
+      channel: CHANNEL,
+      demand: [{ channel: CHANNEL, sku: "SKU-DUP", qty: 10, gatePassNo: "GP-DUP" }],
+      facilities: [
+        {
+          no: "TASK-DUP-MH", taskNo: "TASK-DUP", facility: "SL Mother Hub", status: "open", round: 1, bad: 0, gatePassNo: "GP-DUP",
+          lines: [{ rid: 801, sku: "SKU-DUP", name: "Dup product", facility: "SL Mother Hub", bin: "M4", batch: "B4", exp: [2099, 1], rem: 900, qty: 10 }],
+        },
+      ],
+      shortfall: [],
+      createdAt: new Date().toISOString(),
+    };
+    // Still offline throughout this whole flush pass — every save attempt
+    // (applyPicks' internal one and flushOfflineQueue's explicit follow-up)
+    // fails the same way.
+    vi.mocked(tasksSupabase.fetchTaskByNo).mockRejectedValue(new Error("network unreachable"));
+    useStore.setState({
+      tasks: [freshTask],
+      tasksLoaded: true,
+      stock: [{ rid: 801, location: "SL Mother Hub", bin: "M4", sku: "SKU-DUP", name: "Dup product", batch: "B4", exp: [2099, 1], qty: 10, shelf: 24, type: "Good", active: "Active" }],
+      skus: { "SKU-DUP": { name: "Dup product", shelf: 24 } },
+    });
+
+    enqueue({ facilityNo: "TASK-DUP-MH", results: { 801: 0 }, reasons: {}, heldBy: "Night Picker" });
+
+    await useStore.getState().flushOfflineQueue();
+
+    // Exactly one entry for this facility — not two, even though both the
+    // internal and the explicit follow-up save failed in the same pass.
+    const queued = loadQueue().filter((q) => q.facilityNo === "TASK-DUP-MH");
+    expect(queued).toHaveLength(1);
+
+    useStore.setState(initialState, true);
+  });
 });

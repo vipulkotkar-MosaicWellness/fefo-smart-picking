@@ -1404,8 +1404,16 @@ export const useStore = create<AppState>()(
               await saveOwnFacilityChanges(task, new Set([item.facilityNo]));
             } catch {
               // Still offline / still failing — re-queue rather than
-              // silently dropping it now that it was dequeued above.
-              enqueuePick({ facilityNo: item.facilityNo, results: item.results, reasons: item.reasons, heldBy: item.heldBy });
+              // silently dropping it now that it was dequeued above. Guard
+              // against double-enqueueing: on a genuine reload-then-replay
+              // where the facility transitioned to "completed" during the
+              // applyPicks() call above, applyPicks' OWN catch block already
+              // enqueued a fresh entry for this exact facility if ITS save
+              // failed too — re-checking the queue here before adding
+              // another avoids stacking two entries for one pick.
+              if (!loadPickQueue().some((q) => q.facilityNo === item.facilityNo)) {
+                enqueuePick({ facilityNo: item.facilityNo, results: item.results, reasons: item.reasons, heldBy: item.heldBy });
+              }
             }
           }
         }
