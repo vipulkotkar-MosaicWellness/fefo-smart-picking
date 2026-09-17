@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../lib/authStore";
+import { deleteCaseSize, upsertCaseSize } from "../lib/caseSizesSupabase";
 import { BUCKET_LABELS, type ChannelBucket } from "../lib/channels";
 import { dueForAutoComplete, oneTimeCloseCutoffMs, useStore } from "../lib/store";
 import { Button, Card } from "./Ui";
@@ -19,6 +20,7 @@ export function AdminConfig() {
     autoCompleteAfterDays,
     setAutoCompleteAfterDays,
     closeAgedWmsBlockedPicklists,
+    caseSizes,
   } = useStore();
   const myName = useAuth((s) => s.profile?.display_name ?? "Admin");
   const isSuperAdmin = useAuth((s) => s.profile?.role === "super_admin");
@@ -33,6 +35,8 @@ export function AdminConfig() {
   const [newPickerName, setNewPickerName] = useState("");
   const [editingPicker, setEditingPicker] = useState<string | null>(null);
   const [editPickerName, setEditPickerName] = useState("");
+  const [newCaseSizeSku, setNewCaseSizeSku] = useState("");
+  const [newCaseSizeVal, setNewCaseSizeVal] = useState("");
 
   function submitNewPicker() {
     const name = newPickerName.trim();
@@ -103,6 +107,30 @@ export function AdminConfig() {
     if (!window.confirm(`Delete channel "${name}"? Already-created picklists keep their history — this only stops it being offered for new demand going forward. This can't be undone from here (an Admin would need to re-add it).`)) return;
     void deleteChannel(name);
     logAudit(myName, `Deleted channel ${name}`);
+  }
+
+  // Case sizes flow through the store the same way channelRules does: we
+  // just fire the Supabase call here and let the existing realtime
+  // subscription (subscribeCaseSizes, wired in the store) refresh
+  // AppState.caseSizes — no local state to hand-roll or drift from it.
+  function submitNewCaseSize() {
+    const sku = newCaseSizeSku.trim();
+    if (!sku) return;
+    const size = Number(newCaseSizeVal);
+    if (!Number.isFinite(size) || size <= 1) {
+      alert("Case size must be a whole number greater than 1.");
+      return;
+    }
+    void upsertCaseSize(sku, size);
+    logAudit(myName, `Set case size for ${sku} to ${size}`);
+    setNewCaseSizeSku("");
+    setNewCaseSizeVal("");
+  }
+
+  function removeCaseSize(sku: string) {
+    if (!window.confirm(`Remove the case size for ${sku}? Future picks for this SKU fall back to each-only allocation.`)) return;
+    void deleteCaseSize(sku);
+    logAudit(myName, `Removed case size for ${sku}`);
   }
 
   // oneTimeCloseCutoffMs clamps the chosen date so it never reaches less
@@ -330,6 +358,66 @@ export function AdminConfig() {
               </div>
             ))}
             {pickers.length === 0 && <p className="text-[11px] text-slate-400">No pickers yet — add one above.</p>}
+          </div>
+        </Card>
+
+        <Card title="Case sizes">
+          <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
+            SKUs with a case size configured here get case-first allocation during picking — full cases from the
+            eligible batch, then the remainder as eaches.
+            {isSuperAdmin && " Super Admin can remove a case size — future picks for that SKU fall back to each-only allocation."}
+          </p>
+
+          <div className="mb-3 flex flex-wrap items-end gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-900">
+            <label className="text-[11px]">
+              <span className="block text-slate-500 dark:text-slate-400">SKU</span>
+              <input
+                value={newCaseSizeSku}
+                onChange={(e) => setNewCaseSizeSku(e.target.value)}
+                placeholder="e.g. SKU-1234"
+                className="mt-0.5 w-36 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-800"
+              />
+            </label>
+            <label className="text-[11px]">
+              <span className="block text-slate-500 dark:text-slate-400">Case size</span>
+              <input
+                type="number"
+                min={2}
+                value={newCaseSizeVal}
+                onChange={(e) => setNewCaseSizeVal(e.target.value)}
+                placeholder="e.g. 24"
+                className="mt-0.5 w-20 rounded border border-slate-300 p-1 text-xs dark:border-slate-600 dark:bg-slate-800"
+              />
+            </label>
+            <Button variant="sm" onClick={submitNewCaseSize}>Add case size</Button>
+          </div>
+
+          <div className="max-h-72 overflow-y-auto">
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                  <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">SKU</th>
+                  <th className="border-b border-slate-200 p-1.5 dark:border-slate-700">Case size</th>
+                  {isSuperAdmin && <th className="border-b border-slate-200 p-1.5 dark:border-slate-700"></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(caseSizes).map(([sku, size]) => (
+                  <tr key={sku} className="text-slate-700 dark:text-slate-200">
+                    <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{sku}</td>
+                    <td className="border-b border-slate-100 p-1.5 dark:border-slate-700/60">{size}</td>
+                    {isSuperAdmin && (
+                      <td className="border-b border-slate-100 p-1.5 text-right dark:border-slate-700/60">
+                        <Button variant="sm" onClick={() => removeCaseSize(sku)}>Remove case size</Button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {Object.keys(caseSizes).length === 0 && (
+              <p className="mt-2 text-[11px] text-slate-400">No case sizes configured yet — add one above.</p>
+            )}
           </div>
         </Card>
 
