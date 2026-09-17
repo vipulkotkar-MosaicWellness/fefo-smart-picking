@@ -251,6 +251,7 @@ export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: 
             />
           )}
           {showTrendline &&
+            days.length > 1 &&
             days.map((d, i) => (
               <circle
                 key={`dot-${d.date}`}
