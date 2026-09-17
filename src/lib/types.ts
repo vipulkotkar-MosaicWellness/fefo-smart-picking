@@ -53,7 +53,13 @@ export interface PickLine {
   vendorBatch?: string;
   exp: Expiry;
   rem: number; // remaining months at pick time
-  qty: number; // suggested pick qty
+  qty: number; // suggested pick qty — always caseQty + eachQty when either is set, unchanged meaning otherwise
+  // Case-based picking (see engine.ts allocate()): set only when this SKU
+  // has a configured case size AND this lot contributes a full case and/or
+  // loose eaches. Both omitted (undefined) is today's plain FEFO line —
+  // every existing reader of `qty` needs no changes at all.
+  caseQty?: number; // full cases suggested from this lot
+  eachQty?: number; // loose units suggested from this lot, on top of or instead of caseQty
   nf?: number; // not-found qty entered on completion
   nfReason?: string; // picker's reason for the not-found qty, e.g. "Damaged stock"
   picked?: number; // actual picked (qty - nf)

@@ -23,6 +23,16 @@ import { fetchFacilityLastSynced, fetchStock, fetchSyncState, replaceStock } fro
 import type { SyncSource } from "./syncSource";
 import { deletePickerRow, fetchPickers, insertPicker, renamePickerRow, subscribePickers } from "./pickersSupabase";
 import { applyChannelOverrides, fetchChannelOverrides, markChannelOverrideDeleted, subscribeChannelOverrides, upsertChannelOverride } from "./channelsSupabase";
+import {
+  applyCaseSizeRows,
+  type CaseSizeGapRow,
+  deleteCaseSize as deleteCaseSizeRow,
+  fetchCaseSizeGaps,
+  fetchCaseSizes,
+  logCaseSizeGaps,
+  subscribeCaseSizes,
+  upsertCaseSize as upsertCaseSizeRow,
+} from "./caseSizesSupabase";
 import { fetchAllTasks, fetchTaskByNo, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
   BinSkip,
@@ -291,8 +301,9 @@ function allocateAcrossFacilities(
   exclude: number[],
   heldKeys: Set<string>,
   minQty?: number,
+  caseSize?: number,
 ): { byFacility: Record<string, PickLine[]>; short: number; skipped: BinSkip[] } {
-  const r = allocate({ sku, need, cutoff, stock, reservedFor: reserved, exclude, heldKeys, minQty });
+  const r = allocate({ sku, need, cutoff, stock, reservedFor: reserved, exclude, heldKeys, minQty, caseSize });
   const byFacility: Record<string, PickLine[]> = {};
   for (const line of r.lines) (byFacility[line.facility] ??= []).push(line);
   return { byFacility, short: r.short, skipped: r.skipped };
@@ -387,6 +398,7 @@ export function computeChannelAllocations(
   stock: StockRow[],
   existingTasks: PickingTask[],
   heldKeys: Set<string> = new Set(),
+  caseSizes: Record<string, number> = {},
 ): ChannelAllocation[] {
   const byGroup = new Map<string, DemandLine[]>();
   for (const d of demand) {
@@ -423,7 +435,7 @@ export function computeChannelAllocations(
     const skipped: BinSkip[] = [];
     for (const d of lines) {
       const cutoff = cutoffMonths(rule, skus[d.sku].shelf);
-      const w = allocateAcrossFacilities(d.sku, d.qty, cutoff, stock, reserved, [], heldKeys, rule.minBinQty);
+      const w = allocateAcrossFacilities(d.sku, d.qty, cutoff, stock, reserved, [], heldKeys, rule.minBinQty, caseSizes[d.sku]);
       for (const f of Object.keys(w.byFacility)) {
         byFacility[f] ??= [];
         byFacility[f].push(...w.byFacility[f]);
@@ -614,6 +626,35 @@ export interface AppState {
   // touched lives in Supabase.
   loadChannelOverrides: () => Promise<void>;
   startChannelOverridesRealtime: () => () => void;
+  // Per-SKU case sizes (sku -> units per case), shared across every
+  // logged-in user (see caseSizesSupabase.ts) — same live-from-Supabase
+  // pattern as channelRules, not a local-only setting. Threaded into
+  // allocate() via computeChannelAllocations/allocateAcrossFacilities so
+  // both generate() and the not-found round-2+ re-offer in applyPicks
+  // produce a case+each split when a SKU has one configured.
+  caseSizes: Record<string, number>;
+  loadCaseSizes: () => Promise<void>;
+  startCaseSizesRealtime: () => () => void;
+  // Historical/ongoing record of SKUs that hit a missing-case-size gap on a
+  // real order (see logCaseSizeGaps in caseSizesSupabase.ts, called from
+  // generate()). Loaded on demand for the Admin dashboard section only — NOT
+  // wired into App.tsx's global mount effect and NOT realtime-subscribed
+  // like caseSizes above, since this is a review dashboard, not data any
+  // other screen depends on. A SKU can appear here AND in caseSizes at the
+  // same time (its gap history stays even after an Admin configures a case
+  // size for it going forward) — see AdminConfig's "Resolved" vs "Open"
+  // distinction, which is what actually decides whether a row still counts
+  // as needing attention.
+  caseSizeGaps: CaseSizeGapRow[];
+  loadCaseSizeGaps: () => Promise<void>;
+  // Add/update or remove a SKU's case size. Same try/catch + notice pattern
+  // as addChannel/deleteChannel, but with no local optimistic update — the
+  // realtime subscription (startCaseSizesRealtime) is what actually updates
+  // AppState.caseSizes on success, so there's no local copy to hand-roll or
+  // drift from it. Returns whether the Supabase call succeeded, so the
+  // caller (AdminConfig) knows whether it's safe to clear its form.
+  addCaseSize: (sku: string, size: number) => Promise<boolean>;
+  deleteCaseSize: (sku: string) => Promise<boolean>;
   addPicker: (name: string) => Promise<void>;
   renamePicker: (oldName: string, newName: string) => Promise<void>;
   removePicker: (name: string) => Promise<void>;
@@ -686,6 +727,8 @@ export const useStore = create<AppState>()(
       skus: skusFromStock(initialStock),
       channelRules: { ...CHANNELS },
       channelBuckets: {},
+      caseSizes: {},
+      caseSizeGaps: [],
       deletedChannels: [],
       facilityPriority: [...FACILITY_PRIORITY],
       pickers: [...PICKERS_DEFAULT],
@@ -827,6 +870,50 @@ export const useStore = create<AppState>()(
       startChannelOverridesRealtime: () => {
         if (!isSupabaseConfigured) return () => {};
         return subscribeChannelOverrides(() => void get().loadChannelOverrides());
+      },
+
+      loadCaseSizes: async () => {
+        if (!isSupabaseConfigured) return;
+        try {
+          const rows = await fetchCaseSizes();
+          set({ caseSizes: applyCaseSizeRows(rows) });
+        } catch {
+          // Transient failure — keep whatever's already in state.
+        }
+      },
+
+      startCaseSizesRealtime: () => {
+        if (!isSupabaseConfigured) return () => {};
+        return subscribeCaseSizes(() => void get().loadCaseSizes());
+      },
+
+      loadCaseSizeGaps: async () => {
+        if (!isSupabaseConfigured) return;
+        try {
+          set({ caseSizeGaps: await fetchCaseSizeGaps() });
+        } catch {
+          // Transient failure — keep whatever's already in state.
+        }
+      },
+
+      addCaseSize: async (sku, size) => {
+        try {
+          await upsertCaseSizeRow(sku, size);
+          return true;
+        } catch (e) {
+          set({ notice: "Could not save case size for " + sku + ": " + (e as Error).message });
+          return false;
+        }
+      },
+
+      deleteCaseSize: async (sku) => {
+        try {
+          await deleteCaseSizeRow(sku);
+          return true;
+        } catch (e) {
+          set({ notice: "Could not delete case size for " + sku + ": " + (e as Error).message });
+          return false;
+        }
       },
 
       loadHolds: async () => {
@@ -1018,7 +1105,23 @@ export const useStore = create<AppState>()(
           }
         }
 
-        const allocations = computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(get().holds));
+        const allocations = computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(get().holds), get().caseSizes);
+
+        // Fires once per generate() call against the planner's original demand list — NOT
+        // re-run on not-found re-offer rounds (see the round-2+ re-offer logic in applyPicks
+        // below), since a re-offer isn't a new order, just a retry of one already logged here.
+        if (isSupabaseConfigured) {
+          const gaps = demand.filter((d) => !get().caseSizes[d.sku]).map((d) => ({ sku: d.sku, qty: d.qty }));
+          if (gaps.length > 0) {
+            try {
+              await logCaseSizeGaps(gaps);
+            } catch {
+              // Logging failure must never block real task creation — this
+              // is visibility, not a gate.
+            }
+          }
+        }
+
         const newTasks: PickingTask[] = [];
         const allUnusedGatePasses: string[] = [];
         // Gate passes a CSV supplied that turned out to already belong to
@@ -1268,7 +1371,7 @@ export const useStore = create<AppState>()(
             const skuInfo = state.skus[sku];
             if (!skuInfo) { missingSkus.push(sku); continue; }
             const cutoff = cutoffMonths(rule, skuInfo.shelf);
-            const w = allocateAcrossFacilities(sku, nfBySku[sku], cutoff, stock, reserved, [...usedRids], heldKeysForRound2, rule.minBinQty);
+            const w = allocateAcrossFacilities(sku, nfBySku[sku], cutoff, stock, reserved, [...usedRids], heldKeysForRound2, rule.minBinQty, state.caseSizes[sku]);
             for (const f of Object.keys(w.byFacility)) {
               (r2[f] ??= []).push(...w.byFacility[f]);
               w.byFacility[f].forEach((l) => usedRids.add(l.rid));
@@ -1775,6 +1878,12 @@ export const useStore = create<AppState>()(
         channelRules: isSupabaseConfigured ? {} : s.channelRules,
         channelBuckets: isSupabaseConfigured ? {} : s.channelBuckets,
         deletedChannels: isSupabaseConfigured ? [] : s.deletedChannels,
+        // Same reasoning as channelRules above: live from Supabase when
+        // configured (see loadCaseSizes/startCaseSizesRealtime), so nothing
+        // of theirs belongs in localStorage — persisting a stale copy here
+        // would just get overwritten by the next load anyway, and could
+        // briefly flash outdated case sizes before that load completes.
+        caseSizes: isSupabaseConfigured ? {} : s.caseSizes,
         facilityPriority: s.facilityPriority,
         pickers: isSupabaseConfigured ? [] : s.pickers,
         visibleFacilities: s.visibleFacilities,

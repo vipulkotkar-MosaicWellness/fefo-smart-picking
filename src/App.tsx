@@ -174,6 +174,8 @@ function Workspace() {
     startPickersRealtime,
     loadChannelOverrides,
     startChannelOverridesRealtime,
+    loadCaseSizes,
+    startCaseSizesRealtime,
     tasks,
     flushOfflineQueue,
     checkWmsAutoBlock,
@@ -205,11 +207,13 @@ function Workspace() {
     void loadHolds();
     void loadPickers();
     void loadChannelOverrides();
+    void loadCaseSizes();
     void loadAutoCompleteSetting();
     void flushOfflineQueue();
     const stop = startTasksRealtime();
     const stopPickers = startPickersRealtime();
     const stopChannelOverrides = startChannelOverridesRealtime();
+    const stopCaseSizes = startCaseSizesRealtime();
     const stopAutoCompleteSetting = startAutoCompleteSettingRealtime();
     const onOnline = () => void flushOfflineQueue();
     window.addEventListener("online", onOnline);
@@ -230,6 +234,7 @@ function Workspace() {
       stop();
       stopPickers();
       stopChannelOverrides();
+      stopCaseSizes();
       stopAutoCompleteSetting();
       window.removeEventListener("online", onOnline);
       window.clearInterval(wmsTimer);

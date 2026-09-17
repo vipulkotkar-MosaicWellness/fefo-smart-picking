@@ -1,6 +1,7 @@
 import { useMemo, useState, type ChangeEvent } from "react";
 import { useAuth } from "../lib/authStore";
 import { downloadCsv } from "../lib/format";
+import { activeHoldKeys } from "../lib/holds";
 import { parseDemandCsv } from "../lib/sampleData";
 import { activeTasks, computeChannelAllocations, useStore } from "../lib/store";
 import { PartnerMark } from "./partners/PartnerMark";
@@ -58,7 +59,8 @@ function WizardSteps({ step, furthest, onJump }: { step: Step; furthest: Step; o
 }
 
 export function DemandPanel() {
-  const { channelRules, skus, stock, facilityPriority, tasks, demand, setDemand, removeDemand, generate } = useStore();
+  const { channelRules, skus, stock, facilityPriority, tasks, holds, caseSizes, demand, setDemand, removeDemand, generate } =
+    useStore();
   const userId = useAuth((s) => s.userId);
   const displayName = useAuth((s) => s.profile?.display_name ?? null);
   const [step, setStep] = useState<Step>(1);
@@ -89,9 +91,9 @@ export function DemandPanel() {
 
   const allocations = useMemo(() => {
     if (demand.length === 0) return [];
-    return computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks));
+    return computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(holds), caseSizes);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [demand, channelRules, skus, stock]);
+  }, [demand, channelRules, skus, stock, holds, caseSizes]);
 
   const totalUnits = demand.reduce((s, d) => s + d.qty, 0);
   const facilitiesUsed = new Set(allocations.flatMap((a) => Object.keys(a.byFacility))).size;
