@@ -1363,7 +1363,7 @@ export const useStore = create<AppState>()(
           } catch {
             // Offline or a transient failure — the pick is already applied
             // locally above; queue the sync so it isn't silently lost.
-            enqueuePick({ facilityNo, results });
+            enqueuePick({ facilityNo, results, reasons: reasons ?? {}, heldBy: heldBy || "Unknown" });
             const offlineMsg = "⚠ Saved on this device — will sync once you're back online.";
             const priorNotice = get().notice;
             set({ notice: priorNotice.startsWith("Could not place hold") ? `${priorNotice} Also: ${offlineMsg}` : offlineMsg });
@@ -1372,30 +1372,20 @@ export const useStore = create<AppState>()(
       },
 
       flushOfflineQueue: async () => {
-        if (!isSupabaseConfigured) return;
+        if (!isSupabaseConfigured || !get().tasksLoaded) return;
         const queue = loadPickQueue();
         const gpQueue = loadGatePassQueue();
         if (queue.length === 0 && gpQueue.length === 0) return;
-        const { tasks } = get();
         for (const item of queue) {
-          const task = tasks.find((t) => t.facilities.some((f) => f.no === item.facilityNo));
-          if (!task) {
-            dequeuePick(item.id);
-            continue;
-          }
-          try {
-            // Same fresh-fetch-and-layer save as the main path (not a blind
-            // push of local state) — a retry is exactly the case where the
-            // most time has passed since this device last read the task, so
-            // it's the likeliest of all to be stale.
-            await saveOwnFacilityChanges(task, new Set([item.facilityNo]));
-            dequeuePick(item.id);
-          } catch {
-            // Still offline / still failing — leave it queued for next time.
-          }
+          // Remove the old entry before retrying — applyPicks' own catch
+          // block re-queues a fresh entry if this retry also fails, so
+          // nothing is lost either way, and there's no leftover stale
+          // duplicate sitting alongside a new one.
+          dequeuePick(item.id);
+          await get().applyPicks(item.facilityNo, item.results, item.reasons, item.heldBy);
         }
         for (const item of gpQueue) {
-          const task = tasks.find((t) => t.no === item.taskNo);
+          const task = get().tasks.find((t) => t.no === item.taskNo);
           if (!task) {
             dequeueGatePass(item.id);
             continue;
