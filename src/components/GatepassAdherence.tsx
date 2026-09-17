@@ -40,6 +40,39 @@ function byDay(rows: GatepassAdherenceRow[]): DaySummary[] {
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
+/** Monday of the Mon-Sun week containing this date, as YYYY-MM-DD. UTC throughout — report_date is a plain date string with no timezone of its own, matching byDay's convention. */
+function weekStart(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  const day = d.getUTCDay(); // 0=Sun..6=Sat
+  const diffToMonday = day === 0 ? 6 : day - 1;
+  d.setUTCDate(d.getUTCDate() - diffToMonday);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Same shape as byDay, one row per Mon-Sun week instead of per day — for the pure-FEFO historical baseline, which has too many days to read one-by-one. */
+export function byWeek(rows: GatepassAdherenceRow[]): DaySummary[] {
+  const groups = new Map<string, GatepassAdherenceRow[]>();
+  for (const r of rows) {
+    const wk = weekStart(r.report_date);
+    if (!groups.has(wk)) groups.set(wk, []);
+    groups.get(wk)!.push(r);
+  }
+  return [...groups.entries()]
+    .map(([wk, weekRows]) => {
+      const instructedQty = weekRows.reduce((s, r) => s + r.instructed_qty, 0);
+      const compliantQty = weekRows.reduce((s, r) => s + r.compliant_qty, 0);
+      return {
+        date: wk,
+        gatepassCount: weekRows.length,
+        instructedQty,
+        compliantQty,
+        pct: instructedQty ? Math.round((compliantQty / instructedQty) * 10000) / 100 : 0,
+        rows: weekRows,
+      };
+    })
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
 /** Two sheets: gate-pass rollup, and full line-level detail. Report Date and Facility are
  * repeated on both sheets so either can be filtered/traced without cross-referencing the other. */
 function exportWorkbook(rows: GatepassAdherenceRow[]) {
