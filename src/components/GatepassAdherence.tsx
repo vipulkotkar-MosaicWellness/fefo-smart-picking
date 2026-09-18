@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   fetchGatepassAdherence,
@@ -197,6 +197,27 @@ function shortDateLabel(dateStr: string): string {
 
 export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: { days: DaySummary[]; selectedDate: string | null; onSelectDate: (date: string) => void; showTrendline?: boolean }) {
   const [hovered, setHovered] = useState<DaySummary | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Real measured width of the card the chart sits in, not a fixed pixel
+  // guess — this is what makes the chart fill the actual available width
+  // (centered, no dead space on the right) and re-flow on window resize /
+  // different screen sizes, instead of rendering at a fixed small size
+  // inside a wider card. 480 is only the first-paint fallback before the
+  // ResizeObserver's first measurement lands.
+  const [containerW, setContainerW] = useState(480);
+  useEffect(() => {
+    const el = containerRef.current;
+    // Guards an environment with no ResizeObserver (older browsers, and
+    // jsdom in tests) — the chart still renders correctly at the 480
+    // fallback width, it just won't re-flow on resize there.
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width) setContainerW(width);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const h = 220;
   const padL = 40;
@@ -209,12 +230,17 @@ export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: 
   const chartH = h - padT - padB;
   // A bar never gets thinner than this even when there are many days — past
   // that point the chart scrolls horizontally instead of shrinking bars to
-  // unreadable slivers. slot = bar + the 2px surface gap on each side. Wider
-  // than before to give the "01 Sep" date labels room without colliding.
-  const slot = 36;
-  const barW = 24;
-  const chartW = Math.max(480 - padL - padR, days.length * slot);
+  // unreadable slivers. Below that floor, bars spread out evenly to fill
+  // the card's REAL width (via containerW) rather than clumping at a fixed
+  // small size and leaving empty space on the right.
+  const minSlot = 28;
+  const chartW = Math.max(containerW - padL - padR, days.length * minSlot);
   const w = padL + chartW + padR;
+  const slot = days.length > 0 ? chartW / days.length : chartW;
+  // Bars stay readable-sized even when only a handful of days fill a wide
+  // card — capped so they never balloon into fat blocks, evenly spaced
+  // across the full slot width either way.
+  const barW = Math.min(slot * 0.65, 44);
   // Shared by the bar tip, its value label, and the trendline dot below —
   // all three must floor the same way (a day at/near 0% never fully
   // collapses to the baseline) so they visually agree with each other.
@@ -233,7 +259,7 @@ export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: 
         ))}
       </div>
 
-      <div className="relative overflow-x-auto">
+      <div ref={containerRef} className="relative overflow-x-auto">
         <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Daily adherence percentage trend, one bar per day">
           {[0, 25, 50, 75, 100].map((tick) => {
             const y = padT + chartH - (tick / 100) * chartH;
@@ -530,22 +556,32 @@ export function GatepassAdherence() {
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <div id="gpa-daily-log">
-          <div className="mb-1.5 flex items-center justify-between">
-            <p className="text-sm font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Weekly log breakdown</p>
+        <div id="gpa-daily-log" className="rounded-2xl border border-[var(--fefo-line)] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-lg font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Weekly log breakdown</p>
             <span className="rounded-full bg-[var(--fefo-teal-50)] px-2 py-0.5 text-[11px] font-semibold text-[var(--fefo-teal-900)] dark:bg-slate-700 dark:text-slate-300">
               {baselineWeeks.length} record{baselineWeeks.length === 1 ? "" : "s"}
             </span>
           </div>
           <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
-          <table className="w-full min-w-[520px] border-collapse text-lg tabular-nums">
+          {/* table-fixed + percentage col widths, not a min-width — this is
+              what lets the table fit within the card at normal desktop
+              widths instead of forcing horizontal scroll. */}
+          <table className="w-full table-fixed border-collapse text-[12.5px] tabular-nums">
+            <colgroup>
+              <col className="w-[30%]" />
+              <col className="w-[16%]" />
+              <col className="w-[19%]" />
+              <col className="w-[19%]" />
+              <col className="w-[16%]" />
+            </colgroup>
             <thead className="sticky top-0 z-10">
-              <tr className="text-left text-base uppercase tracking-wide text-teal-800 dark:text-teal-300">
-                <th className="border-b border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">Week Starting</th>
-                <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Gate Passes</th>
-                <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Instructed Qty</th>
-                <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Compliant Qty</th>
-                <th className="border-b border-slate-200 bg-slate-50 p-2 text-right dark:border-slate-700 dark:bg-slate-900">Adherence %</th>
+              <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
+                <th className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900">Week Starting</th>
+                <th className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Gate Passes</th>
+                <th className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Instructed</th>
+                <th className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Compliant</th>
+                <th className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Adherence</th>
               </tr>
             </thead>
             <tbody>
@@ -557,28 +593,33 @@ export function GatepassAdherence() {
                     expandedDate === d.date ? "bg-[var(--fefo-teal-50)] dark:bg-slate-900" : ""
                   }`}
                 >
-                  <td className="border-b border-slate-100 p-2 dark:border-slate-700/60">
-                    <span className="mr-1 inline-block w-3 text-[var(--fefo-muted)]">{expandedDate === d.date ? "▾" : "▸"}</span>
+                  <td className="truncate border-b border-slate-100 px-2 py-1 dark:border-slate-700/60">
+                    <span className="mr-1 inline-block w-2.5 text-[var(--fefo-muted)]">{expandedDate === d.date ? "▾" : "▸"}</span>
                     {d.date}
                   </td>
-                  <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{d.gatepassCount}</td>
-                  <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{d.instructedQty.toLocaleString()}</td>
-                  <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">{d.compliantQty.toLocaleString()}</td>
-                  <td className="border-b border-slate-100 p-2 text-right dark:border-slate-700/60">
+                  <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">{d.gatepassCount}</td>
+                  <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">{d.instructedQty.toLocaleString()}</td>
+                  <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">{d.compliantQty.toLocaleString()}</td>
+                  <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">
                     <Tag tone={pctTone(d.pct)}>{pctDisplay(d.pct)}</Tag>
                   </td>
                 </tr>
               ))}
-              <tr className="font-bold text-[var(--fefo-text)] dark:text-slate-100">
-                <td className="p-2">Overall</td>
-                <td className="p-2 text-right">{baselineRows.length}</td>
-                <td className="p-2 text-right">{totalInstructed.toLocaleString()}</td>
-                <td className="p-2 text-right">{totalCompliant.toLocaleString()}</td>
-                <td className="p-2 text-right">
+            </tbody>
+            {/* tfoot + sticky bottom-0 — the Overall row stays visually
+                distinct (tinted background, heavier top border) and stays
+                in view while scrolling through a longer weekly list. */}
+            <tfoot className="sticky bottom-0 z-10">
+              <tr className="border-t-2 border-slate-300 bg-slate-50 font-bold text-[var(--fefo-text)] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100">
+                <td className="px-2 py-1.5">Overall</td>
+                <td className="px-2 py-1.5 text-right">{baselineRows.length}</td>
+                <td className="px-2 py-1.5 text-right">{totalInstructed.toLocaleString()}</td>
+                <td className="px-2 py-1.5 text-right">{totalCompliant.toLocaleString()}</td>
+                <td className="px-2 py-1.5 text-right">
                   <Tag tone={pctTone(overallPct)}>{pctDisplay(overallPct)}</Tag>
                 </td>
               </tr>
-            </tbody>
+            </tfoot>
           </table>
           </div>
         </div>
