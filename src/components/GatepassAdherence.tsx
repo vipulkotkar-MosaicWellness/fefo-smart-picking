@@ -26,6 +26,8 @@ interface DaySummary {
   rows: GatepassAdherenceRow[];
 }
 
+type WeeklySortKey = "date" | "gatepassCount" | "instructedQty" | "compliantQty" | "pct" | "wow";
+
 function byDay(rows: GatepassAdherenceRow[]): DaySummary[] {
   const groups = new Map<string, GatepassAdherenceRow[]>();
   for (const r of rows) {
@@ -79,6 +81,21 @@ export function byWeek(rows: GatepassAdherenceRow[]): DaySummary[] {
       };
     })
     .sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
+/**
+ * Percentage-POINT change vs. the immediately preceding week, keyed by
+ * week-start date — `null` for the first week (nothing to compare against).
+ * Takes the full, chronologically-sorted week list, not whatever subset is
+ * currently displayed, so a "Last N weeks" filter never changes what the
+ * edge weeks compare against.
+ */
+function weekOverWeek(weeksAsc: DaySummary[]): Map<string, number | null> {
+  const out = new Map<string, number | null>();
+  weeksAsc.forEach((week, i) => {
+    out.set(week.date, i === 0 ? null : Math.round((week.pct - weeksAsc[i - 1].pct) * 10) / 10);
+  });
+  return out;
 }
 
 /** Two sheets: gate-pass rollup, and full line-level detail. Report Date and Facility are
@@ -186,6 +203,23 @@ const ADHERENCE_STATUS = [
 ];
 function statusColor(pct: number): string {
   return ADHERENCE_STATUS.find((s) => pct >= s.min)!.color;
+}
+
+// A finer, 4-tier read used ONLY by the Pure-FEFO baseline's weekly chart
+// and table (below) — deliberately separate from ADHERENCE_STATUS/pctTone
+// above, which stay 3-tier everywhere else in the app (including the new
+// Case-Based Picking section). Splitting the old "Below target" band into
+// 70–79% and <70% gives the weekly view enough resolution to distinguish a
+// rough week from a genuinely critical one, without changing what every
+// OTHER adherence display in the app already means by "bad".
+const WEEKLY_STATUS = [
+  { min: 95, color: "#10b981", bg: "bg-emerald-100 dark:bg-emerald-900/50", text: "text-emerald-700 dark:text-emerald-300", label: "On target (≥95%)" },
+  { min: 80, color: "#f59e0b", bg: "bg-amber-100 dark:bg-amber-900/50", text: "text-amber-800 dark:text-amber-300", label: "Watch (80–94%)" },
+  { min: 70, color: "#f97316", bg: "bg-orange-100 dark:bg-orange-900/50", text: "text-orange-800 dark:text-orange-300", label: "Below target (70–79%)" },
+  { min: 0, color: "#e11d48", bg: "bg-rose-100 dark:bg-rose-900/50", text: "text-rose-700 dark:text-rose-300", label: "Critical (<70%)" },
+];
+function weeklyStatus(pct: number) {
+  return WEEKLY_STATUS.find((s) => pct >= s.min)!;
 }
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -358,6 +392,129 @@ export function TrendChart({ days, selectedDate, onSelectDate, showTrendline }: 
   );
 }
 
+/**
+ * Line/area chart for the Pure-FEFO weekly baseline — a genuinely different
+ * read than TrendChart's bars (used everywhere else on this screen): points
+ * sit at even x-intervals spanning the full axis (not bar-slot-centered),
+ * there's a dashed target line, and each point is coloured by the 4-tier
+ * WEEKLY_STATUS scale instead of the 3-tier one. Kept as its own component
+ * rather than a mode on TrendChart, since the two only share the
+ * "measure my container, lay out N points evenly" idea, not their geometry.
+ */
+function WeeklyAreaChart({ weeks, target = 95, selectedDate, onSelectDate }: { weeks: DaySummary[]; target?: number; selectedDate: string | null; onSelectDate: (date: string) => void }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerW, setContainerW] = useState(480);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width) setContainerW(width);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const h = 240;
+  const padL = 46;
+  const padR = 16;
+  const padT = 30;
+  const padB = 32;
+  const chartH = h - padT - padB;
+  const chartW = Math.max(containerW - padL - padR, 200);
+  const w = padL + chartW + padR;
+  // Points span the full axis at even intervals (first point ON the left
+  // edge, last ON the right edge) — the natural read for a line/area chart,
+  // unlike TrendChart's bar-slot-centered spacing.
+  const pointX = (i: number) => (weeks.length > 1 ? padL + (i / (weeks.length - 1)) * chartW : padL + chartW / 2);
+  const pointY = (pct: number) => padT + chartH - (Math.min(pct, 100) / 100) * chartH;
+  const baselineY = padT + chartH;
+
+  const areaPath =
+    weeks.length > 0
+      ? `M ${pointX(0)},${baselineY} ` + weeks.map((d, i) => `L ${pointX(i)},${pointY(d.pct)}`).join(" ") + ` L ${pointX(weeks.length - 1)},${baselineY} Z`
+      : "";
+  const linePath = weeks.map((d, i) => `${i === 0 ? "M" : "L"} ${pointX(i)},${pointY(d.pct)}`).join(" ");
+
+  return (
+    <div>
+      <div ref={containerRef} className="relative overflow-x-auto">
+        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Weekly adherence percentage trend, one point per week">
+          <defs>
+            <linearGradient id="weeklyAreaFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#0d9488" stopOpacity={0.28} />
+              <stop offset="100%" stopColor="#0d9488" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+
+          {[0, 20, 40, 60, 80, 100].map((tick) => {
+            const y = pointY(tick);
+            return (
+              <g key={tick}>
+                <line x1={padL} y1={y} x2={w - padR} y2={y} stroke="currentColor" strokeOpacity={0.1} />
+                <text x={padL - 8} y={y + 4} textAnchor="end" fontSize="11" fill="currentColor" opacity={0.6}>
+                  {tick}
+                </text>
+              </g>
+            );
+          })}
+          <text x={12} y={padT + chartH / 2} textAnchor="middle" fontSize="10.5" fill="currentColor" opacity={0.55} transform={`rotate(-90 12 ${padT + chartH / 2})`}>
+            Adherence (%)
+          </text>
+
+          {/* Dashed target line — the one fixed reference every week is measured against. */}
+          <line x1={padL} y1={pointY(target)} x2={w - padR} y2={pointY(target)} stroke="#0d9488" strokeWidth={1.5} strokeDasharray="5 4" opacity={0.65} />
+          <text x={w - padR} y={pointY(target) - 6} textAnchor="end" fontSize="10.5" fontWeight={600} fill="#0d9488">
+            Target (≥{target}%)
+          </text>
+
+          {areaPath && <path d={areaPath} fill="url(#weeklyAreaFill)" />}
+          {linePath && <path d={linePath} fill="none" stroke="#0d9488" strokeWidth={2} />}
+
+          {weeks.map((d, i) => {
+            const tone = weeklyStatus(d.pct);
+            const isSelected = d.date === selectedDate;
+            return (
+              <g key={d.date}>
+                <text x={pointX(i)} y={pointY(d.pct) - 10} textAnchor="middle" fontSize="11" fontWeight={700} fill="currentColor">
+                  {pctDisplay(d.pct)}
+                </text>
+                <circle cx={pointX(i)} cy={pointY(d.pct)} r={isSelected ? 6 : 4.5} fill={tone.color} stroke="white" strokeWidth={1.5} className="dark:stroke-slate-800" />
+                <text x={pointX(i)} y={h - 10} textAnchor="middle" fontSize="11" fill="currentColor" opacity={isSelected ? 0.95 : 0.6} fontWeight={isSelected ? 700 : 400}>
+                  {shortDateLabel(d.date)}
+                </text>
+                {/* Larger transparent hit target, easier to click than the dot itself. */}
+                <circle
+                  cx={pointX(i)}
+                  cy={pointY(d.pct)}
+                  r={14}
+                  fill="transparent"
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`Week of ${d.date}: ${pctDisplay(d.pct)} adherence, ${d.gatepassCount} gate pass${d.gatepassCount === 1 ? "" : "es"}`}
+                  className="cursor-pointer outline-none"
+                  onClick={() => onSelectDate(d.date)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectDate(d.date); } }}
+                />
+              </g>
+            );
+          })}
+          <line x1={padL} y1={baselineY} x2={w - padR} y2={baselineY} stroke="currentColor" strokeOpacity={0.25} />
+        </svg>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-[var(--fefo-line)] px-3 py-2 text-xs text-[var(--fefo-muted)] dark:border-slate-700 dark:text-slate-400">
+        {WEEKLY_STATUS.map((s) => (
+          <span key={s.label} className="inline-flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.color }} />
+            {s.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function GatepassAdherence() {
   const [rows, setRows] = useState<GatepassAdherenceRow[]>([]);
   const [fefoDeviations, setFefoDeviations] = useState<FefoDeviationRow[]>([]);
@@ -365,6 +522,12 @@ export function GatepassAdherence() {
   const [error, setError] = useState<string | null>(null);
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [expandedGatepass, setExpandedGatepass] = useState<string | null>(null);
+  // Weekly log breakdown table — "Last N weeks" filter and column sort,
+  // both purely a display concern: Export Excel always exports the full
+  // baselineRows regardless of what's currently filtered/sorted on screen.
+  const [weekWindow, setWeekWindow] = useState<number | "all">("all");
+  const [sortKey, setSortKey] = useState<WeeklySortKey>("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
     let cancelled = false;
@@ -442,6 +605,30 @@ export function GatepassAdherence() {
   const prior7Pct = prior7.length >= 3 ? windowPct(prior7) : null;
   const trendDelta = last7Pct !== null && prior7Pct !== null ? last7Pct - prior7Pct : null;
 
+  // Week-over-week deltas, the "Last N weeks" filter, and column sort — all
+  // display-only derivations of baselineWeeks, computed fresh on every
+  // render since there are at most a few dozen weeks, never enough to
+  // justify memoizing.
+  const wowByWeek = weekOverWeek(baselineWeeks);
+  const currentWeek = baselineWeeks.length ? baselineWeeks[baselineWeeks.length - 1] : null;
+  const currentWeekWow = currentWeek ? wowByWeek.get(currentWeek.date) ?? null : null;
+  const windowedWeeks = weekWindow === "all" ? baselineWeeks : baselineWeeks.slice(-weekWindow);
+  const windowAveragePct = windowPct(windowedWeeks);
+  const sortedWeeks = [...windowedWeeks].sort((a, b) => {
+    const av = sortKey === "wow" ? (wowByWeek.get(a.date) ?? -Infinity) : sortKey === "date" ? a.date : a[sortKey];
+    const bv = sortKey === "wow" ? (wowByWeek.get(b.date) ?? -Infinity) : sortKey === "date" ? b.date : b[sortKey];
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+
+  function toggleSort(key: WeeklySortKey) {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
+
   function selectDate(date: string) {
     setExpandedGatepass(null);
     setExpandedDate(expandedDate === date ? null : date);
@@ -451,14 +638,21 @@ export function GatepassAdherence() {
     <section className={shellCls}>
       {caseBasedRows.length > 0 && (
         <div className="mb-6 border-b border-[var(--fefo-line)] pb-6 dark:border-slate-700">
-          <h2 className="mb-1 text-xl font-bold tracking-tight text-[var(--fefo-text)] dark:text-slate-100">
-            Case-Based Picking — Live Since {shortDateLabel(CASE_BASED_LAUNCH_DATE)}
-          </h2>
-          <p className="mb-4 max-w-2xl text-sm text-[var(--fefo-muted)] dark:text-slate-400">
-            Two numbers, day by day: whether the instructed batch was picked as instructed (unchanged method), and that
-            same number further adjusted for units where case-first picking itself chose a later-expiry batch than strict
-            FEFO would have.
-          </p>
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="mb-1 text-xl font-bold tracking-tight text-[var(--fefo-text)] dark:text-slate-100">
+                Case-Based Picking — Live Since {shortDateLabel(CASE_BASED_LAUNCH_DATE)}
+              </h2>
+              <p className="max-w-2xl text-sm text-[var(--fefo-muted)] dark:text-slate-400">
+                Two numbers, day by day: whether the instructed batch was picked as instructed (unchanged method), and
+                that same number further adjusted for units where case-first picking itself chose a later-expiry batch
+                than strict FEFO would have.
+              </p>
+            </div>
+            <Button variant="sm" onClick={() => exportWorkbook(caseBasedRows)}>
+              Export Excel
+            </Button>
+          </div>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <div className="rounded-2xl border border-[var(--fefo-line)] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
               <p className="mb-1 text-lg font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Pure case-based %</p>
@@ -557,58 +751,97 @@ export function GatepassAdherence() {
 
       <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
         <div id="gpa-daily-log" className="rounded-2xl border border-[var(--fefo-line)] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
             <p className="text-lg font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Weekly log breakdown</p>
-            <span className="rounded-full bg-[var(--fefo-teal-50)] px-2 py-0.5 text-[11px] font-semibold text-[var(--fefo-teal-900)] dark:bg-slate-700 dark:text-slate-300">
-              {baselineWeeks.length} record{baselineWeeks.length === 1 ? "" : "s"}
-            </span>
+            <select
+              value={weekWindow}
+              onChange={(e) => setWeekWindow(e.target.value === "all" ? "all" : Number(e.target.value))}
+              className="rounded-lg border border-slate-300 bg-white p-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+              aria-label="Weeks to show"
+            >
+              <option value="all">All weeks</option>
+              <option value={4}>Last 4 weeks</option>
+              <option value={8}>Last 8 weeks</option>
+              <option value={12}>Last 12 weeks</option>
+              <option value={26}>Last 26 weeks</option>
+            </select>
           </div>
+          <p className="mb-3 text-sm text-[var(--fefo-muted)] dark:text-slate-400">Gate passes, instructed vs. compliant quantity, and week-over-week change.</p>
           <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
           {/* table-fixed + percentage col widths, not a min-width — this is
               what lets the table fit within the card at normal desktop
               widths instead of forcing horizontal scroll. */}
           <table className="w-full table-fixed border-collapse text-[12.5px] tabular-nums">
             <colgroup>
-              <col className="w-[30%]" />
+              <col className="w-[24%]" />
+              <col className="w-[11%]" />
               <col className="w-[16%]" />
-              <col className="w-[19%]" />
-              <col className="w-[19%]" />
               <col className="w-[16%]" />
+              <col className="w-[13%]" />
+              <col className="w-[20%]" />
             </colgroup>
             <thead className="sticky top-0 z-10">
               <tr className="text-left text-[10px] uppercase tracking-wide text-teal-800 dark:text-teal-300">
-                <th className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 dark:border-slate-700 dark:bg-slate-900">Week Starting</th>
-                <th className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Gate Passes</th>
-                <th className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Instructed</th>
-                <th className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Compliant</th>
-                <th className="border-b border-slate-200 bg-slate-50 px-2 py-1.5 text-right dark:border-slate-700 dark:bg-slate-900">Adherence</th>
+                {(
+                  [
+                    ["date", "Week Starting"],
+                    ["gatepassCount", "Gate Passes"],
+                    ["instructedQty", "Instructed"],
+                    ["compliantQty", "Compliant"],
+                    ["pct", "Adherence"],
+                    ["wow", "WoW Change"],
+                  ] as [WeeklySortKey, string][]
+                ).map(([key, label]) => (
+                  <th
+                    key={key}
+                    onClick={() => toggleSort(key)}
+                    className={`cursor-pointer border-b border-slate-200 bg-slate-50 px-2 py-1.5 select-none dark:border-slate-700 dark:bg-slate-900 ${key === "date" ? "" : "text-right"}`}
+                  >
+                    {label} <span className="text-[9px] opacity-60">{sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}</span>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {baselineWeeks.map((d) => (
-                <tr
-                  key={d.date}
-                  onClick={() => selectDate(d.date)}
-                  className={`cursor-pointer text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900 ${
-                    expandedDate === d.date ? "bg-[var(--fefo-teal-50)] dark:bg-slate-900" : ""
-                  }`}
-                >
-                  <td className="truncate border-b border-slate-100 px-2 py-1 dark:border-slate-700/60">
-                    <span className="mr-1 inline-block w-2.5 text-[var(--fefo-muted)]">{expandedDate === d.date ? "▾" : "▸"}</span>
-                    {d.date}
-                  </td>
-                  <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">{d.gatepassCount}</td>
-                  <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">{d.instructedQty.toLocaleString()}</td>
-                  <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">{d.compliantQty.toLocaleString()}</td>
-                  <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">
-                    <Tag tone={pctTone(d.pct)}>{pctDisplay(d.pct)}</Tag>
-                  </td>
-                </tr>
-              ))}
+              {sortedWeeks.map((d) => {
+                const wow = wowByWeek.get(d.date) ?? null;
+                const tone = weeklyStatus(d.pct);
+                return (
+                  <tr
+                    key={d.date}
+                    onClick={() => selectDate(d.date)}
+                    className={`cursor-pointer text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900 ${
+                      d.date === currentWeek?.date ? "bg-emerald-50/60 dark:bg-emerald-900/20" : expandedDate === d.date ? "bg-[var(--fefo-teal-50)] dark:bg-slate-900" : ""
+                    }`}
+                  >
+                    <td className="truncate border-b border-slate-100 px-2 py-1 dark:border-slate-700/60">
+                      <span className="mr-1 inline-block w-2.5 text-[var(--fefo-muted)]">{expandedDate === d.date ? "▾" : "▸"}</span>
+                      <span className={d.date === currentWeek?.date ? "font-bold" : ""}>{d.date}</span>
+                    </td>
+                    <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">{d.gatepassCount}</td>
+                    <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">{d.instructedQty.toLocaleString()}</td>
+                    <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">{d.compliantQty.toLocaleString()}</td>
+                    <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">
+                      <span className={`inline-block rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${tone.bg} ${tone.text}`}>{pctDisplay(d.pct)}</span>
+                    </td>
+                    <td className="border-b border-slate-100 px-2 py-1 text-right dark:border-slate-700/60">
+                      {wow === null ? (
+                        <span className="text-[var(--fefo-muted)]">—</span>
+                      ) : (
+                        <span className={wow >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}>
+                          {wow >= 0 ? "▲" : "▼"} {Math.abs(wow).toFixed(1)}%
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
             {/* tfoot + sticky bottom-0 — the Overall row stays visually
                 distinct (tinted background, heavier top border) and stays
-                in view while scrolling through a longer weekly list. */}
+                in view while scrolling through a longer weekly list. Always
+                the true all-time total, independent of the "Last N weeks"
+                filter above. */}
             <tfoot className="sticky bottom-0 z-10">
               <tr className="border-t-2 border-slate-300 bg-slate-50 font-bold text-[var(--fefo-text)] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100">
                 <td className="px-2 py-1.5">Overall</td>
@@ -618,18 +851,73 @@ export function GatepassAdherence() {
                 <td className="px-2 py-1.5 text-right">
                   <Tag tone={pctTone(overallPct)}>{pctDisplay(overallPct)}</Tag>
                 </td>
+                <td className="px-2 py-1.5 text-right">—</td>
               </tr>
             </tfoot>
           </table>
           </div>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--fefo-muted)] dark:text-slate-400">
+            <span>
+              Showing {sortedWeeks.length} of {baselineWeeks.length} week{baselineWeeks.length === 1 ? "" : "s"}
+            </span>
+            <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              {WEEKLY_STATUS.map((s) => (
+                <span key={s.label} className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
+                  {s.label}
+                </span>
+              ))}
+            </span>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-[var(--fefo-line)] bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-          <p className="mb-1 text-lg font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">
-            Pure-FEFO baseline — weekly
-          </p>
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-lg font-bold tracking-wide text-[var(--fefo-text)] uppercase dark:text-slate-100">Pure-FEFO baseline — weekly</p>
+            <select
+              value={weekWindow}
+              onChange={(e) => setWeekWindow(e.target.value === "all" ? "all" : Number(e.target.value))}
+              className="rounded-lg border border-slate-300 bg-white p-1.5 text-xs dark:border-slate-600 dark:bg-slate-800"
+              aria-label="Weeks to show"
+            >
+              <option value="all">All weeks</option>
+              <option value={4}>Last 4 weeks</option>
+              <option value={8}>Last 8 weeks</option>
+              <option value={12}>Last 12 weeks</option>
+              <option value={26}>Last 26 weeks</option>
+            </select>
+          </div>
           <p className="mb-3 text-sm text-[var(--fefo-muted)] dark:text-slate-400">Every week before case-based picking went live.</p>
-          <TrendChart days={baselineWeeks} selectedDate={expandedDate} onSelectDate={selectDate} showTrendline />
+
+          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="rounded-xl bg-sky-50 p-3 dark:bg-sky-900/30">
+              <p className="text-[11px] font-semibold text-sky-800 dark:text-sky-300">Current Week</p>
+              <p className="text-xl font-bold text-sky-900 dark:text-sky-100">{currentWeek ? pctDisplay(currentWeek.pct) : "—"}</p>
+              <p className="text-[11px] text-sky-700 dark:text-sky-400">
+                {currentWeekWow === null ? "First week on record" : <>{currentWeekWow >= 0 ? "▲" : "▼"} {Math.abs(currentWeekWow).toFixed(1)}% vs previous week</>}
+              </p>
+            </div>
+            <div className="rounded-xl bg-emerald-50 p-3 dark:bg-emerald-900/30">
+              <p className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">Best Week</p>
+              <p className="text-xl font-bold text-emerald-900 dark:text-emerald-100">{bestWeek ? pctDisplay(bestWeek.pct) : "—"}</p>
+              <p className="text-[11px] text-emerald-700 dark:text-emerald-400">{bestWeek ? bestWeek.date : ""}</p>
+            </div>
+            <div className="rounded-xl bg-violet-50 p-3 dark:bg-violet-900/30">
+              <p className="text-[11px] font-semibold text-violet-800 dark:text-violet-300">Average</p>
+              <p className="text-xl font-bold text-violet-900 dark:text-violet-100">{windowAveragePct !== null ? pctDisplay(windowAveragePct) : "—"}</p>
+              <p className="text-[11px] text-violet-700 dark:text-violet-400">
+                {weekWindow === "all" ? "All weeks" : `Last ${windowedWeeks.length} week${windowedWeeks.length === 1 ? "" : "s"}`}
+              </p>
+            </div>
+            <div className="rounded-xl bg-slate-100 p-3 dark:bg-slate-700/50">
+              <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Target</p>
+              <p className="text-xl font-bold text-slate-900 dark:text-slate-100">95%</p>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">FEFO adherence</p>
+            </div>
+          </div>
+
+          <WeeklyAreaChart weeks={windowedWeeks} selectedDate={expandedDate} onSelectDate={selectDate} />
+
           {trendDelta !== null && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--fefo-line)] pt-3 text-xs dark:border-slate-700">
               <p className="text-[var(--fefo-muted)] dark:text-slate-400">
