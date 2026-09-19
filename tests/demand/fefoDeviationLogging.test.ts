@@ -8,6 +8,24 @@ vi.mock("../../src/lib/fefoDeviationsSupabase", async (importOriginal) => {
   return { ...actual, logFefoDeviations };
 });
 
+// generate() also calls nextSequence()/insertTask() from tasksSupabase
+// whenever isSupabaseConfigured is true — true on any machine with real
+// Supabase credentials in .env, including local dev. Without this mock,
+// those become real network calls and this test hangs/times out on such a
+// machine, even though the deviation-logging logic under test is fine.
+vi.mock("../../src/lib/tasksSupabase", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/tasksSupabase")>();
+  return {
+    ...actual,
+    nextSequence: vi.fn(async () => 1),
+    insertTask: vi.fn(async () => undefined),
+    fetchAllTasks: vi.fn(async () => []),
+    fetchTaskByNo: vi.fn(async () => null),
+    updateTaskData: vi.fn(async () => undefined),
+    subscribeTasks: vi.fn(() => () => {}),
+  };
+});
+
 const CHANNEL = "Internal Stock Transfer - Warehouse - Local";
 
 describe("generate() — logs FEFO deviation for a real order on a case-configured SKU", () => {
@@ -28,7 +46,13 @@ describe("generate() — logs FEFO deviation for a real order on a case-configur
       { rid: 1, location: "SL Mother Hub", bin: "A5", sku: "SKU-DEV", name: "Product", batch: "EACHES-LOT", exp: [2027, 1], qty: 20, shelf: 24, type: "Good", active: "Active" },
       { rid: 2, location: "SL Mother Hub", bin: "A1", sku: "SKU-DEV", name: "Product", batch: "CASE-LOT", exp: [2027, 6], qty: 500, shelf: 24, type: "Good", active: "Active" },
     ];
-    useStore.setState({ stock, skus: { "SKU-DEV": { name: "Product", shelf: 24 } }, caseSizes: { "SKU-DEV": 30 }, tasks: [] });
+    useStore.setState({
+      stock,
+      skus: { "SKU-DEV": { name: "Product", shelf: 24 } },
+      caseSizes: { "SKU-DEV": 30 },
+      channelRules: { [CHANNEL]: { type: "fixed", val: 0 } },
+      tasks: [],
+    });
     // Gate pass prefix must match "SL Mother Hub" (GPSLMH — see
     // FACILITY_GATE_PASS_PREFIX in facilities.ts) so reconcileGatePasses()
     // actually resolves it onto this facility instead of leaving it pending.
@@ -52,7 +76,13 @@ describe("generate() — logs FEFO deviation for a real order on a case-configur
     const stock: StockRow[] = [
       { rid: 1, location: "SL Mother Hub", bin: "A1", sku: "SKU-PLAIN", name: "Product", batch: "B1", exp: [2027, 1], qty: 500, shelf: 24, type: "Good", active: "Active" },
     ];
-    useStore.setState({ stock, skus: { "SKU-PLAIN": { name: "Product", shelf: 24 } }, caseSizes: {}, tasks: [] });
+    useStore.setState({
+      stock,
+      skus: { "SKU-PLAIN": { name: "Product", shelf: 24 } },
+      caseSizes: {},
+      channelRules: { [CHANNEL]: { type: "fixed", val: 0 } },
+      tasks: [],
+    });
     useStore.getState().setDemand([{ channel: CHANNEL, sku: "SKU-PLAIN", qty: 50, gatePassNo: "GPSLMH-DEV-2" }]);
 
     await useStore.getState().generate(null, "Tester");
