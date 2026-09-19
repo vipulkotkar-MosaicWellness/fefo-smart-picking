@@ -544,6 +544,23 @@ async function saveOwnFacilityChanges(local: PickingTask, ownFacilityNos: Readon
   await updateTaskData(fresh ? mergeOwnChangesOntoFreshTask(fresh, local, ownFacilityNos) : local);
 }
 
+/**
+ * Same "fetch fresh, don't trust local" principle as saveOwnFacilityChanges,
+ * for fields that live on the TASK itself (e.g. `archived`) rather than
+ * inside any one facility — there's no ownFacilityNos concept to merge by,
+ * so this just fetches fresh and layers the patch on top of it. Falls back
+ * to `local` if the fresh fetch comes back empty, same as
+ * saveOwnFacilityChanges — no worse than the old behavior in that case.
+ */
+async function saveTaskFlag(local: PickingTask, patch: Partial<Pick<PickingTask, "archived">>): Promise<void> {
+  const fresh = await fetchTaskByNo(local.no);
+  await updateTaskData(fresh ? { ...fresh, ...patch } : { ...local, ...patch });
+}
+
+// Test-only export — saveTaskFlag itself stays module-private like
+// saveOwnFacilityChanges, this just gives tests a way to call it directly.
+export const saveTaskFlagForTest = saveTaskFlag;
+
 export interface SavedInventoryView {
   name: string;
   filters: { text?: string; batch?: string; location?: string; minQty?: number; maxQty?: number };
