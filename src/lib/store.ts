@@ -1646,7 +1646,7 @@ export const useStore = create<AppState>()(
         if (!updated) return;
         const archived = { ...updated, archived: true };
         set({ tasks: mergeTask(get().tasks, archived) });
-        if (isSupabaseConfigured) await updateTaskData(archived);
+        if (isSupabaseConfigured) await saveTaskFlag(archived, { archived: true });
         if (!get().anyOpen()) void get().loadFromSupabase();
       },
 
@@ -1655,7 +1655,7 @@ export const useStore = create<AppState>()(
         if (!existing) return;
         const restored = { ...existing, archived: false };
         set({ tasks: mergeTask(get().tasks, restored) });
-        if (isSupabaseConfigured) await updateTaskData(restored);
+        if (isSupabaseConfigured) await saveTaskFlag(restored, { archived: false });
       },
 
       // The non-destructive "start fresh" action: every currently-active
@@ -1672,7 +1672,7 @@ export const useStore = create<AppState>()(
         if (isSupabaseConfigured) {
           for (const t of archivedTasks) {
             try {
-              await updateTaskData(t);
+              await saveTaskFlag(t, { archived: true });
             } catch (e) {
               set({ notice: "Could not archive " + t.no + ": " + (e as Error).message });
             }
@@ -1691,7 +1691,7 @@ export const useStore = create<AppState>()(
         if (isSupabaseConfigured) {
           for (const t of restoredTasks) {
             try {
-              await updateTaskData(t);
+              await saveTaskFlag(t, { archived: false });
             } catch (e) {
               set({ notice: "Could not unarchive " + t.no + ": " + (e as Error).message });
             }
@@ -1711,7 +1711,7 @@ export const useStore = create<AppState>()(
         if (isSupabaseConfigured) {
           for (const t of archivedTasks) {
             try {
-              await updateTaskData(t);
+              await saveTaskFlag(t, { archived: true });
             } catch (e) {
               set({ notice: "Could not archive " + t.no + ": " + (e as Error).message });
             }
