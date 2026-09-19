@@ -1761,7 +1761,7 @@ export const useStore = create<AppState>()(
           ),
         };
         set({ tasks: mergeTask(get().tasks, updated) });
-        if (isSupabaseConfigured) await updateTaskData(updated);
+        if (isSupabaseConfigured) await saveOwnFacilityChanges(updated, new Set([facilityNo]));
         if (!get().anyOpen()) void get().loadFromSupabase();
       },
 
@@ -1770,7 +1770,7 @@ export const useStore = create<AppState>()(
         if (!task) return;
         const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, discarded: false } : f)) };
         set({ tasks: mergeTask(get().tasks, updated) });
-        if (isSupabaseConfigured) await updateTaskData(updated);
+        if (isSupabaseConfigured) await saveOwnFacilityChanges(updated, new Set([facilityNo]));
       },
 
       setFacilityGatePass: async (taskNo, facilityNo, gatePassNo) => {
@@ -1822,7 +1822,7 @@ export const useStore = create<AppState>()(
           ),
         };
         set({ tasks: mergeTask(get().tasks, updated) });
-        if (isSupabaseConfigured) await updateTaskData(updated);
+        if (isSupabaseConfigured) await saveOwnFacilityChanges(updated, new Set([facilityNo]));
       },
 
       checkWmsAutoBlock: async () => {
