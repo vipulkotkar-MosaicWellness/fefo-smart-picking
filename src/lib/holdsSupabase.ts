@@ -93,3 +93,31 @@ export async function releaseHoldRow(id: number, releasedBy: string): Promise<vo
     .eq("id", id);
   if (error) throw error;
 }
+
+/**
+ * Live updates: fires whenever ANY user places or releases a hold.
+ * Refetch-on-any-change, the same pattern as subscribePickers /
+ * subscribeChannelOverrides — the hold list is small enough that a full
+ * reload beats diffing rows.
+ *
+ * Without this, holds were the one shared entity with no realtime feed:
+ * loaded once at mount, then only after this device's own placeHold /
+ * releaseHold (checkHoldAutoRelease returns before loadHolds() whenever
+ * nothing is due, so the 60s timer is not a refresh path). A hold placed
+ * elsewhere stayed invisible here indefinitely — and activeHoldKeys() feeds
+ * allocate(), so this device kept offering held stock.
+ *
+ * Requires stock_holds to be in the supabase_realtime publication — see
+ * supabase/add_stock_holds_realtime.sql.
+ */
+export function subscribeHolds(onChange: () => void): () => void {
+  if (!supabase) return () => {};
+  const client = supabase;
+  const channel = client
+    .channel("stock-holds-realtime")
+    .on("postgres_changes", { event: "*", schema: "public", table: "stock_holds" }, () => onChange())
+    .subscribe();
+  return () => {
+    void client.removeChannel(channel);
+  };
+}

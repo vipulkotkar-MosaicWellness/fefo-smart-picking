@@ -6,7 +6,7 @@ import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_GATE_PASS_PREFIX, FACILITY_PRIORITY, facilityCode, gatePassMatchesFacility } from "./facilities";
 import { matchesCutoff } from "./dateRanges";
 import { activeHoldKeys, dueForHoldAutoRelease, holdKey, holdsToCreate } from "./holds";
-import { fetchHolds, insertHold, releaseHoldRow } from "./holdsSupabase";
+import { fetchHolds, insertHold, releaseHoldRow, subscribeHolds } from "./holdsSupabase";
 import {
   dequeue as dequeuePick,
   dequeueGatePass,
@@ -678,6 +678,7 @@ export interface AppState {
   renamePicker: (oldName: string, newName: string) => Promise<void>;
   removePicker: (name: string) => Promise<void>;
   loadHolds: () => Promise<void>;
+  startHoldsRealtime: () => () => void;
   placeHold: (h: { sku: string; facility: string; bin: string; batch: string; qty: number; heldBy: string; reason?: string; sourceTaskNo?: string }) => Promise<void>;
   releaseHold: (id: number, releasedBy: string) => Promise<void>;
   setDemand: (d: DemandLine[]) => void;
@@ -946,6 +947,11 @@ export const useStore = create<AppState>()(
         } catch (e) {
           set({ notice: "Could not load stock holds: " + (e as Error).message });
         }
+      },
+
+      startHoldsRealtime: () => {
+        if (!isSupabaseConfigured) return () => {};
+        return subscribeHolds(() => void get().loadHolds());
       },
 
       placeHold: async (h) => {

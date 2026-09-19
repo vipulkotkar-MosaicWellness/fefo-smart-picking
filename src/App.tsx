@@ -170,6 +170,7 @@ function Workspace() {
     loadTasks,
     startTasksRealtime,
     loadHolds,
+    startHoldsRealtime,
     loadPickers,
     startPickersRealtime,
     loadChannelOverrides,
@@ -211,6 +212,7 @@ function Workspace() {
     void loadAutoCompleteSetting();
     void flushOfflineQueue();
     const stop = startTasksRealtime();
+    const stopHolds = startHoldsRealtime();
     const stopPickers = startPickersRealtime();
     const stopChannelOverrides = startChannelOverridesRealtime();
     const stopCaseSizes = startCaseSizesRealtime();
@@ -232,6 +234,7 @@ function Workspace() {
     const autoCompleteTimer = window.setInterval(() => void checkPicklistAutoComplete(), 60_000);
     return () => {
       stop();
+      stopHolds();
       stopPickers();
       stopChannelOverrides();
       stopCaseSizes();
