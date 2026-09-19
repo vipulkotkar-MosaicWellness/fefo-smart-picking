@@ -6,7 +6,7 @@ import { allocate, cutoffMonths } from "./engine";
 import { FACILITY_GATE_PASS_PREFIX, FACILITY_PRIORITY, facilityCode, gatePassMatchesFacility } from "./facilities";
 import { matchesCutoff } from "./dateRanges";
 import { activeHoldKeys, dueForHoldAutoRelease, holdKey, holdsToCreate } from "./holds";
-import { fetchHolds, insertHold, releaseHoldRow } from "./holdsSupabase";
+import { fetchHolds, insertHold, releaseHoldRow, subscribeHolds } from "./holdsSupabase";
 import {
   dequeue as dequeuePick,
   dequeueGatePass,
@@ -300,12 +300,11 @@ function allocateAcrossFacilities(
   cutoff: number,
   stock: StockRow[],
   reserved: (key: string) => number,
-  exclude: number[],
   heldKeys: Set<string>,
   minQty?: number,
   caseSize?: number,
 ): { byFacility: Record<string, PickLine[]>; short: number; skipped: BinSkip[] } {
-  const r = allocate({ sku, need, cutoff, stock, reservedFor: reserved, exclude, heldKeys, minQty, caseSize });
+  const r = allocate({ sku, need, cutoff, stock, reservedFor: reserved, heldKeys, minQty, caseSize });
   const byFacility: Record<string, PickLine[]> = {};
   for (const line of r.lines) (byFacility[line.facility] ??= []).push(line);
   return { byFacility, short: r.short, skipped: r.skipped };
@@ -437,7 +436,7 @@ export function computeChannelAllocations(
     const skipped: BinSkip[] = [];
     for (const d of lines) {
       const cutoff = cutoffMonths(rule, skus[d.sku].shelf);
-      const w = allocateAcrossFacilities(d.sku, d.qty, cutoff, stock, reserved, [], heldKeys, rule.minBinQty, caseSizes[d.sku]);
+      const w = allocateAcrossFacilities(d.sku, d.qty, cutoff, stock, reserved, heldKeys, rule.minBinQty, caseSizes[d.sku]);
       for (const f of Object.keys(w.byFacility)) {
         byFacility[f] ??= [];
         byFacility[f].push(...w.byFacility[f]);
@@ -678,6 +677,7 @@ export interface AppState {
   renamePicker: (oldName: string, newName: string) => Promise<void>;
   removePicker: (name: string) => Promise<void>;
   loadHolds: () => Promise<void>;
+  startHoldsRealtime: () => () => void;
   placeHold: (h: { sku: string; facility: string; bin: string; batch: string; qty: number; heldBy: string; reason?: string; sourceTaskNo?: string }) => Promise<void>;
   releaseHold: (id: number, releasedBy: string) => Promise<void>;
   setDemand: (d: DemandLine[]) => void;
@@ -948,6 +948,11 @@ export const useStore = create<AppState>()(
         }
       },
 
+      startHoldsRealtime: () => {
+        if (!isSupabaseConfigured) return () => {};
+        return subscribeHolds(() => void get().loadHolds());
+      },
+
       placeHold: async (h) => {
         const key = holdKey(h.sku, h.facility, h.bin, h.batch);
         if (activeHoldKeys(get().holds).has(key)) return; // already on hold, nothing to do
@@ -1194,6 +1199,16 @@ export const useStore = create<AppState>()(
         const rejectedGatePasses: { gatePassNo: string; conflict: { taskNo: string; facility: string } }[] = [];
         let pendingCount = 0;
 
+        // Gate pass numbers THIS batch has already handed out, and to which
+        // task. findGatePassConflict below only sees `tasks` (the fresh
+        // refetch), and nothing is inserted until after this whole loop — so
+        // one number typed onto two rows of a single CSV under two different
+        // channels (separate gatePassGroupKey groups, therefore separate
+        // tasks) passed the check twice and got applied to both. Exactly the
+        // gap seqUsedThisBatch above already closes for task NUMBERS, applied
+        // to gate passes.
+        const gatePassUsedThisBatch = new Map<string, { taskNo: string; facility: string }>();
+
         // Real case: one upload with two channels that map to the SAME
         // task-number prefix (e.g. "Internal Stock Transfer - Warehouse -
         // Local" and "Internal Stock Transfer - Dark Stores" both become
@@ -1228,10 +1243,15 @@ export const useStore = create<AppState>()(
           for (const facility of Object.keys(gatePassByFacility)) {
             const gp = gatePassByFacility[facility];
             if (!gp) continue;
-            const conflict = findGatePassConflict(tasks, gp, no);
+            const claimedThisBatch = gatePassUsedThisBatch.get(gp);
+            const conflict =
+              findGatePassConflict(tasks, gp, no) ??
+              (claimedThisBatch && claimedThisBatch.taskNo !== no ? claimedThisBatch : undefined);
             if (conflict) {
               rejectedGatePasses.push({ gatePassNo: gp, conflict });
               gatePassByFacility[facility] = undefined;
+            } else {
+              gatePassUsedThisBatch.set(gp, { taskNo: no, facility });
             }
           }
           pendingCount += Object.values(gatePassByFacility).filter((gp) => !gp).length;
@@ -1395,7 +1415,6 @@ export const useStore = create<AppState>()(
         if (completedFacility && parentTask && completedFacility.bad > 0 && state.channelRules[parentTask.channel]) {
           const task = parentTask;
           const rule = state.channelRules[task.channel];
-          const usedRids = new Set(task.facilities.flatMap((f) => f.lines.map((l) => l.rid)));
           const nfBySku: Record<string, number> = {};
           completedFacility.lines.forEach((l) => { if (l.nf) nfBySku[l.sku] = (nfBySku[l.sku] ?? 0) + l.nf; });
           const r2: Record<string, PickLine[]> = {};
@@ -1419,6 +1438,24 @@ export const useStore = create<AppState>()(
           for (const l of completedFacility.lines) {
             if (l.nf) heldKeysForRound2.add(holdKey(l.sku, completedFacility.facility, l.bin, l.batch));
           }
+          // Every bin+batch this task has EVER offered a line for, any round,
+          // whether that line is still open, was picked, or came back
+          // not-found — the re-offer we're about to build must never send a
+          // lot back out that this same task already has a line against.
+          // Deliberately keyed on sku+facility+bin+batch (see holdKey), NOT
+          // on the line's remembered `rid`: rid is reassigned on every stock
+          // resync (rowsFromTuples), so a line created before a resync holds
+          // onto a rid that may no longer match that same physical lot's rid
+          // in the current `stock` snapshot — a plain `rid` Set silently
+          // fails to recognize it's the same lot and lets round N+1 land
+          // right back on a bin an earlier round already tried (and, for
+          // rounds before the one that just completed, this task's own
+          // not-found holds may not have made it into `state.holds` yet
+          // either — e.g. no Supabase configured, so placeHold() no-ops —
+          // making this the only remaining guard against re-offering them).
+          for (const f of task.facilities) {
+            for (const l of f.lines) heldKeysForRound2.add(holdKey(l.sku, f.facility, l.bin, l.batch));
+          }
           // Same crash shape as the missing-channel-rule case above:
           // state.skus[sku] used to be read unguarded here, so a not-found
           // SKU that isn't in this browser's current stock/skus snapshot
@@ -1432,10 +1469,14 @@ export const useStore = create<AppState>()(
             const skuInfo = state.skus[sku];
             if (!skuInfo) { missingSkus.push(sku); continue; }
             const cutoff = cutoffMonths(rule, skuInfo.shelf);
-            const w = allocateAcrossFacilities(sku, nfBySku[sku], cutoff, stock, reserved, [...usedRids], heldKeysForRound2, rule.minBinQty, state.caseSizes[sku]);
+            const w = allocateAcrossFacilities(sku, nfBySku[sku], cutoff, stock, reserved, heldKeysForRound2, rule.minBinQty, state.caseSizes[sku]);
             for (const f of Object.keys(w.byFacility)) {
               (r2[f] ??= []).push(...w.byFacility[f]);
-              w.byFacility[f].forEach((l) => usedRids.add(l.rid));
+              // Fold this SKU's own freshly-allocated lots back in so a
+              // later SKU in this same loop can't be offered the same
+              // bin+batch (two different demand lines never legitimately
+              // share one physical lot within a single re-offer pass).
+              w.byFacility[f].forEach((l) => heldKeysForRound2.add(holdKey(l.sku, l.facility, l.bin, l.batch)));
             }
             if (w.short > 0) extraShort.push({ sku, name: skuInfo.name, qty: w.short });
             extraSkipped.push(...w.skipped);

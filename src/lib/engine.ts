@@ -46,7 +46,12 @@ export interface AllocateArgs {
   // row's rid — rid is reassigned on every resync and isn't safe to persist
   // reservations against.
   reservedFor: (key: string) => number;
-  exclude?: number[];
+  // Same sku+facility+bin+batch identity as reservedFor's key — bins to
+  // exclude outright (active holds, and any lot a caller wants hard-blocked
+  // for this allocation) rather than merely reserved-against. Also how a
+  // caller keeps a single allocation from double-offering the same bin+batch
+  // to two different demand lines: fold each result's lots back in via
+  // holdKey before the next call, same as an already-active hold.
   heldKeys?: Set<string>;
   today?: Date;
   // Minimum available qty a bin+batch must have to be offered at all — see
@@ -81,7 +86,6 @@ export interface AllocateResult {
  */
 export function allocate(args: AllocateArgs): AllocateResult {
   const { sku, need, location, cutoff, stock, reservedFor, minQty } = args;
-  const exclude = args.exclude ?? [];
   const heldKeys = args.heldKeys;
   const today = args.today ?? new Date();
 
@@ -93,7 +97,6 @@ export function allocate(args: AllocateArgs): AllocateResult {
         b.type === "Good" &&
         b.active === "Active" &&
         !isExceptionBin(b.bin) &&
-        !exclude.includes(b.rid) &&
         !(heldKeys?.has(holdKey(b.sku, b.location, b.bin, b.batch)) ?? false),
     )
     .map((b) => ({ b, rem: monthsRemaining(b.exp, today), av: b.qty - reservedFor(holdKey(b.sku, b.location, b.bin, b.batch)) }))

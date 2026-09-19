@@ -381,7 +381,27 @@ export function SupervisorQueue() {
 
   const metrics = useMemo(() => queueMetrics(all), [all]);
   const channelOptions = useMemo(() => [...new Set(tasks.map((t) => t.channel))].sort(), [tasks]);
-  const families = useMemo(() => groupPicklistFamilies(tasks), [tasks]);
+  // Round tabs are built from exactly the set of facility picklists this
+  // queue itself shows. Grouping the raw `tasks` (as this used to) pulled in
+  // rounds the queue deliberately excludes — a discarded one, or one still in
+  // Gate Pass Allocation Pending — and rendered them as fully interactive tabs
+  // on a sibling round's card: selecting one hands it straight to
+  // <FacilityBlock f={active} …/>, which for an open picklist renders "Assign
+  // all to", per-line picker selects, not-found inputs, "Mark completed" and
+  // Discard. Same shape as the filter PicklistRepository.tsx already applies
+  // before grouping (see its tasksWithoutDiscarded), just driven off `all`,
+  // which already accounts for archived + discarded + gate-pass-pending in
+  // one place (supervisorVisibleFacilityLists).
+  const visibleNos = useMemo(() => new Set(all.map((f) => f.no)), [all]);
+  const families = useMemo(
+    () =>
+      groupPicklistFamilies(
+        tasks
+          .map((t) => ({ ...t, facilities: t.facilities.filter((f) => visibleNos.has(f.no)) }))
+          .filter((t) => t.facilities.length > 0),
+      ),
+    [tasks, visibleNos],
+  );
 
   if (all.length === 0) {
     return (
