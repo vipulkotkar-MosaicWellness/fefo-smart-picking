@@ -99,18 +99,34 @@ export async function fetchLatestDayAdherence(): Promise<LatestDayAdherence | nu
 }
 
 /** Rows for the last `days` report dates — populated daily by GatepassAdherenceCheck.gs. */
+/**
+ * Rows for the last `days` report dates — populated daily by
+ * GatepassAdherenceCheck.gs. Paged past PostgREST's silent 1000-row default
+ * (same loop as fetchStock in supabaseStock.ts): the sort is report_date
+ * DESC then adherence_pct ASC, so an un-paged fetch trims the
+ * HIGHEST-adherence gate passes of the boundary day — and every aggregate
+ * built on this then reports a worse adherence % than actually happened.
+ */
 export async function fetchGatepassAdherence(days = 30): Promise<GatepassAdherence[]> {
   if (!supabase) return [];
   const since = new Date();
   since.setDate(since.getDate() - days);
   const sinceIso = since.toISOString().slice(0, 10);
-  const { data, error } = await supabase
-    .from("gatepass_adherence")
-    .select("gatepass_code,facility,report_date,instructed_qty,compliant_qty,adherence_pct,lines")
-    .eq("used_for_performance", true)
-    .gte("report_date", sinceIso)
-    .order("report_date", { ascending: false })
-    .order("adherence_pct", { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as GatepassAdherence[];
+  const page = 1000;
+  const all: GatepassAdherence[] = [];
+  for (let from = 0; ; from += page) {
+    const { data, error } = await supabase
+      .from("gatepass_adherence")
+      .select("gatepass_code,facility,report_date,instructed_qty,compliant_qty,adherence_pct,lines")
+      .eq("used_for_performance", true)
+      .gte("report_date", sinceIso)
+      .order("report_date", { ascending: false })
+      .order("adherence_pct", { ascending: true })
+      .range(from, from + page - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...(data as GatepassAdherence[]));
+    if (data.length < page) break;
+  }
+  return all;
 }
