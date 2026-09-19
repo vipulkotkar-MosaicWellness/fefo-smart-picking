@@ -1830,16 +1830,17 @@ export const useStore = create<AppState>()(
         if (due.length === 0) return;
         const dueKeys = new Set(due.map((f) => f.no));
         const now = new Date().toISOString();
-        const touchedTasks: PickingTask[] = [];
+        const touched: { task: PickingTask; facilityNos: Set<string> }[] = [];
         let tasks = get().tasks.map((t) => {
-          if (!t.facilities.some((f) => dueKeys.has(f.no))) return t;
+          const ownFacilityNos = new Set(t.facilities.filter((f) => dueKeys.has(f.no)).map((f) => f.no));
+          if (ownFacilityNos.size === 0) return t;
           const next = { ...t, facilities: t.facilities.map((f) => (dueKeys.has(f.no) ? { ...f, wmsBlocked: true, wmsBlockedAt: now } : f)) };
-          touchedTasks.push(next);
+          touched.push({ task: next, facilityNos: ownFacilityNos });
           return next;
         });
         set({ tasks });
         if (isSupabaseConfigured) {
-          for (const t of touchedTasks) await updateTaskData(t);
+          for (const { task, facilityNos } of touched) await saveOwnFacilityChanges(task, facilityNos);
         }
         if (!get().anyOpen()) void get().loadFromSupabase();
       },
