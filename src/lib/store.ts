@@ -1280,7 +1280,7 @@ export const useStore = create<AppState>()(
           return next;
         });
         set({ tasks });
-        if (isSupabaseConfigured && changed) await updateTaskData(changed);
+        if (isSupabaseConfigured && changed) await saveOwnFacilityChanges(changed, new Set([facilityNo]));
       },
 
       assignLine: async (rid, facilityNo, picker) => {
@@ -1299,7 +1299,7 @@ export const useStore = create<AppState>()(
           return next;
         });
         set({ tasks });
-        if (isSupabaseConfigured && changed) await updateTaskData(changed);
+        if (isSupabaseConfigured && changed) await saveOwnFacilityChanges(changed, new Set([facilityNo]));
       },
 
       uploadAssignments: async (facilityNo, text) => {
@@ -1326,7 +1326,7 @@ export const useStore = create<AppState>()(
           return next;
         });
         set({ tasks, notice: "Assignments uploaded." });
-        if (isSupabaseConfigured && changed) await updateTaskData(changed);
+        if (isSupabaseConfigured && changed) await saveOwnFacilityChanges(changed, new Set([facilityNo]));
       },
 
       applyPicks: async (facilityNo, results, reasons, heldBy) => {
