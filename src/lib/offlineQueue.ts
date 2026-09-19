@@ -8,6 +8,8 @@ export interface QueuedPick {
   id: string;
   facilityNo: string;
   results: Record<number, number>;
+  reasons: Record<number, string>;
+  heldBy: string;
   queuedAt: string;
 }
 
@@ -24,7 +26,7 @@ function save(queue: QueuedPick[]): void {
   localStorage.setItem(KEY, JSON.stringify(queue));
 }
 
-export function enqueue(item: { facilityNo: string; results: Record<number, number> }): QueuedPick {
+export function enqueue(item: { facilityNo: string; results: Record<number, number>; reasons: Record<number, string>; heldBy: string }): QueuedPick {
   const queued: QueuedPick = { ...item, id: `${item.facilityNo}-${Date.now()}`, queuedAt: new Date().toISOString() };
   save([...loadQueue(), queued]);
   return queued;
