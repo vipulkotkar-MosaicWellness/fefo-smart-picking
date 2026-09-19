@@ -544,6 +544,23 @@ async function saveOwnFacilityChanges(local: PickingTask, ownFacilityNos: Readon
   await updateTaskData(fresh ? mergeOwnChangesOntoFreshTask(fresh, local, ownFacilityNos) : local);
 }
 
+/**
+ * Same "fetch fresh, don't trust local" principle as saveOwnFacilityChanges,
+ * for fields that live on the TASK itself (e.g. `archived`) rather than
+ * inside any one facility — there's no ownFacilityNos concept to merge by,
+ * so this just fetches fresh and layers the patch on top of it. Falls back
+ * to `local` if the fresh fetch comes back empty, same as
+ * saveOwnFacilityChanges — no worse than the old behavior in that case.
+ */
+async function saveTaskFlag(local: PickingTask, patch: Partial<Pick<PickingTask, "archived">>): Promise<void> {
+  const fresh = await fetchTaskByNo(local.no);
+  await updateTaskData(fresh ? { ...fresh, ...patch } : { ...local, ...patch });
+}
+
+// Test-only export — saveTaskFlag itself stays module-private like
+// saveOwnFacilityChanges, this just gives tests a way to call it directly.
+export const saveTaskFlagForTest = saveTaskFlag;
+
 export interface SavedInventoryView {
   name: string;
   filters: { text?: string; batch?: string; location?: string; minQty?: number; maxQty?: number };
@@ -826,7 +843,9 @@ export const useStore = create<AppState>()(
 
         const affected = get().tasks.filter((t) => t.facilities.some((f) => f.lines.some((l) => l.picker === oldName)));
         let tasks = get().tasks;
+        const touched: { task: PickingTask; facilityNos: Set<string> }[] = [];
         for (const t of affected) {
+          const facilityNos = new Set(t.facilities.filter((f) => f.lines.some((l) => l.picker === oldName)).map((f) => f.no));
           const updated: PickingTask = {
             ...t,
             facilities: t.facilities.map((f) => ({
@@ -835,14 +854,15 @@ export const useStore = create<AppState>()(
             })),
           };
           tasks = mergeTask(tasks, updated);
+          touched.push({ task: updated, facilityNos });
         }
         set({ tasks });
         if (isSupabaseConfigured) {
-          for (const t of tasks.filter((t) => affected.some((a) => a.no === t.no))) {
+          for (const { task, facilityNos } of touched) {
             try {
-              await updateTaskData(t);
+              await saveOwnFacilityChanges(task, facilityNos);
             } catch (e) {
-              set({ notice: "Could not rename picker on " + t.no + ": " + (e as Error).message });
+              set({ notice: "Could not rename picker on " + task.no + ": " + (e as Error).message });
             }
           }
         }
@@ -1263,7 +1283,7 @@ export const useStore = create<AppState>()(
           return next;
         });
         set({ tasks });
-        if (isSupabaseConfigured && changed) await updateTaskData(changed);
+        if (isSupabaseConfigured && changed) await saveOwnFacilityChanges(changed, new Set([facilityNo]));
       },
 
       assignLine: async (rid, facilityNo, picker) => {
@@ -1282,7 +1302,7 @@ export const useStore = create<AppState>()(
           return next;
         });
         set({ tasks });
-        if (isSupabaseConfigured && changed) await updateTaskData(changed);
+        if (isSupabaseConfigured && changed) await saveOwnFacilityChanges(changed, new Set([facilityNo]));
       },
 
       uploadAssignments: async (facilityNo, text) => {
@@ -1309,7 +1329,7 @@ export const useStore = create<AppState>()(
           return next;
         });
         set({ tasks, notice: "Assignments uploaded." });
-        if (isSupabaseConfigured && changed) await updateTaskData(changed);
+        if (isSupabaseConfigured && changed) await saveOwnFacilityChanges(changed, new Set([facilityNo]));
       },
 
       applyPicks: async (facilityNo, results, reasons, heldBy) => {
@@ -1626,7 +1646,7 @@ export const useStore = create<AppState>()(
         if (!updated) return;
         const archived = { ...updated, archived: true };
         set({ tasks: mergeTask(get().tasks, archived) });
-        if (isSupabaseConfigured) await updateTaskData(archived);
+        if (isSupabaseConfigured) await saveTaskFlag(archived, { archived: true });
         if (!get().anyOpen()) void get().loadFromSupabase();
       },
 
@@ -1635,7 +1655,7 @@ export const useStore = create<AppState>()(
         if (!existing) return;
         const restored = { ...existing, archived: false };
         set({ tasks: mergeTask(get().tasks, restored) });
-        if (isSupabaseConfigured) await updateTaskData(restored);
+        if (isSupabaseConfigured) await saveTaskFlag(restored, { archived: false });
       },
 
       // The non-destructive "start fresh" action: every currently-active
@@ -1652,7 +1672,7 @@ export const useStore = create<AppState>()(
         if (isSupabaseConfigured) {
           for (const t of archivedTasks) {
             try {
-              await updateTaskData(t);
+              await saveTaskFlag(t, { archived: true });
             } catch (e) {
               set({ notice: "Could not archive " + t.no + ": " + (e as Error).message });
             }
@@ -1671,7 +1691,7 @@ export const useStore = create<AppState>()(
         if (isSupabaseConfigured) {
           for (const t of restoredTasks) {
             try {
-              await updateTaskData(t);
+              await saveTaskFlag(t, { archived: false });
             } catch (e) {
               set({ notice: "Could not unarchive " + t.no + ": " + (e as Error).message });
             }
@@ -1691,7 +1711,7 @@ export const useStore = create<AppState>()(
         if (isSupabaseConfigured) {
           for (const t of archivedTasks) {
             try {
-              await updateTaskData(t);
+              await saveTaskFlag(t, { archived: true });
             } catch (e) {
               set({ notice: "Could not archive " + t.no + ": " + (e as Error).message });
             }
@@ -1744,7 +1764,7 @@ export const useStore = create<AppState>()(
           ),
         };
         set({ tasks: mergeTask(get().tasks, updated) });
-        if (isSupabaseConfigured) await updateTaskData(updated);
+        if (isSupabaseConfigured) await saveOwnFacilityChanges(updated, new Set([facilityNo]));
         if (!get().anyOpen()) void get().loadFromSupabase();
       },
 
@@ -1753,7 +1773,7 @@ export const useStore = create<AppState>()(
         if (!task) return;
         const updated = { ...task, facilities: task.facilities.map((f) => (f.no === facilityNo ? { ...f, discarded: false } : f)) };
         set({ tasks: mergeTask(get().tasks, updated) });
-        if (isSupabaseConfigured) await updateTaskData(updated);
+        if (isSupabaseConfigured) await saveOwnFacilityChanges(updated, new Set([facilityNo]));
       },
 
       setFacilityGatePass: async (taskNo, facilityNo, gatePassNo) => {
@@ -1805,7 +1825,7 @@ export const useStore = create<AppState>()(
           ),
         };
         set({ tasks: mergeTask(get().tasks, updated) });
-        if (isSupabaseConfigured) await updateTaskData(updated);
+        if (isSupabaseConfigured) await saveOwnFacilityChanges(updated, new Set([facilityNo]));
       },
 
       checkWmsAutoBlock: async () => {
@@ -1813,16 +1833,17 @@ export const useStore = create<AppState>()(
         if (due.length === 0) return;
         const dueKeys = new Set(due.map((f) => f.no));
         const now = new Date().toISOString();
-        const touchedTasks: PickingTask[] = [];
+        const touched: { task: PickingTask; facilityNos: Set<string> }[] = [];
         let tasks = get().tasks.map((t) => {
-          if (!t.facilities.some((f) => dueKeys.has(f.no))) return t;
+          const ownFacilityNos = new Set(t.facilities.filter((f) => dueKeys.has(f.no)).map((f) => f.no));
+          if (ownFacilityNos.size === 0) return t;
           const next = { ...t, facilities: t.facilities.map((f) => (dueKeys.has(f.no) ? { ...f, wmsBlocked: true, wmsBlockedAt: now } : f)) };
-          touchedTasks.push(next);
+          touched.push({ task: next, facilityNos: ownFacilityNos });
           return next;
         });
         set({ tasks });
         if (isSupabaseConfigured) {
-          for (const t of touchedTasks) await updateTaskData(t);
+          for (const { task, facilityNos } of touched) await saveOwnFacilityChanges(task, facilityNos);
         }
         if (!get().anyOpen()) void get().loadFromSupabase();
       },
