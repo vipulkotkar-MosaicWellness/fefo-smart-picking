@@ -1200,6 +1200,16 @@ export const useStore = create<AppState>()(
         const rejectedGatePasses: { gatePassNo: string; conflict: { taskNo: string; facility: string } }[] = [];
         let pendingCount = 0;
 
+        // Gate pass numbers THIS batch has already handed out, and to which
+        // task. findGatePassConflict below only sees `tasks` (the fresh
+        // refetch), and nothing is inserted until after this whole loop — so
+        // one number typed onto two rows of a single CSV under two different
+        // channels (separate gatePassGroupKey groups, therefore separate
+        // tasks) passed the check twice and got applied to both. Exactly the
+        // gap seqUsedThisBatch above already closes for task NUMBERS, applied
+        // to gate passes.
+        const gatePassUsedThisBatch = new Map<string, { taskNo: string; facility: string }>();
+
         // Real case: one upload with two channels that map to the SAME
         // task-number prefix (e.g. "Internal Stock Transfer - Warehouse -
         // Local" and "Internal Stock Transfer - Dark Stores" both become
@@ -1234,10 +1244,15 @@ export const useStore = create<AppState>()(
           for (const facility of Object.keys(gatePassByFacility)) {
             const gp = gatePassByFacility[facility];
             if (!gp) continue;
-            const conflict = findGatePassConflict(tasks, gp, no);
+            const claimedThisBatch = gatePassUsedThisBatch.get(gp);
+            const conflict =
+              findGatePassConflict(tasks, gp, no) ??
+              (claimedThisBatch && claimedThisBatch.taskNo !== no ? claimedThisBatch : undefined);
             if (conflict) {
               rejectedGatePasses.push({ gatePassNo: gp, conflict });
               gatePassByFacility[facility] = undefined;
+            } else {
+              gatePassUsedThisBatch.set(gp, { taskNo: no, facility });
             }
           }
           pendingCount += Object.values(gatePassByFacility).filter((gp) => !gp).length;
