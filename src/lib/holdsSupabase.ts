@@ -33,12 +33,30 @@ function fromRow(r: HoldRow): Hold {
   };
 }
 
-/** Every hold, active and released — callers filter for active client-side. */
+/**
+ * Every hold, active and released — callers filter for active client-side.
+ * Paged past PostgREST's silent 1000-row default (same loop as fetchStock in
+ * supabaseStock.ts): this is ordered held_at DESCENDING, so an un-paged fetch
+ * drops the OLDEST holds — the ones the aging pivot's "> 10 days" bucket
+ * exists to surface, and whose keys activeHoldKeys() feeds into allocate().
+ * A hold that falls off the end silently stops blocking its lot.
+ */
 export async function fetchHolds(): Promise<Hold[]> {
   if (!supabase) return [];
-  const { data, error } = await supabase.from("stock_holds").select("*").order("held_at", { ascending: false });
-  if (error) throw error;
-  return (data as HoldRow[]).map(fromRow);
+  const page = 1000;
+  const all: HoldRow[] = [];
+  for (let from = 0; ; from += page) {
+    const { data, error } = await supabase
+      .from("stock_holds")
+      .select("*")
+      .order("held_at", { ascending: false })
+      .range(from, from + page - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...(data as HoldRow[]));
+    if (data.length < page) break;
+  }
+  return all.map(fromRow);
 }
 
 export interface NewHold {
