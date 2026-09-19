@@ -10,11 +10,29 @@ interface TaskRow {
   data: PickingTask;
 }
 
+/**
+ * Every task. Paged past PostgREST's silent 1000-row default the same way
+ * fetchStock() in supabaseStock.ts is — without this, once the tasks table
+ * passes 1000 rows the rows quietly dropped are the NEWEST ones (this orders
+ * created_at ascending), so today's picklists vanish from every screen at
+ * once with no error anywhere.
+ */
 export async function fetchAllTasks(): Promise<PickingTask[]> {
   if (!supabase) return [];
-  const { data, error } = await supabase.from("tasks").select("data,created_at").order("created_at", { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map((r) => (r as unknown as TaskRow).data);
+  const page = 1000;
+  const all: TaskRow[] = [];
+  for (let from = 0; ; from += page) {
+    const { data, error } = await supabase
+      .from("tasks")
+      .select("data,created_at")
+      .order("created_at", { ascending: true })
+      .range(from, from + page - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...(data as unknown as TaskRow[]));
+    if (data.length < page) break;
+  }
+  return all.map((r) => r.data);
 }
 
 /**
