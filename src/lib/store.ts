@@ -1324,7 +1324,8 @@ export const useStore = create<AppState>()(
             const lines = f.lines.map((l) => {
               const resolved = resolvePickLine(l, results, reasons);
               if (resolved === l) return l;
-              const b = stock.find((x) => x.rid === l.rid);
+              const key = holdKey(l.sku, l.facility, l.bin, l.batch);
+              const b = stock.find((x) => holdKey(x.sku, x.location, x.bin, x.batch) === key);
               if (b) b.qty = Math.max(0, b.qty - resolved.picked!);
               return resolved;
             });
