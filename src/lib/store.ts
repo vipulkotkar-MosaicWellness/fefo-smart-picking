@@ -843,7 +843,9 @@ export const useStore = create<AppState>()(
 
         const affected = get().tasks.filter((t) => t.facilities.some((f) => f.lines.some((l) => l.picker === oldName)));
         let tasks = get().tasks;
+        const touched: { task: PickingTask; facilityNos: Set<string> }[] = [];
         for (const t of affected) {
+          const facilityNos = new Set(t.facilities.filter((f) => f.lines.some((l) => l.picker === oldName)).map((f) => f.no));
           const updated: PickingTask = {
             ...t,
             facilities: t.facilities.map((f) => ({
@@ -852,14 +854,15 @@ export const useStore = create<AppState>()(
             })),
           };
           tasks = mergeTask(tasks, updated);
+          touched.push({ task: updated, facilityNos });
         }
         set({ tasks });
         if (isSupabaseConfigured) {
-          for (const t of tasks.filter((t) => affected.some((a) => a.no === t.no))) {
+          for (const { task, facilityNos } of touched) {
             try {
-              await updateTaskData(t);
+              await saveOwnFacilityChanges(task, facilityNos);
             } catch (e) {
-              set({ notice: "Could not rename picker on " + t.no + ": " + (e as Error).message });
+              set({ notice: "Could not rename picker on " + task.no + ": " + (e as Error).message });
             }
           }
         }
