@@ -33,6 +33,8 @@ import {
   subscribeCaseSizes,
   upsertCaseSize as upsertCaseSizeRow,
 } from "./caseSizesSupabase";
+import { computeFefoDeviation } from "./fefoDeviation";
+import { logFefoDeviations } from "./fefoDeviationsSupabase";
 import { fetchAllTasks, fetchTaskByNo, insertTask, nextSequence, subscribeTasks, updateTaskData } from "./tasksSupabase";
 import type {
   BinSkip,
@@ -1120,6 +1122,44 @@ export const useStore = create<AppState>()(
               // is visibility, not a gate.
             }
           }
+        }
+
+        // Also once per generate() call, right after gap logging above —
+        // computes what strict FEFO would have allocated for the SAME
+        // demand on the SAME stock snapshot, and logs the delta per lot.
+        // Skipped entirely when no SKU in this demand has a case size
+        // configured: case-first and strict-FEFO are then guaranteed
+        // identical, so there's nothing to compute. The two
+        // computeChannelAllocations calls receive the exact same `demand`
+        // array in the exact same order, and grouping is a pure function of
+        // `demand` alone (caseSizes only affects per-group allocation, not
+        // which group a line belongs to) — so allocations[i] and
+        // strictFefoAllocations[i] are guaranteed to be the same channel
+        // group, safe to match by index.
+        if (isSupabaseConfigured && demand.some((d) => get().caseSizes[d.sku])) {
+          const strictFefoAllocations = computeChannelAllocations(demand, channelRules, skus, stock, activeTasks(tasks), activeHoldKeys(get().holds), {});
+          // Collected first, then fired together — an order spanning several
+          // channel groups/facilities would otherwise await each Supabase
+          // insert one at a time, serializing generate()'s critical path
+          // (task creation happens after this block) behind however many
+          // deviations happened to occur. Failures are already swallowed per
+          // call below, so there's no correctness reason to serialize them.
+          const logCalls: Promise<void>[] = [];
+          for (let i = 0; i < allocations.length; i++) {
+            const caseBased = allocations[i];
+            const strictFefo = strictFefoAllocations[i];
+            for (const facility of Object.keys(caseBased.byFacility)) {
+              const deviations = computeFefoDeviation(caseBased.byFacility[facility], strictFefo.byFacility[facility] ?? []);
+              if (deviations.length > 0) {
+                logCalls.push(
+                  logFefoDeviations(facility, caseBased.gatePassByFacility[facility], deviations).catch(() => {
+                    // Logging failure must never block real task creation — this is visibility, not a gate.
+                  }),
+                );
+              }
+            }
+          }
+          await Promise.allSettled(logCalls);
         }
 
         const newTasks: PickingTask[] = [];
